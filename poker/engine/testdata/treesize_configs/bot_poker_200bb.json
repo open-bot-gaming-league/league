@@ -1,0 +1,31 @@
+{
+  "sb": 50,
+  "bb": 100,
+  "stack_bb": 200,
+  "opening": [
+    0.25,
+    0.3333333333333333,
+    0.5,
+    1.0,
+    1.5,
+    2.0,
+    5.0
+  ],
+  "raise_menu": [
+    0.5,
+    1.0,
+    2.0
+  ],
+  "threebet_menu": [
+    1.0
+  ],
+  "fourbet_menu": [
+    1.0
+  ],
+  "allow_sb_fold": true,
+  "allow_sb_limp": true,
+  "buckets_preflop": 169,
+  "buckets_flop": 3904,
+  "buckets_turn": 3602,
+  "buckets_river": 2173
+}

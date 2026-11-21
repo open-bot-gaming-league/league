@@ -1,0 +1,19 @@
+{
+  "sb": 50,
+  "bb": 100,
+  "stack_bb": 20,
+  "opening": [
+    1.0
+  ],
+  "raise_menu": [
+    1.0
+  ],
+  "threebet_menu": [
+    1.0
+  ],
+  "fourbet_menu": [
+    1.0
+  ],
+  "allow_sb_fold": true,
+  "allow_sb_limp": true
+}

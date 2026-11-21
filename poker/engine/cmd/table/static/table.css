@@ -1,0 +1,105 @@
+/* The 50 bb table: plain. Sprites (cards, chips, the dealer button) are placed and scaled only by transform
+   (cardmotion.js); panels size in rem, and the root font follows the viewport. */
+:root{--bg:#1e2225;--panel:#272c30;--line:#3a4147;--txt:#d9dde1;--dim:#8b939b;--felt:#2f5d45;--felt2:#285039;
+  --red:#c8302c;--black:#16191c;--glow:#f0c75e;--pos:#7fd18b;--neg:#f08a7e}
+*{box-sizing:border-box}
+html{font-size:clamp(11px,min(1.6vh,1.05vw),24px)}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--txt);font-family:"Liberation Sans",Arial,sans-serif}
+body{display:grid;grid-template-columns:1fr clamp(15rem,24vw,30rem);grid-template-rows:100%}
+main{display:grid;grid-template-rows:1fr auto;min-height:0;min-width:0;padding:.6rem}
+#felt{position:relative;overflow:hidden;border-radius:2rem;background:radial-gradient(ellipse at center,var(--felt) 0%,var(--felt2) 100%);box-shadow:inset 0 0 0 .35rem #1b3627,inset 0 0 2rem #0006;
+  -webkit-user-select:none;user-select:none}
+#hand-label{position:absolute;left:1.2rem;top:.8rem;color:#ffffff88;font-size:.9rem}
+/* cards: base 100x140, slots scale them */
+.card{position:absolute;left:0;top:0;width:100px;height:140px;will-change:transform;pointer-events:none}
+.card .flip{position:absolute;inset:0;transform-style:preserve-3d}
+.face{position:absolute;inset:0;border-radius:8px;overflow:hidden;backface-visibility:hidden;-webkit-backface-visibility:hidden;box-shadow:0 1px 4px #0009;transition:box-shadow .15s}
+.card.air .face{box-shadow:0 14px 26px #000a}
+.front{background:#fbfaf6;font-family:"Liberation Sans",Arial,sans-serif;font-weight:700}
+.front.red{color:var(--red)} .front.black{color:var(--black)}
+.front .ix{position:absolute;left:7px;top:6px;font-size:23px;line-height:1;text-align:center}
+.front .ix.lo{left:auto;top:auto;right:7px;bottom:6px;transform:rotate(180deg)}
+.front .pip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:58px}
+.face.back{transform:rotateY(180deg);background:#24384f;border:5px solid #f3efe4;
+  background-image:repeating-linear-gradient(45deg,#ffffff14 0 4px,transparent 4px 10px),repeating-linear-gradient(-45deg,#ffffff14 0 4px,transparent 4px 10px)}
+#deck{position:absolute;border-radius:8px;background:#24384f;border:5px solid #f3efe4;
+  background-image:repeating-linear-gradient(45deg,#ffffff14 0 4px,transparent 4px 10px),repeating-linear-gradient(-45deg,#ffffff14 0 4px,transparent 4px 10px);
+  box-shadow:1px 1px 0 #ccc,2px 2px 0 #24384f,3px 3px 0 #ccc,4px 4px 0 #24384f,0 6px 10px #0008}
+
+/* chips: a pile of discs and the amount; base 96x40 */
+.chips{position:absolute;left:0;top:0;width:96px;height:40px;display:flex;align-items:center;gap:6px;pointer-events:none;will-change:transform}
+.chips .stack{width:38px;height:40px;display:flex;flex-direction:column-reverse;align-items:center}
+.chips i{display:block;width:36px;height:11px;margin-top:-5px;border-radius:50%;border:2px dashed #fff9;box-shadow:0 2px 0 #0007}
+.chips i.t1{background:#e9e6df;border-color:#3d6db5} .chips i.t2{background:#c8302c} .chips i.t3{background:#2a8a4a} .chips i.t4{background:#1b1d20;border-color:#e0c060}
+.chips b{font-size:22px;color:#fff;text-shadow:0 1px 2px #000;white-space:nowrap}
+.dealer{position:absolute;left:0;top:0;width:34px;height:34px;border-radius:50%;background:#f6f3ea;color:#222;font:700 18px/34px "Liberation Sans",Arial,sans-serif;text-align:center;box-shadow:0 2px 4px #0009;pointer-events:none}
+
+/* seats */
+.seat{position:absolute;transform:translateY(-50%);padding:.3rem .6rem;border-radius:.6rem;background:#0000003a;line-height:1.3;white-space:nowrap;z-index:20000}
+.seat .who{font-weight:700;color:#fff} .seat .pos{font-weight:400;color:#ffffffaa;font-size:.85em}
+.seat .stk b{font-size:1.15rem;color:#fff} .seat .stk span{color:#ffffffaa;font-size:.85em}
+.seat .holds{color:var(--glow);font-weight:700}
+.seat .said{color:#fff;min-height:1.3em}
+.seat .said.pop{animation:pop .35s ease-out}
+@keyframes pop{0%{opacity:0;transform:translateY(.4rem)}100%{opacity:1;transform:none}}
+.seat.won{box-shadow:0 0 0 2px var(--glow),0 0 1.2rem #f0c75e66}
+.rm .seat .said.pop{animation:none}
+
+/* the action bar */
+#bar{min-height:4.4rem;padding:.6rem 0 0;display:flex;flex-direction:column;gap:.3rem}
+#actions,#next-wrap{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:center}
+#next-wrap[hidden]{display:none}
+button{font:inherit;background:#454c54;color:#fff;border:1px solid #5b636c;border-radius:.45rem;padding:.45rem .9rem;cursor:pointer;white-space:nowrap}
+button:hover{filter:brightness(1.15)} button:disabled{opacity:.45;cursor:default}
+#actions button{font-size:1.1rem;padding:.6rem 1rem;display:flex;gap:.5rem;align-items:center}
+#actions button.fold{background:#5a3a3a;border-color:#7a5050}
+#actions button.check,#actions button.call{background:#2f5c86;border-color:#4a7aa6}
+#actions button.bet{background:#7a5a1e;border-color:#a07a30}
+#actions button.allin{background:#8a2a26;border-color:#b04a44}
+kbd{font:700 .75em "Liberation Mono",monospace;background:#0004;border:1px solid #fff4;border-radius:.25rem;padding:0 .3rem;color:#fffc}
+#outcome{font-size:1.15rem;font-weight:700}
+#outcome.won{color:var(--pos)} #outcome.lost{color:var(--neg)}
+#next{background:#2f5c86;border-color:#4a7aa6;font-size:1.1rem}
+#error{color:var(--neg);text-align:center;min-height:0}
+#error:empty{display:none}
+
+/* the side panel */
+#side{background:var(--panel);border-left:1px solid var(--line);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.7rem;min-height:0;overflow:hidden;font-size:.95rem}
+#side h1{font-size:1.15rem;margin:0} #side h2{font-size:.95rem;margin:0 0 .3rem;color:var(--dim);font-weight:400;text-transform:uppercase;letter-spacing:.06em}
+.dim{color:var(--dim)} .small{font-size:.85em}
+#bot .ex{margin-top:.2rem} #exploitability{color:#fff;font-weight:700}
+#stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;text-align:center;background:#0002;border-radius:.5rem;padding:.4rem}
+#stats .k{display:block;color:var(--dim);font-size:.8em} #stats b{font-size:1.35rem} #stats small{display:block;color:var(--dim);font-size:.75em}
+#stat-by{grid-column:1/-1;text-align:left;font-size:.8em;color:var(--dim)} #stat-by:empty{display:none}
+#controls select{font:inherit;max-width:100%;background:#454c54;color:#fff;border:1px solid #5b636c;border-radius:.3rem}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+#history-wrap{flex:1;min-height:4rem;display:flex;flex-direction:column}
+#history{flex:1;overflow-y:auto;border:1px solid var(--line);border-radius:.4rem;font-size:.9em}
+.hand summary{display:flex;gap:.5rem;padding:.25rem .5rem;cursor:pointer;border-bottom:1px solid #ffffff10;align-items:baseline}
+.hand summary .n{color:var(--dim);min-width:2.5em} .hand summary .cs{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hand summary .net{white-space:nowrap}
+.hand .c{display:inline-block;background:#f3f1ea;border-radius:.2rem;padding:0 .15rem;margin-right:.12rem;font-weight:700;font-size:.9em}
+.hand .c.red{color:var(--red)} .hand .c.black{color:var(--black)}
+.hand ul{margin:.2rem 0 .4rem;padding-left:1.6rem;color:var(--dim)} .hand li.street{color:var(--txt)}
+#controls{display:flex;flex-direction:column;gap:.4rem;font-size:.9em}
+[hidden]{display:none!important}
+#controls .row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
+#controls label{display:flex;gap:.25rem;align-items:center}
+#controls input[type=range]{width:5rem}
+#controls button{padding:.25rem .6rem}
+body.busy #skip{border-color:var(--glow)}
+
+/* layouts by screen: last, so they override the rules above */
+/* tall screens (desktop half width): the panel goes under the table */
+@media (max-aspect-ratio:5/4){
+  html{font-size:clamp(11px,1.45vw,24px)}
+  body{grid-template-columns:100%;grid-template-rows:62% 38%}
+  #side{border-left:0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto auto 1fr;column-gap:1rem}
+  #side>header,#side>#bot,#side>#stats{grid-column:1}
+  #history-wrap{grid-column:2;grid-row:1/5}
+  #controls{grid-column:1}
+}
+/* short screens (phone landscape): no keyboard, little height */
+@media (max-height:500px){ main{padding:.3rem} #felt{border-radius:1rem} #side{padding:.4rem .6rem;gap:.4rem} #side h1{font-size:1rem}
+  kbd,#keys,#menu{display:none} #controls{gap:.25rem} }
+
