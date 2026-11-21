@@ -1,5 +1,5 @@
-/* The 50 bb heads-up table: the page for cmd/table (API.md). Plain, but the cards and chips move as on the
-   San Juan / dmcg table v2: every server answer becomes an event queue (deal, blinds, each action's chips,
+/* The 50 bb heads-up table: the page for cmd/table (API.md). Plain, but the cards and chips move as on an
+   earlier table page of ours: every server answer becomes an event queue (deal, blinds, each action's chips,
    streets dealt and flipped, the showdown, the pot to the winner), played by cardmotion.js. Input waits
    until the queue is empty; Skip (Esc) drains it.
 

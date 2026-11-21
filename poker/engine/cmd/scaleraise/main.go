@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	config := flag.String("config", "", "betting-tree config (poker/treesize format)")
+	config := flag.String("config", "", "betting-tree config (see configs/ for examples)")
 	abs := flag.String("abs", "", "the blueprint's bucket file")
 	in := flag.String("in", "", "blueprint to start from")
 	out := flag.String("out", "", "blueprint file to write")

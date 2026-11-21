@@ -1,6 +1,6 @@
 /* cardmotion.js: card motion for a table page, as an ES module.
 
-   Carried over from the San Juan / dmcg table v2 (sanjuan/table-web/v2.js, its "frame loop" and "event
+   Carried over from an earlier card-game table page of ours (its "frame loop" and "event
    queue" sections), chosen for its card feel, and made independent of that game:
 
    - Every sprite (a card, a chip stack) has a logical SLOT, asked of the page every frame, and a VISUAL that
@@ -18,7 +18,7 @@
    - Reduced motion: sprites snap to their slots, and one that jumped far fades in instead of moving. The
      beats stay, so the order still reads.
 
-   The San Juan table keeps its own copy of this code (it is part of dmcg, which deploys on its own); this
+   An earlier table page of ours keeps its own copy of this code, which deploys on its own; this
    module is the same motion with the game taken out, so a later v2 could import it. */
 
 export const FEEL = { k: 500, c: 30, fly: 24, step: 1 / 240, fade: 30 };

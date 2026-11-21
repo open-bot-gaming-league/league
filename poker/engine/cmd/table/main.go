@@ -42,7 +42,7 @@ import (
 var static embed.FS
 
 func main() {
-	config := flag.String("config", "", "betting-tree config (poker/treesize format)")
+	config := flag.String("config", "", "betting-tree config (see configs/ for examples)")
 	botsPath := flag.String("bots", "", "JSON file listing the bots to serve, the default first (required; see botFile)")
 	handsPath := flag.String("hands", "", "append every finished hand to this file, one JSON object per line")
 	addr := flag.String("addr", "127.0.0.1:9790", "listen address")

@@ -27,7 +27,7 @@ import (
 
 func main() {
 	game := flag.String("game", "holdem", "kuhn, leduc or holdem")
-	config := flag.String("config", "", "holdem: betting-tree config (poker/treesize format)")
+	config := flag.String("config", "", "holdem: betting-tree config (see configs/ for examples)")
 	absA := flag.String("abs-a", "", "holdem: bucket file for the first blueprint of each pair")
 	absB := flag.String("abs-b", "", "holdem: bucket file for the second (default: the first's)")
 	dealsFlag := flag.String("deals", "1e6", "deals per pair; each is played in both seatings")

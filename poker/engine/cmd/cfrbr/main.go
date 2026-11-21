@@ -43,7 +43,7 @@ import (
 
 func main() {
 	game := flag.String("game", "holdem", "leduc or holdem")
-	config := flag.String("config", "", "holdem: betting-tree config (poker/treesize format)")
+	config := flag.String("config", "", "holdem: betting-tree config (see configs/ for examples)")
 	abs := flag.String("abs", "", "holdem: bucket file from cmd/buckets, or \"category\"")
 	itersFlag := flag.String("iters", "1e3", "iterations (sampled first deals) to run in total")
 	checkpointsFlag := flag.String("checkpoints", "", "comma-separated iteration counts to report at, besides the end")

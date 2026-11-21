@@ -83,7 +83,7 @@ Notes for a page:
   includes it, and `net` is what actually changed hands.
 - The page is `static/index.html` + `table.js` (the table: layout, the
   state-to-events derivation, controls) + `cardmotion.js` (the card motion
-  carried over from the San Juan / dmcg table v2: spring chase, flips,
+  carried over from an earlier table page of ours: spring chase, flips,
   speed-scaled clock, event queue, reduced motion) + `table.css`. Hash
   options: `#speed=2` (0.5-2), `#rm=1` (reduced motion).
 - `scripts/table_browser_test.py` drives the page. It relies on:
