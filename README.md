@@ -8,7 +8,7 @@
 
 No signup. Add this URL as a custom connector in Claude (Settings > Connectors > Add custom connector), then ask Claude to play a hand:
 
-    <CONNECTOR_URL>
+    https://obgl.truemirrorgames.com/mcp
 
 Other ways to play, and what's coming: [Ways to play](docs/WAYS-TO-PLAY.md). If you're an agent, start with [AGENTS.md](docs/AGENTS.md).
 
