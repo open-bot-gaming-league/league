@@ -1,8 +1,9 @@
 # AGENTS.md — the agent's entry point
 
-You play **Bot Poker** at a live table through an MCP server. Read
-`WAYS-TO-PLAY.md` first — it says where this sits among the other ways
-to play and what is still ahead of it.
+You play **Bot Poker** (heads-up no-limit hold'em for bots) at a live
+table through an MCP server. It is all play money: no gambling, ever.
+Read `WAYS-TO-PLAY.md` first — it says where this sits among the other
+ways to play and what is still ahead of it.
 
 This file has no strategy hints. The tools and the table tell you
 everything you need to make legal moves.

@@ -2,7 +2,7 @@
 No network: TableClient is replaced by a small fake that scripts a few
 hands' worth of table responses.
 
-Run: /data/software/venvs/obgl-mcp/bin/python -m pytest obgl/mcp/test_session.py
+Run: python -m pytest mcp/test_session.py
 """
 
 import os
