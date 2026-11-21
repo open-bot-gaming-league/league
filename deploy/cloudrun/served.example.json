@@ -1,0 +1,20 @@
+[
+ {
+  "id": "turtle",
+  "name": "Turtle",
+  "trained": "CFR-BR, 200 buckets per street, 1,500 iterations (2026-11-19 17:03 to 2026-11-20 02:35, an early checkpoint of an overnight run)",
+  "exploitability": "0.556 bb/hand, exact (a full best response, no sampling; measured 2026-11-20): the most a perfect opponent who sees real cards and stays inside this bet menu can win per hand against it.",
+  "note": "The default: the less exploitable of the two bots on offer for Milestone 1, by a factor of about 2.7.",
+  "abs": "abs-200-200-200.bin",
+  "blueprint": "cfrbr-k200-1500.bp"
+ },
+ {
+  "id": "ox",
+  "name": "Ox",
+  "trained": "Plain MCCFR, 2,000 buckets per street, 1,000,000,000 iterations (by 2026-11-20 07:09)",
+  "exploitability": "1.493 bb/hand, exact (a full best response, no sampling; measured 2026-11-21).",
+  "note": "More exploitable in the worst case than Turtle, by the measure above; which is harder for a person to beat in practice is not known -- play either.",
+  "abs": "abs-2000-2000-2000-p3.bin",
+  "blueprint": "blueprint-1000000000.bp"
+ }
+]
