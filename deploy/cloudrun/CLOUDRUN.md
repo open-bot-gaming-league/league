@@ -80,6 +80,21 @@ builds, and deploys it.
   bucket files, two blueprints) alongside it before building -- see
   `data/README.md`.
 
+- `../../.gcloudignore` -- a Cloud Build/Cloud Run `--source` upload
+  reads `.gcloudignore` if one exists at the repo root, or otherwise
+  falls back to a generated one that respects `.gitignore` (gcloud's
+  own docs). This repo's `deploy/cloudrun/.gitignore` un-ignores
+  `data/README.md` but still ignores the rest of `deploy/cloudrun/data/`
+  -- exactly the staged bot data the build needs -- so relying on the
+  auto-generated fallback would silently upload an empty `data/`
+  directory and the Dockerfile's `COPY` would ship nothing, no error
+  at build time. The root `.gcloudignore` mirrors the repo's
+  `.gitignore` files by hand, with that one exclusion deliberately
+  dropped. **Unverified here** (SAFETY: gcloud is not run from this
+  box) -- confirm with `gcloud meta list-files-for-upload` before a
+  real build, specifically that `deploy/cloudrun/data/`'s staged files
+  show up in that list.
+
 ## Memory sizing
 
 Turtle and Ox do **not** share a bucket file (Milestone 1's bots use
@@ -240,17 +255,6 @@ with the URL can crowd out other sessions by churning past that
 200-session cap, and there's no login, so "whoever has the URL" is the
 only access control there is. Reasonable for a v0 demo; revisit before
 this is the long-term shape.
-
-## Scrub
-
-Grepped this branch's new/changed files and `../mcp/`, `../docs/` for
-member names, `/data/` paths, `localhost:9777`, and "packbox". The
-table accompanying this branch's push has the full list of what was
-found and what was done about it. One thing worth restating here: `data/README.md`
-and this file deliberately do **not** name an absolute path to the
-training box's bot-data output directory -- unlike an earlier draft of
-this port, which did. Whoever stages `deploy/cloudrun/data/` needs
-that path and does not get it from this file; ask directly.
 
 ## Tests run / what's unverified
 

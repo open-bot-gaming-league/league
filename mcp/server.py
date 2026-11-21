@@ -1,7 +1,8 @@
 """MCP server for Bot Poker: six tools (rules, new_session, state, act,
 next_hand, score) wrapping the live table's HTTP API. See
-docs/AGENTS.md for what this is and how to read it; see
-mcp/SETUP-DESKTOP.md for wiring the stdio mode into Claude Desktop.
+docs/AGENTS.md for what this is and how to read it; for the stdio
+mode, add it to your MCP client config as a stdio server (command
+`python`, args `[path/to/this/file]`).
 
 Two transports, one server:
 

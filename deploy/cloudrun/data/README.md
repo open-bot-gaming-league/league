@@ -16,12 +16,16 @@ here:
   or `exploitability`.
 - The two bucket files and two blueprints `served.json` names (as of
   Milestone 1: one bucket file + one blueprint per bot -- see
-  `served.example.json`).
+  `served.example.json`). The two blueprint files are named
+  `turtle-k200-1500.bp` and `ox-k2000-1e9.bp` in `served.example.json`
+  on purpose (by bot, not by training run); the files as they come off
+  training have their own, more generic names and need renaming to
+  match when staged here.
 
 Ask whoever trained the bots on offer for the current location of
 these files (they live on the training box's own output directory,
-not in this repo); `served.example.json`'s filenames are what to look
-for there. `hands.jsonl` is not staged here either way: the table
-server creates its session-state file fresh on first run, under its
-own path (`$OBGL_STATE_DIR`, default `/state` -- see `../CLOUDRUN.md`
-and `../entrypoint.sh`), deliberately not under this directory.
+not in this repo) and for which of their files is which bot's.
+`hands.jsonl` is not staged here either way: the table server creates
+its session-state file fresh on first run, under its own path
+(`$OBGL_STATE_DIR`, default `/state` -- see `../CLOUDRUN.md` and
+`../entrypoint.sh`), deliberately not under this directory.
