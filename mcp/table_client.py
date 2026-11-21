@@ -1,7 +1,6 @@
 """Thin sync HTTP client for the Bot Poker table API.
 
-Talks to the table's existing HTTP API (see API.md on echo/poker-table,
-or /data/projects-wt/poker-table/poker/engine/cmd/table/API.md). No game
+Talks to the table's HTTP API (see the table's API.md). No game
 logic lives here -- just request/response plumbing and error mapping.
 """
 

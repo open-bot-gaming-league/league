@@ -1,0 +1,15 @@
+# Bucket tables, blueprints and run logs are large and reproducible; see README.md.
+/data/
+/runs/
+/scripts/table_browser_test.png
+# `go build ./cmd/X` without -o drops the binary here. Build into runs/ or bin/.
+/buckets
+/cfrbr
+/exploit
+/inside
+/match
+/respond
+/scaleraise
+/table
+/train
+/bin/

@@ -1,0 +1,61 @@
+# deploy/cloudrun/Dockerfile: one container for Cloud Run -- the Go
+# table server and the MCP server (Streamable HTTP mode), the MCP
+# tools calling the table on 127.0.0.1. Unbuilt as of this branch: no
+# docker on the dev box this was written on -- see CLOUDRUN.md's "what
+# is unverified". Built via Cloud Build, not from this box (no docker here).
+#
+# Build from the REPO ROOT (not from this directory), so poker/engine,
+# docs/ and mcp/ are all reachable as COPY sources:
+#
+#   docker build -f deploy/cloudrun/Dockerfile -t obgl-cloudrun:v0 .
+#
+# Precondition on the build context (data/README.md spells this out):
+# deploy/cloudrun/data/ (gitignored) must hold served.json and the bot
+# files it names before this build runs -- see data/README.md for
+# what to stage and served.example.json for the Milestone 1 shape.
+
+# ---- stage 1: build the Go table server ----------------------------------
+FROM golang:1.27 AS tablebuilder
+WORKDIR /src
+COPY poker/engine/go.mod ./
+COPY poker/engine/*.go ./
+COPY poker/engine/cmd/table ./cmd/table
+# go.mod declares zero external dependencies (stdlib only, no go.sum to
+# restore), so this build needs no network access.
+RUN go build -o /out/table ./cmd/table
+
+# ---- stage 2: the runtime image -------------------------------------------
+FROM python:3.12-slim AS runtime
+WORKDIR /app
+
+# Python side: the MCP server, run in Streamable HTTP mode
+# (OBGL_TRANSPORT=http, set below) -- same code mcp/ ships for stdio.
+COPY mcp/requirements.txt ./mcp/requirements.txt
+RUN pip install --no-cache-dir -r ./mcp/requirements.txt
+COPY mcp/server.py mcp/session.py mcp/table_client.py ./mcp/
+# server.py reads obgl://docs/AGENTS.md and .../WAYS-TO-PLAY.md as
+# resources from ../docs relative to its own file -- ./docs here,
+# since server.py lives in ./mcp.
+COPY docs/ ./docs/
+
+# Go side: the table binary, its betting-tree config, and the bot data
+# (bucket files + blueprints + served.json) staged into the build
+# context per the precondition above.
+COPY --from=tablebuilder /out/table ./table/bin/table
+COPY poker/engine/configs/table_50bb.json ./table/configs/table_50bb.json
+COPY deploy/cloudrun/data/ ./table/data/
+
+COPY deploy/cloudrun/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh ./table/bin/table
+
+# Cloud Run sets $PORT and expects the container to listen on it;
+# entrypoint.sh reads it for the MCP server and sets OBGL_TRANSPORT=http
+# for it. The table server only ever listens on 127.0.0.1:9790, inside
+# the container -- nothing external reaches it directly.
+ENV OBGL_TABLE_URL=http://127.0.0.1:9790/
+ENV OBGL_TRANSPORT=http
+# Session state (hands.jsonl) lives under its own path, separate from
+# the baked-in bot data under ./table/data/ -- see entrypoint.sh and
+# CLOUDRUN.md's "Session state" section for why.
+ENV OBGL_STATE_DIR=/state
+ENTRYPOINT ["./entrypoint.sh"]

@@ -7,7 +7,7 @@ internal math.
 Needs the live table at http://localhost:9777/poker/ (read-only GETs
 plus our own new session -- see API.md). Run with the project's venv:
 
-  /data/software/venvs/obgl-mcp/bin/python -m pytest obgl/mcp/test_e2e.py -q
+  python -m pytest mcp/test_e2e.py -q
 """
 
 import json

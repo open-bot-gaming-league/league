@@ -1,0 +1,49 @@
+# gcloud ignore file for Cloud Build / Cloud Run --source uploads.
+#
+# gcloud's documented fallback -- "if a .gcloudignore file is absent
+# and a .gitignore file is present, gcloud will use a generated
+# Git-compatible .gcloudignore file that respects your .gitignored
+# files" (gcloud topic gcloudignore; gcloud builds submit --help) --
+# only applies when NO .gcloudignore exists. The moment one does, it
+# is used by itself; .gitignore is not consulted at all. This repo has
+# three .gitignore files (root, poker/engine/, deploy/cloudrun/), and
+# the last one intentionally un-ignores deploy/cloudrun/data/README.md
+# while ignoring the rest of deploy/cloudrun/data/ -- the staged bot
+# data a Cloud Build upload for this Dockerfile needs. So this file
+# exists to mirror the other .gitignore patterns by hand, MINUS
+# deploy/cloudrun/data/'s exclusion, rather than let an
+# auto-generated .gcloudignore silently drop ~850 MB of bot data from
+# the build context (the Dockerfile's COPY would then ship an empty
+# directory, with no error at build time).
+#
+# Unverified from this box (SAFETY: gcloud is not run here) --
+# confirm with `gcloud meta list-files-for-upload` before relying on
+# this, especially that deploy/cloudrun/data/ actually shows up in
+# that list once staged.
+
+.gcloudignore
+.git/
+
+# Mirrors the root .gitignore.
+__pycache__/
+.pytest_cache/
+
+# Mirrors poker/engine/.gitignore (bucket tables, blueprints and run
+# logs are large and reproducible; `go build ./cmd/X` without -o drops
+# a binary at that package's own root).
+/poker/engine/data/
+/poker/engine/runs/
+/poker/engine/scripts/table_browser_test.png
+/poker/engine/buckets
+/poker/engine/cfrbr
+/poker/engine/exploit
+/poker/engine/inside
+/poker/engine/match
+/poker/engine/respond
+/poker/engine/scaleraise
+/poker/engine/table
+/poker/engine/train
+/poker/engine/bin/
+
+# Deliberately NOT mirrored from deploy/cloudrun/.gitignore:
+# deploy/cloudrun/data/* must upload -- see the comment above.

@@ -1,53 +1,26 @@
-# obgl/mcp — the MCP server for stranger test 2
+# mcp/ — the Bot Poker MCP server
 
-A local stdio MCP server wrapping the live Bot Poker table's HTTP API
-(`/data/projects-wt/poker-table/poker/engine/cmd/table/API.md`) for a
-plain Claude to play through. Built for `STRANGER-TEST-2.md`.
+An MCP server wrapping the Bot Poker table's HTTP API, so an agent can play through six tools. The hosted connector runs this same code; you don't need to run it yourself to play (see the [README](../README.md)).
+
+Two transports, one codebase: **stdio** (default, for Claude Desktop and local use) and **Streamable HTTP** (`OBGL_TRANSPORT=http`, what [deploy/cloudrun/](../deploy/cloudrun/) serves to claude.ai custom connectors). See `server.py`'s module docstring for how the two share one `build_server()` — the only real difference is how a `PokerSession` gets scoped to a caller.
 
 ## Files
 
-- `table_client.py` — thin sync HTTP client for the table API. No game
-  logic.
-- `session.py` — the hand/step bookkeeping (`PokerSession`), the
-  staleness/validation errors, and `compute_score()`. No MCP or network
-  framing; this is what the unit tests exercise directly.
-- `server.py` — the MCP server itself: six tools (`rules`,
-  `new_session`, `state`, `act`, `next_hand`, `score`) and two resources
-  (`obgl://docs/AGENTS.md`, `obgl://docs/WAYS-TO-PLAY.md`).
-- `test_session.py` — unit tests (no network) for the bookkeeping and
-  `compute_score()`.
-- `test_e2e.py` — starts `server.py` over real stdio with the MCP
-  Python client, plays 3 hands, checks `score()` against the table's
-  own `api/state` history. Skips itself if the live table is not
-  reachable.
-- `SETUP-DESKTOP.md` — the `claude_desktop_config.json` snippets (two
-  options, both untested against a real Desktop) and exactly what could
-  not be verified from this box.
-- `PREFLIGHT.md` — describes (does not run) the 20-hand fresh-worker
-  check `STRANGER-TEST-2.md` asks for before Sunday's run.
+- `table_client.py` — thin HTTP client for the table API. No game logic.
+- `session.py` — hand/step bookkeeping (`PokerSession`), staleness and validation errors, `compute_score()`. No MCP or network framing; the unit tests exercise it directly.
+- `server.py` — the MCP server: six tools (`rules`, `new_session`, `state`, `act`, `next_hand`, `score`) and two resources (`obgl://docs/AGENTS.md`, `obgl://docs/WAYS-TO-PLAY.md`), over either transport.
+- `test_session.py` — unit tests (no network).
+- `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
+- `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.
 
-Docs the agent reads: `../docs/AGENTS.md`, `../docs/WAYS-TO-PLAY.md`.
+## Running it locally
 
-## Running it
-
-Venv: `/data/software/venvs/obgl-mcp` (mcp 2.3.0; see
-`/data/software/MANIFEST.md`).
+Needs Python with the `mcp` package (tested with 2.3.0) and a reachable table.
 
 ```sh
-# all tests (unit + e2e; e2e needs the live table at localhost:9777)
-/data/software/venvs/obgl-mcp/bin/python -m pytest obgl/mcp/ -q
-
-# the server itself, stdio, for a manual MCP client
-/data/software/venvs/obgl-mcp/bin/python obgl/mcp/server.py
+python -m pytest mcp/ -q                            # unit tests + both e2e suites (skip without a table)
+python mcp/server.py                                # stdio, for a local MCP client
+OBGL_TRANSPORT=http PORT=8080 python mcp/server.py   # Streamable HTTP at :8080/mcp
 ```
 
-`OBGL_TABLE_URL` overrides the table's base URL (default
-`http://localhost:9777/poker/`).
-
-## What is measured, not yet
-
-Tokens per 100 hands (`STRANGER-TEST-2.md`'s open question 5) needs an
-actual run against a model counting tokens, not something this build
-can produce by itself -- each tool's reply is a small dict (see
-`session.summarize_state`'s dropped-fields comment for what is cut),
-but "small" was not turned into a number here.
+`OBGL_TABLE_URL` sets the table's base URL (default `http://localhost:9777/poker/`). `HOST`/`PORT` only matter for the HTTP transport (defaults `0.0.0.0`/`8080`).

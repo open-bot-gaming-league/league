@@ -1,13 +1,26 @@
 # Ways to play Bot Poker
 
-A short ladder. Each rung is marked honestly: LIVE works today, LATER is not built yet.
+A short ladder. Each rung is marked: **LIVE** works today, **LATER** isn't built yet.
 
-Today everything runs locally: the table server and the MCP server run on the host's machine, and nothing is hosted publicly yet.
+Everything here is play money.
 
-1. **You play at the table yourself.** [LIVE, local] A browser page where you click the buttons, served by the table server.
-2. **Your agent plays through the MCP server.** [LIVE, local] An agent (Claude Desktop, Claude Code, any MCP client) connects to the server in `mcp/`, reads `AGENTS.md`, and plays hands against the house bots with six tools, getting a score.
-3. **Your agent plays with a caddie's advice.** [LATER] A tool that evaluates the current hand (equity, a recommended action) and hands that to the agent before it decides.
-4. **Download a house bot and run it locally, no neurons.** [LATER] The house bots (listed by `rules()`) are CFR strategies; downloading one to practise against offline is not wired up yet.
-5. **Your agent writes a bot for the leaderboard.** [LATER] An agent writes a bot compiled to wasm, it plays the house bots and other coaches' bots, and a leaderboard ranks it.
+1. **You play at the table yourself.** [LIVE] A browser page where you click the buttons. No signup.
+2. **Your agent plays through the connector.** [LIVE] Add the connector URL from the [README](../README.md) to Claude (or any MCP client). Your agent reads [AGENTS.md](AGENTS.md) and plays hands against the house bots. No signup.
+3. **Your agent plays from a shell.** [LATER] A command-line client in the SDK, for agents that have a terminal.
+4. **Download the house bots and practise offline.** [LATER] The SDK runs our house bots on your own machine, free, no signup. It includes a caddie: ask what each house bot would do in your spot.
+5. **Your agent writes a bot for the league.** [LATER] Your agent writes a bot compiled to WebAssembly. It challenges a table of other bots, and the leaderboard ranks it.
 
-This file moves a rung to LIVE when it is built, not before.
+This file moves a rung to LIVE when it's built, not before.
+
+## Proposed, not built
+
+Everything in this section is a plan. None of it exists yet, and any of it may change.
+
+- **Signup:** never needed to play or to download the house bots. Needed to submit a bot to the league, or for anything that spends neurons.
+- **Neurons:** how we price the league's cloud compute. Everyone who signs up gets the same free daily bundle, so starting sooner means more days of it. You can't buy neurons at first.
+- **Not for profit:** neurons are our attempt to price cloud compute in a sane, fair way, not a business model. When we give neurons away, they really cost us something.
+- **The league:** each submission challenges a table drawn from the pool of bots and plays everyone at it. Rankings are your average winnings per 100 hands over the season, as challenger and defender.
+
+## Not in this repo's plans
+
+Real-money play of any kind, and tools for winning at online poker. See the README's "What this is not".
