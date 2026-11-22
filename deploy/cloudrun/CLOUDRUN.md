@@ -19,7 +19,8 @@ the same image tree on a machine without Docker, see
   `deploy/cloudrun/data/`, which git ignores and the build needs.
 
 The service answers on `/mcp` (the connector), `/` and `/docs/` (see
-"Docs" below), `/version`, and the OAuth routes (see "OAuth" below).
+"Docs" below), `/version`, the OAuth routes (see "OAuth" below) and
+`/table/` (see "Browser table" below).
 
 ## How the MCP server handles connections
 
@@ -212,8 +213,9 @@ Privacy: what an account stores is listed above.
 ### Storage: Firestore
 
 The OAuth records -- registered clients, pending sign-ins, codes, tokens
-(by sha256), accounts, and which account owns each table session -- live
-in Firestore (`FirestoreStore`, `mcp/oauth/store.py`). Layout: one
+(by sha256), accounts, and each table session's owner, controller, watch
+token and switch log (`mcp/tables.py`) -- live in Firestore
+(`FirestoreStore`, `mcp/oauth/store.py`). Layout: one
 collection per record kind, `oauth_<kind>`; document id = the record's
 key; fields `record` (the record as a JSON string) and `expires_at` (a
 Timestamp, on the kinds that expire). Records past `expires_at` read as
@@ -257,13 +259,29 @@ curl -fsS $B/.well-known/oauth-protected-resource/mcp # resource $B/mcp
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp  # 401
 # A guest sign-in through the OAuth flow, then initialize + new_session + act
 # with its token (registers one client with a loopback redirect URI):
-python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs
+python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs,table
 ```
 
 Then a person, in claude.ai with a fresh account: add the connector, take
 the OAuth option, sign in with GitHub, then with Google, then as a
 guest; each plays a hand. Deploy the same image again; the connector
 still works without signing in again.
+
+## Browser table
+
+`/table/` (`mcp/table_web.py`) serves the table's page, proxied from the
+table binary, and the API calls it allows, to the signed-in owner of
+each session; watch links are `/table/watch/<token>`. It signs in
+through the same OAuth server, as its own client (`obgl-table`,
+redirect `<OBGL_PUBLIC_URL>/table/signin/callback`, registered by the
+server at start). Its cookies are `Secure` when `OBGL_PUBLIC_URL` is
+https. Nothing to create or set beyond "OAuth". Each session's control
+lock and the last finished hand shown to watchers are in the instance's
+memory: keep `--max-instances 1`.
+
+Check: the `table` check of `deploy/local/smoke.py` ("OAuth", "Check")
+signs in as a guest at `/table/`, plays a step, and opens the session's
+watch link.
 
 ## Docs: what the service serves
 

@@ -16,7 +16,9 @@ Stacks **reset to 50 bb at the start of every hand** — nothing carries
 over *between* hands; what accumulates across hands, and is what gets
 measured, is the session's running score (see `score()`). You play
 through seven MCP tools: six wrap the table's HTTP API and one,
-`docs()`, returns these documents; you never call HTTP yourself.
+`docs()`, returns these documents; you never call HTTP yourself. On the
+hosted connector, where your user signs in, there are two more
+(`my_sessions()`, `claim_session()`: see "Your user at the table").
 
 ## The tools
 
@@ -30,7 +32,8 @@ through seven MCP tools: six wrap the table's HTTP API and one,
   1. `opponent` is a bot `id` from `rules()`'s `bots` list (default:
   the first, which is the least exploitable one on offer). `seat` is
   `"sb"`, `"bb"`, or `"alternate"` (default — alternates seat every
-  hand).
+  hand). On the hosted connector the answer also has a `watch_url`:
+  give it to your user (see "Your user at the table").
 - **`state()`** — the current hand: your cards, the bot's visible
   state, the board, the pot, and on your turn `legal` (every legal
   move, any size) and `actions` (the bet menu as shortcuts). Call this if a
@@ -52,6 +55,27 @@ through seven MCP tools: six wrap the table's HTTP API and one,
   opponent, computed from this session's hand history on the table
   (not just this session's local count — if the table server
   restarted, your score is still correct).
+
+### Your user at the table
+
+Your user can play at the browser table themselves
+(https://obgl.truemirrorgames.com/table/) and, when they signed in to
+the connector with GitHub or Google, watch your sessions there live
+through the `watch_url` that `new_session()` and `score()` return. The
+link opens only for them; it cannot act. One player is in control of a
+session at a time:
+
+- If your user **takes over** in the browser, your `act()` and
+  `next_hand()` answer with an error saying so; `state()` still works
+  and says who is playing. Do not try to act around it.
+- If your user **hands a game to you** ("tag in my agent"), or asks you
+  to pick up a game they are playing: **`my_sessions()`** lists their
+  sessions, newest first, with who is playing each; **`claim_session(session)`**
+  makes you the player from where it stands. The decision pending in it
+  is yours: read the state it returns and act.
+
+A guest connection gets no watch link (a guest is a new account at each
+sign-in, so no browser can be that same guest).
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and

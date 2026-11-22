@@ -34,7 +34,7 @@ WORKDIR /app
 # and installs exactly those files or fails.
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
-COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py ./mcp/
+COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/tables.py mcp/table_web.py ./mcp/
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).
 COPY mcp/oauth/ ./mcp/oauth/
 # server.py reads the docs from ../docs and ../README.md relative to its
@@ -57,7 +57,9 @@ RUN chmod +x ./entrypoint.sh ./table/bin/table
 # Cloud Run sets $PORT and expects the container to listen on it;
 # entrypoint.sh reads it for the MCP server and sets OBGL_TRANSPORT=http
 # for it. The table server only ever listens on 127.0.0.1:9790, inside
-# the container -- nothing external reaches it directly.
+# the container -- nothing external reaches it directly: the browser table
+# at /table is the MCP server's (mcp/table_web.py), which proxies the page
+# and the API calls it allows, as the signed-in owner.
 ENV OBGL_TABLE_URL=http://127.0.0.1:9790/
 ENV OBGL_TRANSPORT=http
 # Session state (hands.jsonl) lives under its own path, separate from

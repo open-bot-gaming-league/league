@@ -245,36 +245,6 @@ async def test_expiry_of_pending_and_access_token():
     assert await provider.load_access_token(tok.access_token) is None
 
 
-def test_table_session_owner_survives_restart_and_is_owner_only(tmp_path):
-    path = str(tmp_path / "oauth.json")
-
-    def provider():
-        return LeagueOAuthProvider(FileStore(path), issuer_url=BASE, resource_url=RESOURCE)
-
-    async def record():
-        p = provider()
-        await p.record_table_session("t-guest-a", "guest:aaa")
-        await p.record_table_session("t-guest-b", "guest:bbb")
-        await p.record_table_session("t-github", "github:4242")
-
-    asyncio.run(record())
-
-    async def read():
-        p = provider()  # a fresh process's view: the file reopened
-        assert (await p.table_session_for("t-guest-a", "guest:aaa"))["owner"] == "guest:aaa"
-        assert (await p.table_session_for("t-github", "github:4242"))["owner"] == "github:4242"
-        # Another account (another guest, or a signed-in user) reads nothing.
-        assert await p.table_session_for("t-guest-a", "guest:bbb") is None
-        assert await p.table_session_for("t-guest-a", "github:4242") is None
-        assert await p.table_session_for("t-github", "guest:aaa") is None
-        # A guest matches only its own exact id: no prefix or provider-only match.
-        assert await p.table_session_for("t-guest-a", "guest:") is None
-        assert await p.table_session_for("t-guest-a", "guest:aa") is None
-        assert await p.table_session_for("nope", "guest:aaa") is None
-
-    asyncio.run(read())
-
-
 def test_file_store_survives_reopen_and_drops_expired(tmp_path):
     path = str(tmp_path / "sub" / "oauth.json")
 

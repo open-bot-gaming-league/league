@@ -10,7 +10,10 @@ with a durable backend, across restarts) is a JSON object filed under a
     access    access tokens, by sha256 of the token
     refresh   refresh tokens, by sha256 of the token
     accounts  provider + provider user id + display name, by account id
-    table-sessions  who owns a table session (the account that opened it), by table session id
+    table-sessions  who owns and who controls a table session, by table session id
+    watch-tokens    a table session's watch token -> the session, by sha256 of the token
+    account-tables  an account's table sessions, newest first, by account id
+    (the last three belong to mcp/tables.py: the browser table and its control)
 
 Bearer secrets (codes, tokens) are filed by their sha256, never in the
 clear, so a copy of the store is not a copy of anyone's tokens. (Registered
@@ -40,7 +43,10 @@ import time
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-KINDS = ("clients", "pending", "codes", "access", "refresh", "accounts", "table-sessions")
+KINDS = (
+    "clients", "pending", "codes", "access", "refresh", "accounts",
+    "table-sessions", "watch-tokens", "account-tables",
+)
 
 Record = dict[str, Any]
 

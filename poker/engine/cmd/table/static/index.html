@@ -22,18 +22,24 @@
     <div class="seat" id="seat-you">
       <div class="said" id="you-said"></div>
       <div class="holds" id="you-holds"></div>
-      <div class="who">You <span class="pos" id="you-pos"></span></div>
+      <div class="who"><span id="you-name">You</span> <span class="pos" id="you-pos"></span></div>
       <div class="stk"><b id="you-stack"></b> <span id="you-stackbb"></span></div>
     </div>
   </div>
   <div id="bar">
     <div id="actions"></div>
     <div id="next-wrap" hidden><span id="outcome"></span><button id="next">Next hand <kbd>N</kbd></button></div>
+    <div id="watch-bar" hidden><span id="watch-status"></span><button id="take-over">Take over <kbd>T</kbd></button></div>
     <div id="error" role="alert"></div>
   </div>
 </main>
 <aside id="side">
   <header><h1>Heads-up no-limit hold&rsquo;em</h1><div id="blinds"></div></header>
+  <section id="league" hidden>
+    <div>Signed in: <b id="account-name"></b> <button id="sign-out">Sign out</button></div>
+    <div class="row"><button id="tag-in" hidden>Tag in my agent</button></div>
+    <div class="dim small" id="tag-note"></div>
+  </section>
   <section id="bot">
     <div>Bot: <b id="bot-name"></b></div>
     <div class="dim" id="bot-trained"></div>
@@ -48,7 +54,7 @@
   </section>
   <section id="history-wrap"><h2>Hand history</h2><div id="history"></div></section>
   <section id="controls">
-    <div class="row">Seat:
+    <div class="row play-only">Seat:
       <label><input type="radio" name="seat" value="alternate" checked> alternate</label>
       <label><input type="radio" name="seat" value="sb"> button</label>
       <label><input type="radio" name="seat" value="bb"> big blind</label>
@@ -58,10 +64,10 @@
       <button id="skip" title="Finish the animation now (Esc)">Skip <kbd>Esc</kbd></button>
       <label><input id="rm" type="checkbox"> reduced motion</label>
     </div>
-    <div class="row" id="opp-row" hidden>Opponent (from the next hand): <select id="opponent"></select></div>
-    <div class="row"><button id="new-session">New session</button></div>
+    <div class="row play-only" id="opp-row" hidden>Opponent (from the next hand): <select id="opponent"></select></div>
+    <div class="row play-only"><button id="new-session">New session</button></div>
     <div class="dim small" id="menu"></div>
-    <div class="dim small" id="keys">Keys: F fold, C check/call, 1&ndash;3 bet sizes, A all-in, N next hand.</div>
+    <div class="dim small play-only" id="keys">Keys: F fold, C check/call, 1&ndash;3 bet sizes, A all-in, N next hand.</div>
   </section>
 </aside>
 </body>

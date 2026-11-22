@@ -4,8 +4,9 @@ possible, else the cheapest non-fold action), and checks score() against
 what the table's own api/state history says -- not just the wrapper's
 internal math.
 
-Needs the live table at http://localhost:9777/poker/ (read-only GETs
-plus our own new session -- see API.md). Run with the project's venv:
+Needs a table: $OBGL_TABLE_URL, else the live one at
+http://localhost:9777/poker/ (read-only GETs plus our own new session --
+see API.md). Run with the project's venv:
 
   python -m pytest mcp/test_e2e.py -q
 """
@@ -67,7 +68,10 @@ async def test_three_hands_end_to_end_and_score_matches_table_history():
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
-    params = StdioServerParameters(command=PYTHON, args=[SERVER_PATH])
+    # The stdio client starts the server with a minimal environment: pass on
+    # the table it should use, the same one TableClient() checks below.
+    table_env = {"OBGL_TABLE_URL": os.environ["OBGL_TABLE_URL"]} if os.environ.get("OBGL_TABLE_URL") else None
+    params = StdioServerParameters(command=PYTHON, args=[SERVER_PATH], env=table_env)
 
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client_session:

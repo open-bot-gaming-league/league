@@ -1,5 +1,5 @@
 """Sign-in through an upstream IdP (GitHub, Google), against a FAKE IdP:
-a local Starlette app that speaks the authorization-code + PKCE flow the
+oauth_testing.FakeIdP, a local Starlette app that speaks the authorization-code + PKCE flow the
 real ones do, with their userinfo shapes. Our server runs in-process,
 wired to it through the same github()/google() factories production
 uses (only the endpoint URLs differ), both on real local sockets.
@@ -7,92 +7,28 @@ uses (only the endpoint URLs differ), both on real local sockets.
     python -m pytest mcp/test_oauth_upstream.py -q
 """
 
-import base64
-import hashlib
 import json
 import os
 import secrets
 import sys
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import httpx2
 import pytest
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
-from starlette.routing import Route
 
 import oauth_testing as ot
+from oauth_testing import UPSTREAM_ID, UPSTREAM_SECRET, FakeIdP
 import server as server_module
 from oauth import OAuthConfig
 from oauth.idp import github, google
 from oauth.store import MemoryStore
 
-UPSTREAM_ID = "upstream-app-id"
-UPSTREAM_SECRET = "upstream-app-secret"
-
 USERS = {
     "github": ({"id": 4242, "login": "octo", "name": "Real Name Not Kept"}, "github:4242", "octo"),
     "google": ({"sub": "1098765", "name": "Ada L"}, "google:1098765", "Ada L"),
 }
-
-
-class FakeIdP:
-    """One fake upstream. `mode` decides what /authorize does: approve,
-    deny (the user says no), or approve but fail at /token."""
-
-    def __init__(self, userinfo: dict):
-        self.userinfo = userinfo
-        self.mode = "approve"
-        self.codes: dict[str, dict] = {}
-        self.tokens: dict[str, dict] = {}
-        self.seen_authorize: list[dict] = []
-        self.app = Starlette(
-            routes=[
-                Route("/authorize", self.authorize),
-                Route("/token", self.token, methods=["POST"]),
-                Route("/userinfo", self.user),
-            ]
-        )
-
-    async def authorize(self, request: Request):
-        q = dict(request.query_params)
-        self.seen_authorize.append(q)
-        assert q["client_id"] == UPSTREAM_ID
-        assert q["code_challenge_method"] == "S256" and q["code_challenge"]
-        if self.mode == "deny":
-            return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'error': 'access_denied', 'state': q['state']})}")
-        code = secrets.token_urlsafe(8)
-        self.codes[code] = q
-        return RedirectResponse(f"{q['redirect_uri']}?{urlencode({'code': code, 'state': q['state']})}")
-
-    async def token(self, request: Request):
-        form = dict(await request.form())
-        issued = self.codes.pop(form.get("code"), None)
-        verifier = form.get("code_verifier", "")
-        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-        if (
-            self.mode == "fail_token"
-            or issued is None
-            or form.get("client_id") != UPSTREAM_ID
-            or form.get("client_secret") != UPSTREAM_SECRET
-            or form.get("redirect_uri") != issued["redirect_uri"]
-            or challenge != issued["code_challenge"]
-        ):
-            # GitHub's style: 200 with an error field.
-            return JSONResponse({"error": "bad_verification_code"})
-        access = secrets.token_urlsafe(8)
-        self.tokens[access] = self.userinfo
-        return JSONResponse({"access_token": access, "token_type": "bearer"})
-
-    async def user(self, request: Request):
-        auth = request.headers.get("authorization", "")
-        info = self.tokens.get(auth.removeprefix("Bearer "))
-        if info is None:
-            return JSONResponse({"message": "Bad credentials"}, status_code=401)
-        return JSONResponse(info)
 
 
 @pytest.fixture(params=["github", "google"])

@@ -1,6 +1,7 @@
 """MCP server for Bot Poker: seven tools (docs, rules, new_session, state,
 act, next_hand, score): six wrap the live table's HTTP API, docs() returns
-the documents. See
+the documents. With sign-in (OAuth on, below) two more, my_sessions and
+claim_session, and the browser table at /table. See
 docs/AGENTS.md for what this is and how to read it; for the stdio
 mode, add it to your MCP client config as a stdio server (command
 `python`, args `[path/to/this/file]`).
@@ -48,6 +49,15 @@ bearer token, and /login is the sign-in page (GitHub, Google, guest).
 Each poker session then belongs to the signed-in account as well as to
 its connection (see `_poker_for`). Unset: no auth, as before.
 
+With OAuth on, the same process also serves the browser table at /table
+(table_web.py: the Go table's own page, proxied, with sign-in, Play and
+Watch), and tables.py records each table session's owner and who is
+playing it: the browser, or the agent on one connection. act() and
+next_hand() run only for the session's controller; new_session() and
+score() return the owner's watch link; my_sessions() and claim_session()
+let the owner's agent pick up a session the owner hands it (or plays in
+the browser). The controller changes, the pending decision does not.
+
 OBGL_TABLE_URL points at the table; defaults to
 http://localhost:9777/poker/ for a local non-container run. Inside the
 deploy/cloudrun/ container the entrypoint sets it to the table's own
@@ -58,6 +68,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 
 import anyio.to_thread
 
@@ -81,6 +92,8 @@ from session import (  # noqa: E402
     summarize_state,
 )
 from table_client import TableClient, TableError  # noqa: E402
+from table_web import TableWeb, register_table_routes  # noqa: E402
+from tables import BROWSER, NotInControl, Party, TableSessions, is_controller, is_guest  # noqa: E402
 
 _REPO_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 DOCS_DIR = os.path.join(_REPO_DIR, "docs")
@@ -151,6 +164,12 @@ _SIGN_IN_LINE = {
 }
 
 
+_TABLE_LINE = {
+    False: "",
+    True: '<li><a href="/table/">Play in your browser</a> (and watch your agent play)</li>\n',
+}
+
+
 def landing_html(oauth: bool) -> str:
     return render(
         "Open Bot Gaming League",
@@ -160,7 +179,7 @@ def landing_html(oauth: bool) -> str:
 Connectors &gt; Add custom connector), then ask Claude to play a hand against
 one of our house bots. {_SIGN_IN_LINE[oauth]}</p>
 <ul>
-<li><a href="/docs/">Docs</a> (README, AGENTS, WAYS-TO-PLAY)</li>
+{_TABLE_LINE[oauth]}<li><a href="/docs/">Docs</a> (README, AGENTS, WAYS-TO-PLAY)</li>
 <li><a href="{GITHUB_URL}">Source on GitHub</a></li>
 </ul>""",
     )
@@ -217,8 +236,39 @@ def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
         _file_route(filename, path)
 
 
+GUEST_WATCH_NOTE = (
+    "No watch link for a guest: a watch link opens only for the account that "
+    "started the session, and a guest is a new account at every sign-in. "
+    "Connect with GitHub or Google sign-in to watch your games in the browser."
+)
+
+
+class NotYoursError(Exception):
+    """With sign-in: this connection's table session is being played by
+    someone else (the user in the browser, or another connection)."""
+
+
+def _controller_for_agent(controller: dict, me: Party) -> str:
+    """Who is playing a session, in words for the agent asking."""
+    if controller["kind"] == BROWSER:
+        return "your user, in the browser"
+    if controller.get("agent") is None:
+        return "nobody: your user handed it to their agent; claim_session() to play it"
+    if controller["agent"] == me.conn:
+        return "you"
+    return "your user's agent on another connection"
+
+
+def _not_yours(record: dict, session_id: str, me: Party) -> str:
+    who = _controller_for_agent(record["controller"], me)
+    return (
+        f"you are not playing this session now (playing: {who}). state() still shows it. "
+        f"To play it again, call claim_session('{session_id}') -- when your user wants you to."
+    )
+
+
 def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) -> MCPServer:
-    client = TableClient(base_url) if base_url else TableClient()
+    client = TableClient(base_url)
 
     # One PokerSession per connection that has one (see _SHARED_SESSION_KEY
     # and the module docstring for stdio's fallback). `ctx.session` (the
@@ -253,27 +303,30 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             raise RuntimeError("OAuth is on but this request carries no signed-in account")
         return token.subject
 
-    def _poker_for(ctx: Context) -> PokerSession:
+    def _connection_key(ctx: Context) -> str:
+        """This caller's per-connection key: which PokerSession is theirs,
+        and, as an agent, which connection controls a table session
+        (tables.py)."""
         headers = ctx.headers
         if headers is None:
             # No headers at all on this transport's request object
             # (stdio): one process serves one client, so one shared
             # session is correct -- there is nothing to key per-caller.
-            key = _SHARED_SESSION_KEY
-        else:
-            session_id = headers.get(MCP_SESSION_ID_HEADER)
-            if not session_id:
-                # Only expected with stateless_http=True (not used here)
-                # or a non-conformant client. Fail loud rather than
-                # silently fusing two callers' poker sessions.
-                raise RuntimeError(
-                    f"no {MCP_SESSION_ID_HEADER!r} header on this request: cannot "
-                    "scope poker state to a connection"
-                )
-            key = session_id
-            account = _account()
-            if account is not None:
-                key = f"{account}/{session_id}"
+            return _SHARED_SESSION_KEY
+        session_id = headers.get(MCP_SESSION_ID_HEADER)
+        if not session_id:
+            # Only expected with stateless_http=True (not used here)
+            # or a non-conformant client. Fail loud rather than
+            # silently fusing two callers' poker sessions.
+            raise RuntimeError(
+                f"no {MCP_SESSION_ID_HEADER!r} header on this request: cannot "
+                "scope poker state to a connection"
+            )
+        account = _account()
+        return f"{account}/{session_id}" if account is not None else session_id
+
+    def _poker_for(ctx: Context) -> PokerSession:
+        key = _connection_key(ctx)
         poker = poker_by_key.get(key)
         if poker is None:
             poker = PokerSession(client)
@@ -289,11 +342,24 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "Play Bot Poker (50 bb heads-up) at the live table. Call "
             "docs('agents') first, then rules(), then new_session(). "
             "docs() also has 'readme', 'ways-to-play' and 'rules'."
+            + (
+                " new_session() returns a watch_url: give it to the user, who can watch "
+                "you play in the browser (signed in as the same account) and take over. "
+                "If they hand a game back to you, my_sessions() lists their games and "
+                "claim_session() picks one up."
+                if oauth
+                else ""
+            )
         ),
     )
     _register_docs_routes(server, oauth=oauth is not None)
+    # With sign-in: who owns and who plays each table session (tables.py),
+    # and the browser table at /table (table_web.py) on top of it.
+    tables = TableSessions(oauth.store) if oauth else None
+    web = TableWeb(provider, tables, client, oauth.public_url, oauth.resource_url) if oauth else None
     if provider is not None:
         register_login_routes(server, provider)
+        register_table_routes(server, web)
 
     # mcp 2.3.0 also speaks a newer "modern" Streamable HTTP mode
     # (protocol version 2026-07-28): a self-contained POST per call, no
@@ -366,12 +432,45 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "docs": ["obgl://docs/AGENTS.md", "obgl://docs/WAYS-TO-PLAY.md"],
         }
 
+    def _watch_fields(account: str, record: dict) -> dict:
+        if is_guest(account):
+            return {"watch_url": None, "watch_note": GUEST_WATCH_NOTE}
+        return {"watch_url": web.watch_url(record)}
+
+    async def _control_check(ctx: Context, poker: PokerSession) -> None:
+        """With sign-in, an agent acts only in a session it controls."""
+        if tables is None or poker.session_id is None:
+            return  # no owners without sign-in; no session: the step itself says so
+        me = Party.agent(_connection_key(ctx))
+        try:
+            await tables.require_control(poker.session_id, _account(), me)
+        except LookupError:
+            raise NotYoursError("this session is not on record for your account: call new_session()") from None
+        except NotInControl as e:
+            raise NotYoursError(_not_yours(e.record, poker.session_id, me)) from None
+
+    async def _agent_step(ctx: Context, step: Callable[[PokerSession], dict]) -> dict:
+        """act / next_hand: the step, if this connection controls the session
+        (the check and the step under the session's lock, so a take-over
+        cannot land between them)."""
+        poker = _poker_for(ctx)
+        if tables is None or poker.session_id is None:
+            return await anyio.to_thread.run_sync(lambda: step(poker))
+        session_id = poker.session_id
+        async with tables.lock(session_id):
+            await _control_check(ctx, poker)
+            state = await anyio.to_thread.run_sync(lambda: step(poker))
+        tables.observe(session_id, state)
+        return state
+
     @server.tool()
     async def new_session(ctx: Context, opponent: str | None = None, seat: str | None = None) -> dict:
         """Start a new session and deal hand 1. opponent: a bot id from
         rules()'s `bots` (default: the first/least-exploitable). seat:
         "sb", "bb" or "alternate" (default -- alternates seat each
-        hand, so neither seat's advantage dominates the score)."""
+        hand, so neither seat's advantage dominates the score). With
+        sign-in the answer has a watch_url: give it to the user, who can
+        watch this session live in the browser (only they can open it)."""
         poker = _poker_for(ctx)
         account = _account()
         try:
@@ -380,27 +479,37 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             state = await anyio.to_thread.run_sync(lambda: poker.new(opponent=opponent, seat=seat))
         except TableError as e:
             return {"error": e.message}
-        if account is not None:
-            # Who owns this table session, for owner-only table features
-            # (oauth/provider.py, "table-session ownership").
-            await provider.record_table_session(state["session"], account)
-        return summarize_state(state)
+        out = summarize_state(state)
+        if tables is not None:
+            # Owned by the signed-in account, played by this connection.
+            record = await tables.create(state["session"], account, Party.agent(_connection_key(ctx)))
+            tables.observe(state["session"], state)
+            out.update(_watch_fields(account, record))
+        return out
 
     @server.tool()
-    def state(ctx: Context) -> dict:
+    async def state(ctx: Context) -> dict:
         """The current hand's state: your cards, the bot's visible
         state, the board, pot, and your legal actions. Call this if a
         result looks unexpected before acting again."""
+        poker = _poker_for(ctx)
         try:
-            s = _poker_for(ctx).state()
+            s = await anyio.to_thread.run_sync(poker.state)
         except (NoSessionError,) as e:
             return {"error": str(e)}
         except TableError as e:
             return {"error": e.message}
-        return summarize_state(s)
+        out = summarize_state(s)
+        if tables is not None:
+            tables.observe(poker.session_id, s)
+            try:
+                await _control_check(ctx, poker)
+            except NotYoursError as e:
+                out["control"] = str(e)
+        return out
 
     @server.tool()
-    def act(ctx: Context, action: int | str, amount: int | None = None) -> dict:
+    async def act(ctx: Context, action: int | str, amount: int | None = None) -> dict:
         """Make your move. action: "fold", "check", "call", "bet",
         "raise" or "allin"; amount, for a bet or raise: any whole number
         of chips from the state's legal.minTo to legal.maxTo, as a
@@ -410,35 +519,96 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         hand/step you mean from the last state this session saw -- you
         never pass those yourself."""
         try:
-            s = _poker_for(ctx).act(action, amount)
-        except (NoSessionError, StaleStateError, InvalidActionError) as e:
+            s = await _agent_step(ctx, lambda poker: poker.act(action, amount))
+        except (NoSessionError, StaleStateError, InvalidActionError, NotYoursError) as e:
             return {"error": str(e)}
         except TableError as e:
             return {"error": e.message}
         return summarize_state(s)
 
     @server.tool()
-    def next_hand(ctx: Context) -> dict:
+    async def next_hand(ctx: Context) -> dict:
         """Deal the next hand. Only works once the current hand is over
         (state().over is true)."""
         try:
-            s = _poker_for(ctx).next_hand()
-        except (NoSessionError, StaleStateError) as e:
+            s = await _agent_step(ctx, lambda poker: poker.next_hand())
+        except (NoSessionError, StaleStateError, NotYoursError) as e:
             return {"error": str(e)}
         except TableError as e:
             return {"error": e.message}
         return summarize_state(s)
 
     @server.tool()
-    def score(ctx: Context) -> dict:
+    async def score(ctx: Context) -> dict:
         """hands played, net bb, bb/100, and the same split by
         opponent, computed from this session's hand history."""
+        poker = _poker_for(ctx)
         try:
-            return _poker_for(ctx).score()
+            out = await anyio.to_thread.run_sync(poker.score)
         except (NoSessionError,) as e:
             return {"error": str(e)}
         except TableError as e:
             return {"error": e.message}
+        if tables is not None:
+            account = _account()
+            record = await tables.table_session_for(poker.session_id, account)
+            if record is not None:
+                out.update(_watch_fields(account, record))
+        return out
+
+    if tables is not None:
+
+        @server.tool()
+        async def my_sessions(ctx: Context) -> dict:
+            """Your user's table sessions, newest first: the ones you opened
+            and the ones they play in the browser. Each says who is playing
+            it now; `yours` is true for the ones you control. To play one
+            (say the user handed it to you from the browser), call
+            claim_session(session)."""
+            account = _account()
+            me = Party.agent(_connection_key(ctx))
+            out = []
+            for session_id, record in await tables.list_for(account):
+                try:
+                    s = await anyio.to_thread.run_sync(lambda sid=session_id: client.state(sid))
+                except TableError:
+                    continue  # the table no longer has it
+                out.append(
+                    {
+                        "session": session_id,
+                        "opponent": s["opponent"],
+                        "hand": s["hand"],
+                        "over": s["over"],
+                        "hands_finished": s["totals"]["hands"],
+                        "playing": _controller_for_agent(record["controller"], me),
+                        "yours": is_controller(record, me),
+                        "switches": record["switches"][-5:],
+                        **_watch_fields(account, record),
+                    }
+                )
+            return {"sessions": out}
+
+        @server.tool()
+        async def claim_session(ctx: Context, session: str) -> dict:
+            """Play one of your user's sessions (from my_sessions()) from here
+            on, from where it stands: the decision pending in it is yours.
+            Whoever played it before (the browser, or you on another
+            connection) can only watch until it is handed back. Answers
+            with its state, as state() does."""
+            account = _account()
+            poker = _poker_for(ctx)
+            if await tables.table_session_for(session, account) is None:
+                return {"error": "no such session for your account: call my_sessions()"}
+            try:
+                async with tables.lock(session):
+                    s = await anyio.to_thread.run_sync(lambda: poker.attach(session))
+                    record = await tables.switch(
+                        session, account, Party.agent(_connection_key(ctx)), hand=s["hand"], step=s["step"]
+                    )
+            except TableError as e:
+                return {"error": e.message}
+            tables.observe(session, s)
+            return {**summarize_state(s), **_watch_fields(account, record)}
 
     @server.custom_route("/version", methods=["GET"])
     async def version(request: Request) -> Response:  # noqa: ARG001

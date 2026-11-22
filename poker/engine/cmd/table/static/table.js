@@ -5,7 +5,14 @@
 
    The page keeps V, the hand as it has been SHOWN, and turns each new state into the events between V and
    the state: state.events from V.step on, a change of round between them is a street. The session score
-   and the history change only when the hand's last event has played, so they never give a result away. */
+   and the history change only when the hand's last event has played, so they never give a result away.
+
+   Behind the league's server (mcp/table_web.py: api/info then carries `league`) the page also signs in and
+   has two modes. Play: the signed-in user picks the moves. Watch (/table/watch/<token>): read-only, on a
+   session the user owns, polled about once a second; each move is animated as it lands. Every state says
+   who is in control (`control`): the mode follows it. Take over (Watch -> Play) and Tag in my agent (Play ->
+   the user's agent, which claims it over MCP) switch it. On the bare table (no `league`) it is Play only,
+   as before. */
 import { Motion, cardElement } from './cardmotion.js';
 
 const $ = id => document.getElementById(id);
@@ -18,6 +25,10 @@ const ROUND = { 'before the flop': 0, flop: 1, turn: 2, river: 3, showdown: 4 };
 const BOARD_SIZE = [0, 3, 4, 5];
 
 let info = null, st = null, net = false;          // st: the server's last state; net: a request is out
+let league = null;                                // info.league behind the league's server, else null
+let watchToken = (location.pathname.match(/\/watch\/([^/]+)$/) || [])[1] || null;
+let mode = 'play';                                // 'play' | 'watch' (league only): follows st.control
+const POLL = { watch: 1000, play: 3000 };         // ms between polls: watching, and playing (to see a hand-over)
 const felt = $('felt');
 const M = new Motion(felt, slot);
 const V = { hand: 0, step: 0, round: 0, board: 0, over: true, button: null, stack: { you: 0, bot: 0 } };
@@ -227,7 +238,7 @@ function evFinish(s) {
 /* ---------- derive: a new state -> the events between what is shown and it ---------- */
 function receive(s) {
   st = s;
-  localStorage.setItem(KEY, s.session);
+  if (s.session) localStorage.setItem(KEY, s.session);   // a watched state has none: watching is not playing
   const q = [];
   if (s.hand !== V.hand) {
     for (const who of ['you', 'bot']) $('seat-' + who).classList.remove('won');
@@ -267,8 +278,10 @@ function ui() {
   const bar = $('actions'); bar.replaceChildren();
   const ready = st && !net && !M.busy;
   document.body.classList.toggle('busy', !ready);
-  $('next-wrap').hidden = !(ready && st.over);
-  if (!ready || st.over) return;
+  document.body.classList.toggle('watching', mode === 'watch');
+  showControl();
+  $('next-wrap').hidden = !(ready && st.over && mode === 'play');
+  if (!ready || st.over || mode === 'watch') return;
   let n = 0;
   for (const a of st.actions) {
     const b = document.createElement('button');
@@ -321,7 +334,8 @@ function addHistory(rec) {
   if (info.bots.length > 1) d.title = 'against ' + botOf(rec.opponent).name;
   const ul = document.createElement('ul');
   const opp = info.bots.length > 1 ? ['Against ' + botOf(rec.opponent).name + '.'] : [];
-  for (const line of [...opp, 'You were the ' + rec.seat + '.', ...rec.lines, rec.outcome + '.']) {
+  const handovers = (st && st.control ? st.control.switches : []).filter(x => x.hand === rec.number).map(switchLine);
+  for (const line of [...opp, 'You were the ' + rec.seat + '.', ...handovers, ...rec.lines, rec.outcome + '.']) {
     const li = document.createElement('li'); li.textContent = line; if (line.startsWith('--')) li.className = 'street'; ul.append(li);
   }
   d.append(ul);
@@ -332,9 +346,12 @@ function addHistory(rec) {
 async function call(method, path, body) {
   const res = await fetch(path, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({ error: res.statusText }));
-  if (!res.ok) { const err = new Error(data.error || res.statusText); err.status = res.status; throw err; }
+  if (res.status === 401 && data.signIn) signIn();   // the league's sign-in ran out: sign in again, then back here
+  if (!res.ok) { const err = new Error(data.error || res.statusText); err.status = res.status; err.data = data; throw err; }
   return data;
 }
+const enc = encodeURIComponent;
+function signIn() { location.assign('signin?next=' + enc(location.pathname)); }
 function clearTable() {
   M.skip();
   for (const sp of [...M.sprites]) M.remove(sp);
@@ -360,7 +377,9 @@ async function send(fn, whole) {
     net = false;
     $('error').textContent = err.message;
     try {
-      if (err.status === 404) { load(await call('POST', 'api/new', choice())); $('error').textContent = 'The server had no record of your session; a new one has started.'; }
+      if (err.status === 409 && err.data.control) { st.control = err.data.control; follow(st); }   // someone else plays now
+      else if (err.status === 404 && league) { /* not this account's session: nothing to start over */ }
+      else if (err.status === 404) { load(await call('POST', 'api/new', choice())); $('error').textContent = 'The server had no record of your session; a new one has started.'; }
       else if (err.status === 409 && st) load(await call('GET', 'api/state?session=' + encodeURIComponent(st.session)));
     } catch (e) { $('error').textContent = e.message; }
   }
@@ -370,6 +389,72 @@ const seatChoice = () => (document.querySelector('input[name=seat]:checked') || 
 const choice = () => ({ seat: seatChoice(), opponent: $('opponent').value || undefined });   // both apply from the next hand dealt
 const act = index => send(() => call('POST', 'api/act', { session: st.session, hand: st.hand, step: st.step, action: index }));
 const nextHand = () => { if (st && st.over) send(() => call('POST', 'api/next', { session: st.session, hand: st.hand, ...choice() })); };
+
+/* ---------- the league: who is in control, Watch and Play, the hand-overs ---------- */
+// The mode follows the state's control: Play when this browser is in control, else Watch (the URL then is the
+// session's watch link, so a reload stays on it).
+function follow(s) {
+  if (!league || !s.control) return;
+  mode = s.control.yours ? 'play' : 'watch';
+  const path = new URL(mode === 'watch' ? s.control.watch : './', document.baseURI).pathname;
+  if (mode === 'watch') watchToken = s.control.watch.split('/').pop();
+  if (location.pathname !== path) history.replaceState(null, '', path);
+}
+function showControl() {
+  if (!league) return;
+  const c = st && st.control, idle = st && !net;
+  $('watch-bar').hidden = mode !== 'watch';
+  $('watch-status').textContent = !c ? '' : c.waiting
+    ? 'Handed to your agent. Ask it to pick this session up: my_sessions(), then claim_session().'
+    : 'Your agent is playing; you are watching.';
+  $('take-over').disabled = !idle;
+  $('tag-in').hidden = mode !== 'play' || !c || !c.canTagIn;
+  $('tag-in').disabled = !idle || M.busy;
+  $('you-name').textContent = mode === 'watch' && c && !c.waiting ? 'Your agent' : 'You';
+}
+const SWITCH = {
+  'agent>browser': 'You took over from your agent', 'browser>unclaimed': 'You handed the session to your agent',
+  'unclaimed>agent': 'Your agent picked the session up', 'browser>agent': 'Your agent took over from you',
+  'agent>agent': 'Your agent took over on another connection', 'unclaimed>browser': 'You took the session back',
+  'agent>unclaimed': 'The session was handed to your agent',
+};
+function switchLine(x) { return (SWITCH[x.from + '>' + x.to] || `Control: ${x.from} to ${x.to}`) + ` (step ${x.step}).`; }
+// A switch of control: no animation to wait for, the hand stays where it is.
+async function handOver(fn) {
+  if (net || !st) return;
+  net = true; $('error').textContent = ''; ui();
+  try { const s = await fn(); net = false; follow(s); receive(s); }
+  catch (err) { net = false; $('error').textContent = err.message; }
+  ui(); schedulePoll();
+}
+const takeOver = () => { if (mode === 'watch') handOver(() => call('POST', 'api/takeover', { token: watchToken })); };
+const tagIn = () => { if (mode === 'play' && !M.busy) handOver(() => call('POST', 'api/tagin', { session: st.session })); };
+// The hands a watcher missed (it polled past them) go straight to the history, oldest first.
+function fillHistory(s) {
+  const add = (s.history || []).filter(r => r.number !== s.hand && !H.some(h => h.number === r.number));
+  if (!add.length) return;
+  H.push(...add); H.sort((a, b) => a.number - b.number);
+  $('history').replaceChildren(); H.forEach(addHistory); showTotals();
+}
+// Watching: each poll brings what moved since (or the end of a hand the page was still on: catchUp), only
+// once the table has shown the last answer. Playing: a slower poll, to see a hand-over to the agent.
+let pollTimer = null;
+function schedulePoll() { clearTimeout(pollTimer); if (league && st) pollTimer = setTimeout(poll, POLL[mode]); }
+async function poll() {
+  if (net || M.busy) { schedulePoll(); return; }
+  net = true;
+  try {
+    const s = mode === 'watch'
+      ? await call('GET', `api/watch?token=${enc(watchToken)}&brief=1&hand=${st.hand}&over=${st.over ? 1 : 0}`)
+      : await call('GET', `api/state?session=${enc(st.session)}&brief=1`);
+    net = false;
+    fillHistory(s);
+    if (s.hand !== st.hand || s.step !== st.step || s.over !== st.over || JSON.stringify(s.control) !== JSON.stringify(st.control)) {
+      follow(s); receive(s);
+    }
+  } catch (err) { net = false; $('error').textContent = err.message; }
+  ui(); schedulePoll();
+}
 
 /* ---------- controls ---------- */
 $('next').onclick = nextHand;
@@ -381,10 +466,14 @@ function setSpeed(v) { M.speed = v; $('speed').value = v; $('speedv').textConten
 $('speed').oninput = e => { setSpeed(+e.target.value); localStorage.setItem(SPEED, M.speed); };
 function setRM(on) { M.rm = on; $('rm').checked = on; document.body.classList.toggle('rm', on); }
 $('rm').onchange = e => setRM(e.target.checked);
+$('take-over').onclick = takeOver;
+$('tag-in').onclick = tagIn;
+$('sign-out').onclick = async () => { await call('POST', 'signout', {}).catch(() => {}); localStorage.removeItem(KEY); location.assign('./'); };
 document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.target.tagName === 'INPUT' && e.target.type !== 'radio' && e.target.type !== 'checkbox') return;
   const k = e.key.toUpperCase();
   if (k === 'ESCAPE') { skip(); return; }
+  if (mode === 'watch') { if (k === 'T') { e.preventDefault(); takeOver(); } return; }
   if (st && st.over && (k === 'ENTER' || k === 'N' || k === ' ')) { e.preventDefault(); nextHand(); return; }
   const b = [...document.querySelectorAll('#actions button')].find(b => b.dataset.key === k);
   if (b) { e.preventDefault(); b.click(); }
@@ -403,14 +492,30 @@ addEventListener('resize', layout);
     $('opponent').replaceChildren(...info.bots.map(b => Object.assign(document.createElement('option'), { value: b.id, textContent: b.name })));
     $('opp-row').hidden = info.bots.length < 2;     // a choice only when there is one to make
     $('menu').textContent = 'Bet sizes: ' + info.menu + '.';
+    league = info.league || null;
+    if (league) {
+      if (!league.account) { signIn(); return; }
+      $('league').hidden = false;
+      $('account-name').textContent = league.account.name + (league.account.guest ? ' (guest)' : '');
+      if (league.account.guest) $('tag-note').textContent = 'A guest cannot hand a session to an agent: an agent signs in as another guest.';
+    } else watchToken = null;                       // the bare table has no Watch
     net = true;
-    const saved = localStorage.getItem(KEY);
     let s = null;
-    if (saved) { try { s = await call('GET', 'api/state?session=' + encodeURIComponent(saved)); } catch (err) { if (err.status !== 404) throw err; } }
-    if (!s) s = await call('POST', 'api/new', { seat: 'alternate' });
+    if (watchToken) s = await call('GET', 'api/watch?token=' + enc(watchToken));
+    else {
+      const saved = localStorage.getItem(KEY);
+      if (saved) { try { s = await call('GET', 'api/state?session=' + enc(saved)); } catch (err) { if (err.status !== 404) throw err; } }
+      if (!s) s = await call('POST', 'api/new', { seat: 'alternate' });
+    }
     net = false;
     for (const r of document.querySelectorAll('input[name=seat]')) r.checked = r.value === s.seatMode;
     $('opponent').value = s.opponent;
+    follow(s);
     load(s);
-  } catch (err) { net = false; $('error').textContent = 'Could not reach the table: ' + err.message; }
+    schedulePoll();
+  } catch (err) {
+    net = false;
+    $('error').textContent = err.status === 404 && watchToken ? 'No session here: a watch link opens only for the account that started it.'
+      : 'Could not reach the table: ' + err.message;
+  }
 })();

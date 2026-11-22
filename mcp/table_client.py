@@ -7,6 +7,7 @@ logic lives here -- just request/response plumbing and error mapping.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -34,7 +35,10 @@ class TableError(Exception):
 class TableClient:
     """Talks to one table server. Stateless: every call is a full request."""
 
-    def __init__(self, base_url: str = DEFAULT_BASE_URL, timeout: float = DEFAULT_TIMEOUT):
+    def __init__(self, base_url: str | None = None, timeout: float = DEFAULT_TIMEOUT):
+        # Default: $OBGL_TABLE_URL, else DEFAULT_BASE_URL; the server and the
+        # tests read the same variable.
+        base_url = base_url or os.environ.get("OBGL_TABLE_URL") or DEFAULT_BASE_URL
         self.base_url = base_url if base_url.endswith("/") else base_url + "/"
         self.timeout = timeout
 
@@ -66,6 +70,19 @@ class TableClient:
             except json.JSONDecodeError:
                 message = raw or e.reason
             raise TableError(e.code, message) from e
+        except urllib.error.URLError as e:
+            raise TableError(0, f"table unreachable: {e.reason}") from e
+
+    def asset(self, path: str) -> tuple[int, str, bytes]:
+        """A file of the table's page ("" is index.html): (status, content
+        type, body). For the MCP server's /table, which serves the page the
+        table binary embeds rather than a copy of it."""
+        req = urllib.request.Request(self.base_url + path, method="GET")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return resp.status, resp.headers.get("Content-Type", "application/octet-stream"), resp.read()
+        except urllib.error.HTTPError as e:
+            return e.code, "text/plain; charset=utf-8", b""
         except urllib.error.URLError as e:
             raise TableError(0, f"table unreachable: {e.reason}") from e
 

@@ -1,4 +1,7 @@
-"""Shared pytest fixtures for the HTTP-transport tests."""
+"""Shared pytest fixtures for the HTTP-transport tests: run_server (server.py
+as a subprocess), serve_asgi (an app in-process on a socket), and site (our
+server in-process with a fake GitHub, for the browser table's tests; once
+on the memory store, and once on Firestore when an emulator is up)."""
 
 import os
 import socket
@@ -6,10 +9,24 @@ import subprocess
 import sys
 import time
 import urllib.error
+import uuid
 import urllib.request
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import httpx2  # noqa: E402
+
+import oauth_testing as ot  # noqa: E402
+import server as server_module  # noqa: E402
+from oauth import OAuthConfig  # noqa: E402
+from oauth.idp import github  # noqa: E402
+from oauth.store import FirestoreStore, MemoryStore  # noqa: E402
+
+USER_A = {"id": 1001, "login": "alice"}  # GitHub users for the fake IdP (the `site` fixture)
+USER_B = {"id": 2002, "login": "bob"}
 
 SERVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
 
@@ -107,3 +124,55 @@ def run_server():
     """The context manager above, as a fixture:
     `with run_server(OBGL_TABLE_URL="...") as base: ...`."""
     return _running_server
+
+
+class Site:
+    """Our server with a fake GitHub; `browser(user)` and `agent(user)`
+    sign in as that GitHub user (None: as a guest)."""
+
+    def __init__(self, base, fake):
+        self.base, self.fake = base, fake
+
+    @asynccontextmanager
+    async def browser(self, user):
+        async with httpx2.AsyncClient(base_url=self.base, timeout=30) as http:
+            if user is not None:
+                self.fake.userinfo = user
+            landed = await ot.table_sign_in(http, self.base, "github" if user else "guest")
+            assert landed == "/table/", landed
+            yield http
+
+    async def agent_token(self, user):
+        if user is not None:
+            self.fake.userinfo = user
+        return (await ot.agent_tokens(self.base, "github" if user else "guest"))["access_token"]
+
+
+def _site_store(kind):
+    """The `site` fixture's store: memory, or Firestore (a fresh, empty
+    emulator project) when an emulator is up."""
+    if kind == "memory":
+        return MemoryStore()
+    if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        pytest.skip("FIRESTORE_EMULATOR_HOST not set (no Firestore emulator)")
+    return FirestoreStore(f"demo-obgl-{uuid.uuid4().hex[:12]}")
+
+
+@pytest.fixture(params=["memory", "firestore"])
+def site(request, serve_asgi, free_port):
+    store = _site_store(request.param)
+    fake = ot.FakeIdP(USER_A)
+    with serve_asgi(fake.app) as idp_base:
+        base = f"http://127.0.0.1:{free_port}"
+        idp = github(
+            ot.UPSTREAM_ID,
+            ot.UPSTREAM_SECRET,
+            f"{base}/login/github/callback",
+            authorize_endpoint=f"{idp_base}/authorize",
+            token_endpoint=f"{idp_base}/token",
+            userinfo_endpoint=f"{idp_base}/userinfo",
+        )
+        config = OAuthConfig(public_url=base, mcp_path="/mcp", store=store, idps=[idp])
+        app = server_module.build_server(None, config).streamable_http_app()
+        with serve_asgi(app, free_port):
+            yield Site(base, fake)

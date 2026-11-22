@@ -125,6 +125,13 @@ Notes for a page:
   carried over from an earlier table page of ours: spring chase, flips,
   speed-scaled clock, event queue, reduced motion) + `table.css`. Hash
   options: `#speed=2` (0.5-2), `#rm=1` (reduced motion).
+- Behind the league's MCP server (`mcp/table_web.py`, at `/table/`) the
+  same page gets `league` in `api/info` and the server's extra routes
+  (sign-in, `api/watch`, `api/takeover`, `api/tagin`; every state then
+  carries `control`): it signs in and has a Watch mode. Without `league`
+  (this server alone) it is the page described here. The extra ids it
+  uses: `#watch-bar` (`#watch-status`, `#take-over`), `#league`
+  (`#account-name`, `#sign-out`, `#tag-in`), `#you-name`.
 - `scripts/table_browser_test.py` drives the page. It relies on:
   `#actions button.<kind>` (with `data-key`, the shortcut) for the action
   buttons, `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,

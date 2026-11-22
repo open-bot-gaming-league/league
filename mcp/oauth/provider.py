@@ -223,26 +223,6 @@ class LeagueOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
     async def account(self, account_id: str) -> dict | None:
         return await self.store.get("accounts", account_id)
 
-    # ---- table-session ownership ---------------------------------------------
-    # Every table session opened through the connector records the account
-    # that opened it, so table-side features (owner-only watch links,
-    # handing a browser session to the owner's agent) can check a signed-in
-    # user against it. The Go table itself stays identity-free.
-
-    async def record_table_session(self, table_session_id: str, account_id: str) -> None:
-        await self.store.put(
-            "table-sessions", table_session_id, {"owner": account_id, "created_at": int(self.clock())}
-        )
-
-    async def table_session_for(self, table_session_id: str, account_id: str) -> dict | None:
-        """The ownership record, only if `account_id` owns the session.
-        There is deliberately no owner-blind read: another account's
-        session looks the same as a session that does not exist."""
-        record = await self.store.get("table-sessions", table_session_id)
-        if record is None or record["owner"] != account_id:
-            return None
-        return record
-
     # ---- codes and tokens --------------------------------------------------
 
     async def _issue_code(self, record: dict, account_id: str) -> str:

@@ -15,17 +15,25 @@ venv with mcp==2.3.0). Checks, printing one line each:
            any-size betting) one off-menu raise by kind and amount, played to the end
   version  GET /version == {"sha": SHA}        (only if --sha)
   docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte
+  table    the browser table at /table/ (with OAuth): a browser (a cookie jar) signs
+           in as a guest through /table/signin and the sign-in page, gets the page,
+           starts a session, acts, watches it through its watch link (no session id
+           in the answer), and the watch token is refused where a session id acts;
+           without the cookie the API answers 401
 A check whose route is missing (404) prints "absent" and passes unless it is
 named in --require. Exit 1 on any failure.
 """
 
 import argparse
 import asyncio
+import http.cookiejar
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import parse_qs, urlencode, urlparse
 
 
 def get(url):
@@ -140,6 +148,51 @@ async def play(base, token):
         print(f"mcp      hand {st['hand']} played out: {st['outcome']}")
 
 
+def table(base):
+    """The browser table, as a guest browser: (ok, detail) or None if /table is absent."""
+    status, _, _ = get(base + "/table/api/info")
+    if status == 404:
+        return None
+    jar = http.cookiejar.CookieJar()
+    browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def call(method, path, body=None):
+        req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None,
+                                     headers={"Content-Type": "application/json"} if body is not None else {})
+        try:
+            with browser.open(req, timeout=10) as r:
+                return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, json.load(e)
+
+    # /table/ -> /table/signin -> /authorize -> the sign-in page; click "Continue as guest";
+    # -> /table/signin/callback (sets the cookies) -> /table/, the page.
+    with browser.open(base + "/table/", timeout=10) as r:
+        request_id = parse_qs(urlparse(r.url).query)["request"][0]
+    form = urlencode({"request": request_id}).encode()
+    with browser.open(urllib.request.Request(base + "/login/guest", data=form, method="POST"), timeout=10) as r:
+        page = r.read().decode()
+        assert urlparse(r.url).path == "/table/" and re.search(r'<base href="/table/">', page), r.url
+    print(f"table    guest sign-in at /table/: cookies {sorted(c.name for c in jar)}, page {len(page)} bytes")
+    status, info = call("GET", "/table/api/info")
+    assert status == 200 and info["league"]["account"]["guest"], info
+    status, s = call("POST", "/table/api/new", {"seat": "alternate", "opponent": "turtle"})
+    assert status == 200 and s["control"]["yours"], (status, s)
+    a = next((x for x in s["actions"] if x["kind"] in ("check", "call")), s["actions"][0])
+    status, s2 = call("POST", "/table/api/act", {"session": s["session"], "hand": s["hand"], "step": s["step"], "action": a["index"]})
+    assert status == 200, (status, s2)
+    print(f"table    api/new + api/act({a['kind']}): session {s['session'][:8]}... hand {s2['hand']} step {s['step']} -> {s2['step']}")
+    token = s["control"]["watch"].rsplit("/", 1)[1]
+    status, w = call("GET", f"/table/api/watch?token={token}")
+    assert status == 200 and "session" not in w and (w["hand"], w["step"]) == (s2["hand"], s2["step"]), (status, w)
+    status, refused = call("POST", "/table/api/act", {"session": token, "hand": w["hand"], "step": w["step"], "action": 0})
+    assert status == 404, (status, refused)
+    status, _, _ = get(f"{base}/table/api/watch?token={token}")
+    assert status == 401, status
+    return True, (f"watch link {s['control']['watch'][:14]}... shows hand {w['hand']} step {w['step']} without the session id; "
+                  "the watch token as a session id: 404; no cookie: 401")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
@@ -170,6 +223,13 @@ def main():
         else:
             got = json.loads(body).get("sha") if status == 200 else None
             check("version", got == a.sha, f"GET /version -> {status} {body.decode().strip()}")
+
+    # The browser table signs in through the same OAuth server: none without it.
+    result = table(base) if token is not None else None
+    if result is None:
+        check("table", None, "GET /table/api/info")
+    else:
+        check("table", *result)
 
     status, hdrs, body = get(base + "/docs/AGENTS.md")
     if status == 404:

@@ -111,6 +111,18 @@ class PokerSession:
         self.last_state = state
         return state
 
+    def attach(self, session_id: str) -> dict:
+        """Play an existing table session from here on (claim_session: a
+        session the owner opened elsewhere, or one this connection played
+        before someone took it over). The state is fetched fresh, so the
+        decision pending in it is the one act() makes next."""
+        info = self.client.info()
+        state = self.client.state(session_id)
+        self.big_blind = info["bigBlind"]
+        self.session_id = session_id
+        self.last_state = state
+        return state
+
     def state(self) -> dict:
         self._require_session()
         state = self.client.state(self.session_id)
