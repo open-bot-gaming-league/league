@@ -23,7 +23,7 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
-from pages import render
+from pages import SMALL_STYLE, legal_links, render
 
 from .idp import callback_path
 from .provider import LeagueOAuthProvider, SignInError
@@ -45,7 +45,7 @@ _HEADERS = {
 _STYLE = (
     "form{margin:.5rem 0}button{font:inherit;width:100%;padding:.6rem;border-radius:.4rem;"
     "border:1px solid #888;background:#f4f4f4;cursor:pointer}button.primary{background:#222;color:#fff}"
-    ".small{font-size:.875rem;color:#555}"
+    + SMALL_STYLE
 )
 
 
@@ -90,6 +90,7 @@ def sign_in_page(provider: LeagueOAuthProvider, request_id: str, client_name: st
         + "".join(buttons)
         + '<p class="small">A guest has no account: nothing links your games to you once this connection ends.</p>'
         + privacy
+        + f'<p class="small">{legal_links(attrs=" target=_blank rel=noopener")}</p>'
     )
 
 

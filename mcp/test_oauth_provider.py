@@ -184,6 +184,9 @@ async def test_sign_in_page(http):
     assert "&lt;script&gt;x&lt;/script&gt; Claude" in page.text and "<script>" not in page.text
     assert "127.0.0.1:9" in page.text  # where the user will be sent back
     assert "Continue as guest" in page.text
+    # Small links to the legal pages, opening in a new tab (the sign-in page stays put).
+    assert 'href="/docs/privacy" target=_blank rel=noopener' in page.text
+    assert 'href="/docs/terms" target=_blank rel=noopener' in page.text
     # No IdP configured in this fixture: no GitHub / Google buttons.
     assert "GitHub" not in page.text and "Google" not in page.text
     assert page.headers["x-frame-options"] == "DENY"

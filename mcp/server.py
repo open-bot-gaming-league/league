@@ -39,7 +39,9 @@ Run:
 Over HTTP the same process also serves the docs as plain web pages
 (see `_docs_routes`): a landing page at /, an index at /docs/, and the
 raw markdown at /docs/README.md, /docs/AGENTS.md, /docs/WAYS-TO-PLAY.md,
-read from the repo files on every request. A client that cannot reach
+/docs/PRIVACY.md and /docs/TERMS.md, read from the repo files on every
+request. The last two are also rendered as web pages, /docs/privacy and
+/docs/terms (what the sign-in screens link to). A client that cannot reach
 GitHub (claude.ai's fetcher was rate-limited there) still gets them
 from here, or from the docs() tool.
 
@@ -83,7 +85,8 @@ from starlette.requests import Request  # noqa: E402
 from starlette.responses import HTMLResponse, JSONResponse, Response  # noqa: E402
 
 from oauth import OAuthConfig, register_login_routes  # noqa: E402
-from pages import render  # noqa: E402
+from markdown_lite import render_markdown  # noqa: E402
+from pages import LEGAL_PAGES, SMALL_STYLE, legal_links, render  # noqa: E402
 from session import (  # noqa: E402
     InvalidActionError,
     NoSessionError,
@@ -106,6 +109,8 @@ DOC_FILES = {
     "readme": ("README.md", os.path.join(_REPO_DIR, "README.md")),
     "agents": ("AGENTS.md", os.path.join(DOCS_DIR, "AGENTS.md")),
     "ways-to-play": ("WAYS-TO-PLAY.md", os.path.join(DOCS_DIR, "WAYS-TO-PLAY.md")),
+    "privacy": ("PRIVACY.md", os.path.join(DOCS_DIR, "PRIVACY.md")),
+    "terms": ("TERMS.md", os.path.join(DOCS_DIR, "TERMS.md")),
 }
 DOC_NAMES = [*DOC_FILES, "rules"]
 
@@ -155,6 +160,11 @@ _DOC_LINKS = """<ul>
 <li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
 <li><a href="/docs/AGENTS.md">AGENTS.md</a>: the agent's entry point: tools, rules, notation</li>
 <li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
+</ul>
+<p>Legal:</p>
+<ul>
+<li><a href="/docs/privacy">Privacy Policy</a> (<a href="/docs/PRIVACY.md">markdown</a>)</li>
+<li><a href="/docs/terms">Terms of Service</a> (<a href="/docs/TERMS.md">markdown</a>)</li>
 </ul>"""
 
 _SIGN_IN_LINE = {
@@ -181,14 +191,16 @@ one of our house bots. {_SIGN_IN_LINE[oauth]}</p>
 <ul>
 {_TABLE_LINE[oauth]}<li><a href="/docs/">Docs</a> (README, AGENTS, WAYS-TO-PLAY)</li>
 <li><a href="{GITHUB_URL}">Source on GitHub</a></li>
-</ul>""",
+</ul>
+<p class="small">{legal_links()}</p>""",
+        SMALL_STYLE,
     )
 
 
 DOCS_INDEX_HTML = render(
     "OBGL docs",
     f"""<h1>OBGL docs</h1>
-<p>Raw markdown, served from the same release as the connector.</p>
+<p>The documents as markdown, and the legal pages, served from the same release as the connector.</p>
 {_DOC_LINKS}
 <p><a href="/">Back</a> &middot; <a href="{GITHUB_URL}">GitHub</a></p>""",
 )
@@ -234,6 +246,16 @@ def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
 
     for filename, path in DOC_FILES.values():
         _file_route(filename, path)
+
+    def _legal_route(name: str, url_path: str) -> None:
+        @server.custom_route(url_path, methods=["GET"])
+        async def serve(request: Request) -> Response:  # noqa: ARG001
+            title, body = render_markdown(read_doc(name))
+            footer = f'<p class="small"><a href="/">Home</a> &middot; {legal_links(exclude=name)}</p>'
+            return HTMLResponse(render(title, f"{body}\n{footer}", SMALL_STYLE))
+
+    for name, url_path, _label in LEGAL_PAGES:
+        _legal_route(name, url_path)
 
 
 GUEST_WATCH_NOTE = (
@@ -408,8 +430,9 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     @server.tool()
     def docs(name: str) -> str:
         """A document as text. name: 'agents' (the entry point: read this
-        first), 'readme', 'ways-to-play', or 'rules' (the static rules
-        text; rules() adds the live bet menu and opponents)."""
+        first), 'readme', 'ways-to-play', 'privacy', 'terms', or 'rules'
+        (the static rules text; rules() adds the live bet menu and
+        opponents)."""
         try:
             return read_doc(name)
         except ValueError as e:

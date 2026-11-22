@@ -22,10 +22,19 @@ FILES = {
     "/docs/AGENTS.md": os.path.join(REPO, "docs", "AGENTS.md"),
     "/docs/WAYS-TO-PLAY.md": os.path.join(REPO, "docs", "WAYS-TO-PLAY.md"),
 }
+FILES["/docs/PRIVACY.md"] = os.path.join(REPO, "docs", "PRIVACY.md")
+FILES["/docs/TERMS.md"] = os.path.join(REPO, "docs", "TERMS.md")
+# The legal pages: URL path -> (a heading the page must show, the markdown file's name).
+LEGAL = {
+    "/docs/privacy": ("Open Bot Gaming League — Privacy Policy", "/docs/PRIVACY.md"),
+    "/docs/terms": ("Open Bot Gaming League — Terms of Service", "/docs/TERMS.md"),
+}
 TOOL_NAMES = {
     "readme": FILES["/docs/README.md"],
     "agents": FILES["/docs/AGENTS.md"],
     "ways-to-play": FILES["/docs/WAYS-TO-PLAY.md"],
+    "privacy": FILES["/docs/PRIVACY.md"],
+    "terms": FILES["/docs/TERMS.md"],
 }
 
 
@@ -55,7 +64,7 @@ def test_doc_file_is_served_as_exact_bytes(base, path):
 def test_docs_index_links_each_doc(base):
     status, ctype, body = _get(base + "/docs/")
     assert status == 200 and ctype.startswith("text/html")
-    for path in FILES:
+    for path in [*FILES, *LEGAL]:
         assert f'href="{path}"'.encode() in body
 
 
@@ -74,6 +83,39 @@ def test_landing_page_has_connector_url_and_docs_link(base):
     assert status == 200 and ctype.startswith("text/html")
     assert server_module.CONNECTOR_URL.encode() in body
     assert b'href="/docs/"' in body
+    for path in LEGAL:
+        assert f'href="{path}"'.encode() in body
+
+
+@pytest.mark.parametrize("path", sorted(LEGAL))
+def test_legal_page_is_html_with_its_heading(base, path):
+    heading, _ = LEGAL[path]
+    status, ctype, body = _get(base + path)
+    assert status == 200 and ctype.startswith("text/html")
+    page = body.decode()
+    assert page.startswith("<!doctype html>")
+    assert f"<title>{heading}</title>" in page
+    assert f"<h1>{heading}</h1>" in page
+    assert "<h2>1. " in page
+    assert "<script" not in page
+
+
+@pytest.mark.parametrize("path", sorted(LEGAL))
+def test_legal_page_links_home_and_the_other_legal_page(base, path):
+    page = _get(base + path)[2].decode()
+    assert 'href="/"' in page
+    for other in LEGAL:
+        assert (f'href="{other}"' in page) == (other != path)
+
+
+@pytest.mark.parametrize("path", sorted(LEGAL))
+def test_legal_pages_carry_no_drafting_markers(base, path):
+    """Public repo and public page: no placeholders or review notes, in the
+    served page or in the markdown it is rendered from."""
+    for text in (_get(base + path)[2].decode(), _get(base + LEGAL[path][1])[2].decode()):
+        for marker in ("[CHECK", "DRAFT", "PLACEHOLDER", "[EFFECTIVE DATE]"):
+            assert marker not in text, (path, marker)
+        assert "Effective date" in text and "November 2026" in text
 
 
 def test_unknown_doc_is_404(base):
@@ -85,7 +127,7 @@ def test_doc_urls_in_readme_and_agents_resolve_to_served_paths():
     every such URL must be a path this server actually serves."""
     import re
 
-    served = set(FILES) | {"/docs/"}
+    served = set(FILES) | set(LEGAL) | {"/docs/"}
     for path in (FILES["/docs/README.md"], FILES["/docs/AGENTS.md"]):
         with open(path, encoding="utf-8") as f:
             text = f.read()

@@ -14,7 +14,8 @@ venv with mcp==2.3.0). Checks, printing one line each:
            new_session(turtle), one act() on its first legal action, and (a sha with
            any-size betting) one off-menu raise by kind and amount, played to the end
   version  GET /version == {"sha": SHA}        (only if --sha)
-  docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte
+  docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte; and GET /docs/privacy
+           and /docs/terms are 200 text/html (the pages the sign-in screens link to)
   table    the browser table at /table/ (with OAuth): a browser (a cookie jar) signs
            in as a guest through /table/signin and the sign-in page, gets the page,
            starts a session, acts, watches it through its watch link (no session id
@@ -269,6 +270,14 @@ def main():
         check("docs", status == 200 and body == want,
               f"GET /docs/AGENTS.md -> {status} {hdrs.get('content-type')}, {len(body)} bytes, "
               f"{'identical to' if body == want else 'DIFFERENT from'} {a.repo}/docs/AGENTS.md ({len(want)} bytes)")
+    for page in ("/docs/privacy", "/docs/terms"):
+        status, hdrs, body = get(base + page)
+        if status == 404:
+            check("docs", None, f"GET {page}")
+        else:
+            ctype = hdrs.get("content-type") or ""
+            check("docs", status == 200 and ctype.startswith("text/html"),
+                  f"GET {page} -> {status} {ctype}, {len(body)} bytes")
     sys.exit(1 if failed else 0)
 
 

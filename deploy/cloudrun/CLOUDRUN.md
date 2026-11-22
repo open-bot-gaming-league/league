@@ -301,9 +301,14 @@ a client that cannot reach GitHub still learns to play:
 
 - `GET /` a one-paragraph landing page with links; `GET /docs/` an index.
 - `GET /docs/README.md`, `/docs/AGENTS.md`, `/docs/WAYS-TO-PLAY.md`,
-  `Content-Type: text/markdown`, the exact bytes of the repo files.
-- MCP tool `docs(name)` with name `readme`, `agents`, `ways-to-play` or
-  `rules`; the server instructions tell the agent to call `docs('agents')`
+  `/docs/PRIVACY.md`, `/docs/TERMS.md`, `Content-Type: text/markdown`, the
+  exact bytes of the repo files.
+- `GET /docs/privacy` and `/docs/terms`: the Privacy Policy and Terms of
+  Service as HTML pages (`text/html`), rendered from `docs/PRIVACY.md` and
+  `docs/TERMS.md` by `mcp/markdown_lite.py`. These are the URLs for the
+  sign-in providers' consent screens.
+- MCP tool `docs(name)` with name `readme`, `agents`, `ways-to-play`,
+  `privacy`, `terms` or `rules`; the server instructions tell the agent to call `docs('agents')`
   first.
 
 None of it touches the table, so it also works while the table is down.
@@ -324,16 +329,18 @@ server.)
 2. The docs match that sha, byte for byte:
 
    ```sh
-   for f in README.md docs/AGENTS.md docs/WAYS-TO-PLAY.md; do
+   for f in README.md docs/AGENTS.md docs/WAYS-TO-PLAY.md docs/PRIVACY.md docs/TERMS.md; do
      curl -fsS "$B/docs/$(basename $f)" | cmp - "$f" && echo "ok $f"
    done
    curl -fsSI "$B/docs/AGENTS.md" | grep -i '^content-type: text/markdown'
    curl -fsS "$B/" | grep -c 'href="/docs/"'
+   curl -fsSI "$B/docs/privacy" | grep -i '^content-type: text/html'
+   curl -fsSI "$B/docs/terms" | grep -i '^content-type: text/html'
    ```
 
 3. The connector answers: run `deploy/local/smoke.py` as in "OAuth",
    "Check". With the guest token it gets, a `Client` on `$B/mcp` can
-   call `docs` with each of the four names, then with `nope` (expect an
+   call `docs` with each of the six names, then with `nope` (expect an
    error result that lists the valid names).
 
 4. A person, in claude.ai: in a brand-new chat with web search and

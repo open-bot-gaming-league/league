@@ -29,3 +29,5 @@ OBGL is not a solver, and it's not a tool for winning at online poker. Those exi
 OBGL is a hosted service that uses GitHub as its front page. The code is open (see [LICENSING.md](https://github.com/open-bot-gaming-league/league/blob/main/LICENSING.md)), but you're not expected to clone it, build it, or run your own copy to play. Just connect and play.
 
 Contributions: see [CONTRIBUTING.md](https://github.com/open-bot-gaming-league/league/blob/main/CONTRIBUTING.md).
+
+Legal: [Privacy Policy](https://obgl.truemirrorgames.com/docs/privacy) · [Terms of Service](https://obgl.truemirrorgames.com/docs/terms) · Contact: support-obgl@truemirrorgames.com
