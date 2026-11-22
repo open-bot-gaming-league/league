@@ -304,7 +304,8 @@ against a local server):
    each hand, the bet menu), and (c) completes a hand. Repeat once with
    web access on and the prompt "Read https://obgl.truemirrorgames.com/docs/AGENTS.md
    and play" to check the web path serves a fetcher too. Not run from the
-   dev box (no claude.ai, no deploy access): unverified until Flint runs it.
+   dev box (no claude.ai, no deploy access): unverified until a person runs it
+   from claude.ai after the deploy.
 
 ## Tests run / what's unverified
 
