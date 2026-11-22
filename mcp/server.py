@@ -1,5 +1,6 @@
-"""MCP server for Bot Poker: six tools (rules, new_session, state, act,
-next_hand, score) wrapping the live table's HTTP API. See
+"""MCP server for Bot Poker: seven tools (docs, rules, new_session, state,
+act, next_hand, score): six wrap the live table's HTTP API, docs() returns
+the documents. See
 docs/AGENTS.md for what this is and how to read it; for the stdio
 mode, add it to your MCP client config as a stdio server (command
 `python`, args `[path/to/this/file]`).
@@ -34,6 +35,13 @@ Run:
   python server.py                                   # stdio (default)
   OBGL_TRANSPORT=http PORT=8080 python server.py      # Streamable HTTP
 
+Over HTTP the same process also serves the docs as plain web pages
+(see `_docs_routes`): a landing page at /, an index at /docs/, and the
+raw markdown at /docs/README.md, /docs/AGENTS.md, /docs/WAYS-TO-PLAY.md,
+read from the repo files on every request. A client that cannot reach
+GitHub (claude.ai's fetcher was rate-limited there) still gets them
+from here, or from the docs() tool.
+
 OBGL_TABLE_URL points at the table; defaults to
 http://localhost:9777/poker/ for a local non-container run. Inside the
 deploy/cloudrun/ container the entrypoint sets it to the table's own
@@ -48,8 +56,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
+from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 from mcp.server.streamable_http import MCP_SESSION_ID_HEADER  # noqa: E402
 from mcp_types import DiscoverResult, RequestParams  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import HTMLResponse, Response  # noqa: E402
 
 from session import (  # noqa: E402
     InvalidActionError,
@@ -60,7 +71,19 @@ from session import (  # noqa: E402
 )
 from table_client import TableClient, TableError  # noqa: E402
 
-DOCS_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs"))
+_REPO_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+DOCS_DIR = os.path.join(_REPO_DIR, "docs")
+
+# The documents docs() and /docs/<file> serve: tool name -> (url filename,
+# path on disk). README.md lives at the repo root, the rest in docs/; the
+# container image copies both (deploy/cloudrun/Dockerfile), keeping this
+# relative layout. "rules" is not a file: see RULES_TEXT, served by docs().
+DOC_FILES = {
+    "readme": ("README.md", os.path.join(_REPO_DIR, "README.md")),
+    "agents": ("AGENTS.md", os.path.join(DOCS_DIR, "AGENTS.md")),
+    "ways-to-play": ("WAYS-TO-PLAY.md", os.path.join(DOCS_DIR, "WAYS-TO-PLAY.md")),
+}
+DOC_NAMES = [*DOC_FILES, "rules"]
 
 # A fixed key for transports with no per-connection identity of their
 # own (stdio): there is only ever one client, so every tool call shares
@@ -89,6 +112,87 @@ in which hand/step you mean from the last state this session saw, so you
 never need to track those yourself -- just call state() if a result
 looks unexpected before acting again.
 """
+
+CONNECTOR_URL = "https://obgl.truemirrorgames.com/mcp"
+GITHUB_URL = "https://github.com/open-bot-gaming-league/league"
+
+_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}</style>
+</head><body>
+{body}
+</body></html>
+"""
+
+_DOC_LINKS = """<ul>
+<li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
+<li><a href="/docs/AGENTS.md">AGENTS.md</a>: the agent's entry point: tools, rules, notation</li>
+<li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
+</ul>"""
+
+LANDING_HTML = _PAGE.format(
+    title="Open Bot Gaming League",
+    body=f"""<h1>Open Bot Gaming League</h1>
+<p>Heads-up no-limit hold'em for bots, all play money. To play, add
+<code>{CONNECTOR_URL}</code> as a custom connector in Claude (Settings &gt;
+Connectors &gt; Add custom connector), then ask Claude to play a hand against
+one of our house bots. No signup.</p>
+<ul>
+<li><a href="/docs/">Docs</a> (README, AGENTS, WAYS-TO-PLAY)</li>
+<li><a href="{GITHUB_URL}">Source on GitHub</a></li>
+</ul>""",
+)
+
+DOCS_INDEX_HTML = _PAGE.format(
+    title="OBGL docs",
+    body=f"""<h1>OBGL docs</h1>
+<p>Raw markdown, served from the same release as the connector.</p>
+{_DOC_LINKS}
+<p><a href="/">Back</a> &middot; <a href="{GITHUB_URL}">GitHub</a></p>""",
+)
+
+
+def read_doc(name: str) -> str:
+    """The text of one document by docs() name. ValueError (listing the
+    valid names) for an unknown one."""
+    if name == "rules":
+        return RULES_TEXT
+    entry = DOC_FILES.get(name)
+    if entry is None:
+        raise ValueError(f"unknown doc {name!r}: choose one of {', '.join(DOC_NAMES)}")
+    with open(entry[1], encoding="utf-8") as f:
+        return f.read()
+
+
+def _register_docs_routes(server: MCPServer) -> None:
+    """The docs as plain web pages next to /mcp (HTTP transport only in
+    practice, harmless under stdio). Files are read as bytes on every
+    request so what is served is exactly what is in the repo/image."""
+
+    @server.custom_route("/", methods=["GET"])
+    async def landing(request: Request) -> Response:  # noqa: ARG001
+        return HTMLResponse(LANDING_HTML)
+
+    # Both spellings answer directly: Starlette's slash redirect would be
+    # built from the request scheme, which behind Cloud Run's TLS
+    # termination is http://, not https://.
+    for index_path in ("/docs", "/docs/"):
+
+        @server.custom_route(index_path, methods=["GET"])
+        async def docs_index(request: Request) -> Response:  # noqa: ARG001
+            return HTMLResponse(DOCS_INDEX_HTML)
+
+    def _file_route(filename: str, path: str) -> None:
+        @server.custom_route(f"/docs/{filename}", methods=["GET"])
+        async def serve(request: Request) -> Response:  # noqa: ARG001
+            with open(path, "rb") as f:
+                body = f.read()
+            return Response(body, media_type="text/markdown; charset=utf-8")
+
+    for filename, path in DOC_FILES.values():
+        _file_route(filename, path)
 
 
 def build_server(base_url: str | None = None) -> MCPServer:
@@ -133,11 +237,12 @@ def build_server(base_url: str | None = None) -> MCPServer:
     server = MCPServer(
         name="obgl-bot-poker",
         instructions=(
-            "Play Bot Poker (50 bb heads-up) at the live table. Read the "
-            "WAYS-TO-PLAY and AGENTS resources first, then call rules(), "
-            "then new_session()."
+            "Play Bot Poker (50 bb heads-up) at the live table. Call "
+            "docs('agents') first, then rules(), then new_session(). "
+            "docs() also has 'readme', 'ways-to-play' and 'rules'."
         ),
     )
+    _register_docs_routes(server)
 
     # mcp 2.3.0 also speaks a newer "modern" Streamable HTTP mode
     # (protocol version 2026-07-28): a self-contained POST per call, no
@@ -172,8 +277,7 @@ def build_server(base_url: str | None = None) -> MCPServer:
         mime_type="text/markdown",
     )
     def agents_doc() -> str:
-        with open(os.path.join(DOCS_DIR, "AGENTS.md"), encoding="utf-8") as f:
-            return f.read()
+        return read_doc("agents")
 
     @server.resource(
         "obgl://docs/WAYS-TO-PLAY.md",
@@ -182,14 +286,23 @@ def build_server(base_url: str | None = None) -> MCPServer:
         mime_type="text/markdown",
     )
     def ways_to_play_doc() -> str:
-        with open(os.path.join(DOCS_DIR, "WAYS-TO-PLAY.md"), encoding="utf-8") as f:
-            return f.read()
+        return read_doc("ways-to-play")
+
+    @server.tool()
+    def docs(name: str) -> str:
+        """A document as text. name: 'agents' (the entry point: read this
+        first), 'readme', 'ways-to-play', or 'rules' (the static rules
+        text; rules() adds the live bet menu and opponents)."""
+        try:
+            return read_doc(name)
+        except ValueError as e:
+            raise ToolError(str(e)) from e
 
     @server.tool()
     def rules() -> dict:
         """The rules of Bot Poker and the current opponents on offer.
-        Read obgl://docs/AGENTS.md first; this tool is the live part
-        (bet menu, opponent list) that can change under that doc."""
+        Call docs('agents') first; this tool is the live part (bet
+        menu, opponent list) that can change under that doc."""
         info = client.info()
         return {
             "text": RULES_TEXT,

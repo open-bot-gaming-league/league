@@ -1,0 +1,137 @@
+"""Tests for the docs layers: the /docs/* web pages and the docs() tool.
+
+Neither needs the table, so these start server.py with OBGL_TABLE_URL
+pointing at a closed port: they pass (and prove it) with no table at
+all. Run: python -m pytest mcp/test_docs.py -q
+"""
+
+import os
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import pytest
+
+import server as server_module
+
+REPO = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+FILES = {
+    "/docs/README.md": os.path.join(REPO, "README.md"),
+    "/docs/AGENTS.md": os.path.join(REPO, "docs", "AGENTS.md"),
+    "/docs/WAYS-TO-PLAY.md": os.path.join(REPO, "docs", "WAYS-TO-PLAY.md"),
+}
+TOOL_NAMES = {
+    "readme": FILES["/docs/README.md"],
+    "agents": FILES["/docs/AGENTS.md"],
+    "ways-to-play": FILES["/docs/WAYS-TO-PLAY.md"],
+}
+
+
+@pytest.fixture
+def base(run_server):
+    with run_server(OBGL_TABLE_URL="http://127.0.0.1:1/") as b:
+        yield b
+
+
+def _get(url):
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.status, r.headers.get("Content-Type", ""), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type", ""), e.read()
+
+
+@pytest.mark.parametrize("path", sorted(FILES))
+def test_doc_file_is_served_as_exact_bytes(base, path):
+    status, ctype, body = _get(base + path)
+    assert status == 200
+    assert ctype.startswith("text/markdown")
+    with open(FILES[path], "rb") as f:
+        assert body == f.read()
+
+
+def test_docs_index_links_each_doc(base):
+    status, ctype, body = _get(base + "/docs/")
+    assert status == 200 and ctype.startswith("text/html")
+    for path in FILES:
+        assert f'href="{path}"'.encode() in body
+
+
+def test_docs_index_without_trailing_slash_answers_directly(base):
+    import http.client
+
+    conn = http.client.HTTPConnection(base.removeprefix("http://"), timeout=5)
+    conn.request("GET", "/docs")  # http.client does not follow redirects
+    resp = conn.getresponse()
+    assert resp.status == 200 and resp.getheader("Content-Type").startswith("text/html")
+    conn.close()
+
+
+def test_landing_page_has_connector_url_and_docs_link(base):
+    status, ctype, body = _get(base + "/")
+    assert status == 200 and ctype.startswith("text/html")
+    assert server_module.CONNECTOR_URL.encode() in body
+    assert b'href="/docs/"' in body
+
+
+def test_unknown_doc_is_404(base):
+    assert _get(base + "/docs/NOPE.md")[0] == 404
+
+
+def test_doc_urls_in_readme_and_agents_resolve_to_served_paths():
+    """README/AGENTS point at https://obgl.truemirrorgames.com/docs/...:
+    every such URL must be a path this server actually serves."""
+    import re
+
+    served = set(FILES) | {"/docs/"}
+    for path in (FILES["/docs/README.md"], FILES["/docs/AGENTS.md"]):
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        for url_path in re.findall(r"https://obgl\.truemirrorgames\.com(/docs/[^\s)]*)", text):
+            assert url_path in served, (path, url_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", sorted(TOOL_NAMES))
+async def test_docs_tool_returns_file_text(base, name):
+    from mcp import Client
+
+    async with Client(f"{base}/mcp") as client:
+        result = await client.call_tool("docs", {"name": name})
+    assert not result.is_error, result.content
+    with open(TOOL_NAMES[name], encoding="utf-8") as f:
+        assert result.content[0].text == f.read()
+
+
+@pytest.mark.asyncio
+async def test_docs_tool_rules_is_the_servers_rules_text(base):
+    from mcp import Client
+
+    async with Client(f"{base}/mcp") as client:
+        result = await client.call_tool("docs", {"name": "rules"})
+    assert not result.is_error, result.content
+    assert result.content[0].text == server_module.RULES_TEXT
+
+
+@pytest.mark.asyncio
+async def test_docs_tool_unknown_name_is_a_clear_error(base):
+    from mcp import Client
+
+    async with Client(f"{base}/mcp") as client:
+        result = await client.call_tool("docs", {"name": "nope"})
+    assert result.is_error
+    message = result.content[0].text
+    assert "nope" in message
+    for name in server_module.DOC_NAMES:
+        assert name in message
+
+
+@pytest.mark.asyncio
+async def test_instructions_say_to_call_docs_agents_first(base):
+    from mcp import Client
+
+    async with Client(f"{base}/mcp") as client:
+        instructions = client.instructions
+    assert instructions and "docs('agents')" in instructions

@@ -17,21 +17,13 @@ with a venv that has the `mcp` package (see requirements.txt):
 
 import json
 import os
-import socket
-import subprocess
 import sys
-import time
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest
 
 from table_client import TableClient
-
-SERVER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.py")
-PYTHON = sys.executable
 
 
 def _table_up() -> bool:
@@ -43,12 +35,6 @@ def _table_up() -> bool:
 
 
 pytestmark = pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777")
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 def _payload(result):
@@ -76,44 +62,12 @@ def _pick_action(actions):
 
 
 @pytest.fixture
-def http_server():
-    """Starts server.py (OBGL_TRANSPORT=http) bound to a free local
-    port, OBGL_TABLE_URL left at its default (the live table at
-    localhost:9777/poker/, same as a plain non-container, stdio run
-    gets). Waits for /mcp to answer before handing back the base URL."""
-    port = _free_port()
-    env = dict(os.environ)
-    env["OBGL_TRANSPORT"] = "http"
-    env["PORT"] = str(port)
-    env["HOST"] = "127.0.0.1"
-    proc = subprocess.Popen([PYTHON, SERVER_PATH], env=env)
-    url = f"http://127.0.0.1:{port}/mcp"
-    try:
-        deadline = time.monotonic() + 10
-        while time.monotonic() < deadline:
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=b"{}",
-                    headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
-                    method="POST",
-                )
-                urllib.request.urlopen(req, timeout=1)
-                break
-            except urllib.error.HTTPError:
-                break  # server answered (even an error response means it's up)
-            except Exception:
-                time.sleep(0.2)
-        else:
-            proc.kill()
-            raise RuntimeError("server.py did not come up on /mcp within 10s")
-        yield url
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+def http_server(run_server):
+    """The MCP endpoint URL of a server.py started on a free port
+    (conftest.run_server); the table URL stays at its default, the
+    live table at localhost:9777/poker/."""
+    with run_server() as base:
+        yield f"{base}/mcp"
 
 
 @pytest.mark.asyncio

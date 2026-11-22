@@ -256,6 +256,56 @@ with the URL can crowd out other sessions by churning past that
 only access control there is. Reasonable for a v0 demo; revisit before
 this is the long-term shape.
 
+## Docs: what the service serves, and how to check it after a deploy
+
+`mcp/server.py` (HTTP mode) serves the docs from the files copied into
+the image (`README.md` and `docs/`, see the Dockerfile) three ways, so a
+client that cannot reach GitHub (claude.ai's fetcher was rate-limited
+there, stranger test 11-21) still learns to play:
+
+- `GET /` a one-paragraph landing page with links; `GET /docs/` an index.
+- `GET /docs/README.md`, `/docs/AGENTS.md`, `/docs/WAYS-TO-PLAY.md`,
+  `Content-Type: text/markdown`, the exact bytes of the repo files.
+- MCP tool `docs(name)` with name `readme`, `agents`, `ways-to-play` or
+  `rules`; the server instructions tell the agent to call `docs('agents')`
+  first.
+
+None of it touches the table, so it also works while the table is down.
+
+**Post-deploy check** (run from a checkout at the deployed sha; the
+local suite `python -m pytest mcp/test_docs.py` covers the same ground
+against a local server):
+
+1. Bytes match the sha:
+
+   ```sh
+   B=https://obgl.truemirrorgames.com
+   for f in README.md docs/AGENTS.md docs/WAYS-TO-PLAY.md; do
+     curl -fsS "$B/docs/$(basename $f)" | cmp - "$f" && echo "ok $f"
+   done
+   curl -fsSI "$B/docs/AGENTS.md" | grep -i '^content-type: text/markdown'
+   curl -fsS "$B/" | grep -c 'href="/docs/"'
+   ```
+
+2. The `docs` tool answers over the real connector (any machine with the
+   `mcp` package): connect a `Client("https://obgl.truemirrorgames.com/mcp")`
+   and call `docs` with each of the four names, then with `nope` (expect an
+   error result that lists the valid names).
+
+3. **The spec test: with GitHub unreachable, a fresh chat still learns to
+   play.** claude.ai's own fetcher cannot be firewalled from here, so
+   take GitHub out of the picture on the chat side: in a brand-new
+   claude.ai chat with web search / fetch turned off and only the OBGL
+   connector enabled, do not paste any URL and ask: "How do you play Bot
+   Poker with this connector? Then play one hand." Pass when the chat
+   (a) answers from the connector (it calls `docs('agents')`, the
+   server instructions ask it to), without any github.com fetch in its
+   tool log, (b) states the rules correctly (50 bb heads-up, stacks reset
+   each hand, the bet menu), and (c) completes a hand. Repeat once with
+   web access on and the prompt "Read https://obgl.truemirrorgames.com/docs/AGENTS.md
+   and play" to check the web path serves a fetcher too. Not run from the
+   dev box (no claude.ai, no deploy access): unverified until Flint runs it.
+
 ## Tests run / what's unverified
 
 **`go build ./...`** (`poker/engine`): clean.

@@ -33,9 +33,11 @@ WORKDIR /app
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
 COPY mcp/server.py mcp/session.py mcp/table_client.py ./mcp/
-# server.py reads obgl://docs/AGENTS.md and .../WAYS-TO-PLAY.md as
-# resources from ../docs relative to its own file -- ./docs here,
-# since server.py lives in ./mcp.
+# server.py reads the docs from ../docs and ../README.md relative to its
+# own file (./docs and ./README.md here, since server.py lives in ./mcp)
+# and serves them three ways: the obgl://docs/ resources, the docs() tool,
+# and GET /docs/*.md on the web (https://obgl.truemirrorgames.com/docs/).
+COPY README.md ./README.md
 COPY docs/ ./docs/
 
 # Go side: the table binary, its betting-tree config, and the bot data

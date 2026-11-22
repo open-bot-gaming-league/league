@@ -1,6 +1,6 @@
 # mcp/ — the Bot Poker MCP server
 
-An MCP server wrapping the Bot Poker table's HTTP API, so an agent can play through six tools. The hosted connector runs this same code; you don't need to run it yourself to play (see the [README](../README.md)).
+An MCP server wrapping the Bot Poker table's HTTP API, so an agent can play through seven tools: six wrap the table, one returns the docs. The hosted connector runs this same code; you don't need to run it yourself to play (see the [README](../README.md)).
 
 Two transports, one codebase: **stdio** (default, for Claude Desktop and local use) and **Streamable HTTP** (`OBGL_TRANSPORT=http`, what [deploy/cloudrun/](../deploy/cloudrun/) serves to claude.ai custom connectors). See `server.py`'s module docstring for how the two share one `build_server()` — the only real difference is how a `PokerSession` gets scoped to a caller.
 
@@ -8,8 +8,10 @@ Two transports, one codebase: **stdio** (default, for Claude Desktop and local u
 
 - `table_client.py` — thin HTTP client for the table API. No game logic.
 - `session.py` — hand/step bookkeeping (`PokerSession`), staleness and validation errors, `compute_score()`. No MCP or network framing; the unit tests exercise it directly.
-- `server.py` — the MCP server: six tools (`rules`, `new_session`, `state`, `act`, `next_hand`, `score`) and two resources (`obgl://docs/AGENTS.md`, `obgl://docs/WAYS-TO-PLAY.md`), over either transport.
+- `server.py` — the MCP server: seven tools (`docs`, `rules`, `new_session`, `state`, `act`, `next_hand`, `score`), two resources (`obgl://docs/AGENTS.md`, `obgl://docs/WAYS-TO-PLAY.md`), over either transport; over HTTP also the docs as web pages (`/`, `/docs/`, `/docs/*.md`).
 - `test_session.py` — unit tests (no network).
+- `conftest.py` — the `run_server` fixture: starts `server.py` over HTTP on a free port.
+- `test_docs.py` — the `/docs/*` pages (exact file bytes, content types) and the `docs()` tool. Needs no table.
 - `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
 - `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.
 
