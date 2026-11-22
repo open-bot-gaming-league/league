@@ -9,16 +9,15 @@ here:
 
 - `served.json` -- the bots-on-offer file loadBots reads (see
   `../../poker/engine/cmd/table/main.go`). `served.example.json` one
-  level up names the Milestone 1 shape (ids `turtle`, `ox`); copy it
+  level up is the served set (ids `turtle`, `ox`); copy it
   here as `served.json`, or write your own with the same fields
   (`id`, `name`, `trained`, `exploitability`, `abs`, `blueprint`;
   `note` optional) -- `loadBots` refuses a bot missing an `id`, `name`
   or `exploitability`.
-- The two bucket files and two blueprints `served.json` names (as of
-  Milestone 1: one bucket file + one blueprint per bot -- see
-  `served.example.json`). The two blueprint files are named
-  `turtle-k200-1500.bp` and `ox-k2000-1e9.bp` in `served.example.json`
-  on purpose (by bot, not by training run); the files as they come off
+- The two bucket files and two blueprints `served.json` names (one
+  bucket file + one blueprint per bot -- see `served.example.json`).
+  The two blueprint files are named `turtle-k200-1500.bp` and
+  `ox-k2000-1e9.bp` in `served.example.json` on purpose (by bot, not by training run); the files as they come off
   training have their own, more generic names and need renaming to
   match when staged here.
 

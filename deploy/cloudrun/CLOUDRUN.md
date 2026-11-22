@@ -184,7 +184,7 @@ Privacy: what an account stores is listed above.
    - Homepage URL: `https://obgl.truemirrorgames.com`
    - Authorization callback URL: `https://obgl.truemirrorgames.com/login/github/callback`
    - Generate a client secret. No scopes to configure.
-2. **Google OAuth client** in the `tmg-obgl` project:
+2. **Google OAuth client** in `PROJECT`:
    - OAuth consent screen: External; app name, support email, the
      `https://obgl.truemirrorgames.com` domain; scopes `openid` and
      `profile` only. Publish it ("In production"); otherwise only listed
@@ -220,20 +220,24 @@ collection per record kind, `oauth_<kind>`; document id = the record's
 key; fields `record` (the record as a JSON string) and `expires_at` (a
 Timestamp, on the kinds that expire). Records past `expires_at` read as
 absent. The server reads and writes documents by id only.
+`oauth_clients`, `oauth_accounts`, `oauth_table-sessions`,
+`oauth_watch-tokens` and `oauth_account-tables` never expire (no
+`expires_at`, no TTL policy). `/register` has no cap, so `oauth_clients`
+grows by one document per registration.
 
-Create, in `tmg-obgl`:
+Create, in `PROJECT`:
 
 1. Enable the Firestore API (`firestore.googleapis.com`).
 2. The database: Native mode, standard edition, id `(default)`, in or
    near the service's region (a database's location cannot be changed
    later):
-   `gcloud firestore databases create --project tmg-obgl --location REGION`.
+   `gcloud firestore databases create --project PROJECT --location REGION`.
 3. TTL policies on `expires_at` for the collections whose records
    expire:
 
    ```sh
    for c in oauth_pending oauth_codes oauth_access oauth_refresh; do
-     gcloud firestore fields ttls update expires_at --project tmg-obgl \
+     gcloud firestore fields ttls update expires_at --project PROJECT \
        --collection-group=$c --enable-ttl
    done
    ```

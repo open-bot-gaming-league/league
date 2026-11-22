@@ -5,21 +5,13 @@
 # $PORT -- Cloud Run sets this; defaults to 8080 for a local container
 # run).
 #
-# Session state ("local disk", v0 -- see CLOUDRUN.md): the table
-# server restores sessions from a hands file on boot and appends to it
-# as hands finish. That file lives under $OBGL_STATE_DIR (default
-# /state), deliberately NOT under ./table/data/: the bot data (bucket
-# files, blueprints, served.json) is baked into the image there, and
-# if that directory is ever replaced wholesale by a Cloud Run volume
-# mount (see CLOUDRUN.md's option (a2)), hands.jsonl must not be a
-# file inside that same mount unless the mount is meant to hold it --
-# keeping them on separate paths means a bot-data mount and a
-# session-state mount (or no mount at all) can be decided
-# independently, not coupled by an accident of directory layout.
-# Inside a plain container run $OBGL_STATE_DIR is genuinely local and
-# lost on the next `docker run`; on Cloud Run its persistence depends
-# on whether that path is backed by a mounted volume -- see
-# CLOUDRUN.md's comparison before relying on it.
+# Session state: the table server restores sessions from
+# $OBGL_STATE_DIR/hands.jsonl (default /state) when it starts and appends
+# to it as hands finish. The bot data (bucket files, blueprints,
+# served.json) is baked into the image under ./table/data/, a separate
+# path, so a volume mounted at $OBGL_STATE_DIR never hides it. Without a
+# mounted volume the hands file lasts as long as the container
+# (CLOUDRUN.md, "Session state").
 set -eu
 
 TABLE_ADDR=127.0.0.1:9790

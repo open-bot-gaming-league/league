@@ -6,7 +6,7 @@
 # Build from the REPO ROOT (not from this directory), so poker/engine,
 # docs/ and mcp/ are all reachable as COPY sources:
 #
-#   docker build -f deploy/cloudrun/Dockerfile -t obgl-cloudrun:v0 .
+#   docker build -f deploy/cloudrun/Dockerfile -t obgl-cloudrun .
 #
 # Precondition on the build context (data/README.md spells this out):
 # deploy/cloudrun/data/ (gitignored) must hold served.json and the bot

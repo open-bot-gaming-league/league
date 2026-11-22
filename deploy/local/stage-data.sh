@@ -1,6 +1,6 @@
 #!/bin/bash
 # stage-data.sh: the local bot-data dir (what is staged into
-# deploy/cloudrun/data/ before an image build): the four files the Milestone 1
+# deploy/cloudrun/data/ before an image build): the four files the served
 # bots need, named as served.example.json names them, plus served.json.
 # Then verifies every file against bot-data.sha256 (in this directory).
 #
@@ -39,7 +39,7 @@ ox-k2000-1e9.bp plain-k2000-1000000000.bp
 EOF
 
 # served.json is served.example.json as the repo has it: the ids, names and
-# numbers the Milestone 1 docs promise, and the file names staged above.
+# numbers the docs promise, and the file names staged above.
 cp "$EXAMPLE" "$DATA/served.json"
 
 # Every file served.json names must be staged (loadBots would fail at start).
