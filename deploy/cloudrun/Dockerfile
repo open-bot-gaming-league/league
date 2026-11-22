@@ -1,8 +1,7 @@
 # deploy/cloudrun/Dockerfile: one container for Cloud Run -- the Go
 # table server and the MCP server (Streamable HTTP mode), the MCP
-# tools calling the table on 127.0.0.1. Unbuilt as of this branch: no
-# docker on the dev box this was written on -- see CLOUDRUN.md's "what
-# is unverified". Built via Cloud Build, not from this box (no docker here).
+# tools calling the table on 127.0.0.1. CLOUDRUN.md says how to build,
+# deploy and check it.
 #
 # Build from the REPO ROOT (not from this directory), so poker/engine,
 # docs/ and mcp/ are all reachable as COPY sources:
@@ -12,7 +11,7 @@
 # Precondition on the build context (data/README.md spells this out):
 # deploy/cloudrun/data/ (gitignored) must hold served.json and the bot
 # files it names before this build runs -- see data/README.md for
-# what to stage and served.example.json for the Milestone 1 shape.
+# what to stage and served.example.json for its shape.
 
 # ---- stage 1: build the Go table server ----------------------------------
 FROM golang:1.27 AS tablebuilder

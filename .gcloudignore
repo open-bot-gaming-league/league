@@ -16,10 +16,8 @@
 # the build context (the Dockerfile's COPY would then ship an empty
 # directory, with no error at build time).
 #
-# Unverified from this box (SAFETY: gcloud is not run here) --
-# confirm with `gcloud meta list-files-for-upload` before relying on
-# this, especially that deploy/cloudrun/data/ actually shows up in
-# that list once staged.
+# Check with `gcloud meta list-files-for-upload` that the staged
+# deploy/cloudrun/data/ files are in the upload (CLOUDRUN.md, "Bot data").
 
 .gcloudignore
 .git/
