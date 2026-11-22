@@ -177,7 +177,7 @@ display name (GitHub login; Google `name`). No email is requested
 (GitHub: no scope; Google: `openid profile`). claude.ai registers itself
 through `/register`.
 
-Privacy: what an account stores, and what deleting it does, is in
+Privacy: what we keep is stated in
 [docs/PRIVACY.md](../../docs/PRIVACY.md) (served at `/docs/privacy`). To
 delete an account, see "Deleting an account" below.
 
@@ -260,7 +260,7 @@ again; the connector still works without signing in again.
 
 ### Deleting an account
 
-A person asks by email (docs/PRIVACY.md, section 6); the operator, with
+A person asks by email (the address in docs/PRIVACY.md); the operator, with
 the project's credentials, deletes. The account id is `<provider>:<id>`:
 `github:<numeric user id>`, `google:<sub>`, or `guest:<random>`. We hold
 no email, so find it in the Firestore console's data view: open
@@ -301,9 +301,9 @@ Google makes a new, empty account under the same id.
 Not covered: the hands. They are in the game server's `hands.jsonl` on
 the container's disk (Session state, above), which nothing prunes by
 account; a restart of the service clears it. If `/state` is ever moved to
-a Cloud Storage volume, hands then outlive restarts and docs/PRIVACY.md
-section 4 stops being true: change it first. Cloud Run's request logs
-are Google's, kept for its default retention.
+a Cloud Storage volume, hands then outlive restarts, which changes
+what we keep: check that docs/PRIVACY.md still holds before doing it.
+Cloud Run's request logs are Google's, kept for its default retention.
 
 ### Check
 
