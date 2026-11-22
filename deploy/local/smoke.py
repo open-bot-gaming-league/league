@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """smoke.py: prove a running OBGL stack answers, over HTTP only.
 
-  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require version,docs]
+  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs]
 
 Needs the `mcp` package (run it with the venv python run.sh built, or any
 venv with mcp==2.3.0). Checks, printing one line each:
+  oauth    if the server advertises OAuth (GET /.well-known/oauth-protected-resource/mcp):
+           /mcp without a token is 401, then a guest token through the real flow --
+           dynamic registration, /authorize with PKCE, the sign-in page, the guest
+           button, /token (DIR/mcp/oauth_testing.py) -- used by every mcp step below
   mcp      raw JSON-RPC `initialize` POST to /mcp (shows the protocol version
            and the Mcp-Session-Id header), then, with the MCP client:
            new_session(turtle) and one act() on its first legal action
@@ -31,7 +35,10 @@ def get(url):
         return e.code, e.headers, e.read()
 
 
-def raw_initialize(base):
+def raw_initialize(base, token=None):
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         base + "/mcp",
         data=json.dumps({
@@ -39,7 +46,7 @@ def raw_initialize(base):
             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                        "clientInfo": {"name": "obgl-local-smoke", "version": "0"}},
         }).encode(),
-        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as r:
@@ -51,14 +58,45 @@ def raw_initialize(base):
     return result["protocolVersion"], result["serverInfo"]["name"], sid
 
 
-async def play(base):
-    from mcp import Client
+def guest_token(base, repo):
+    """A guest access token through the server's real OAuth flow, or None
+    if this sha has no OAuth (no protected-resource metadata)."""
+    status, _, body = get(base + "/.well-known/oauth-protected-resource/mcp")
+    if status == 404:
+        return None
+    prm = json.loads(body)
+    try:
+        raw_initialize(base)
+        raise AssertionError("OAuth is advertised but /mcp answered without a token")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401, e.code
+        print(f"oauth    /mcp without a token: 401, WWW-Authenticate {e.headers.get('www-authenticate')}")
+    sys.path.insert(0, os.path.join(repo, "mcp"))
+    import oauth_testing
 
+    client, tok = asyncio.run(oauth_testing.guest_tokens(base))
+    print(f"oauth    guest sign-in: resource {prm['resource']}, client {client['client_id']} registered, "
+          f"code -> token {tok['access_token'][:12]}... (expires_in {tok['expires_in']}, refresh token "
+          f"{'yes' if tok.get('refresh_token') else 'no'})")
+    return tok["access_token"]
+
+
+def _client(base, token):
+    if token is None:
+        from mcp import Client
+
+        return Client(base + "/mcp")
+    import oauth_testing
+
+    return oauth_testing.mcp_client(base + "/mcp", token)
+
+
+async def play(base, token):
     def payload(res):
         assert not res.is_error, res.content
         return res.structured_content if res.structured_content is not None else json.loads(res.content[0].text)
 
-    async with Client(base + "/mcp") as c:
+    async with _client(base, token) as c:
         rules = payload(await c.call_tool("rules", {}))
         bots = [b["id"] for b in rules["bots"]]
         st = payload(await c.call_tool("new_session", {"opponent": "turtle", "seat": "alternate"}))
@@ -86,9 +124,13 @@ def main():
         if ok is False or (ok is None and name in required):
             failed = True
 
-    proto, server, sid = raw_initialize(base)
-    print(f"mcp      initialize: protocol {proto}, server {server!r}, Mcp-Session-Id {sid}")
-    asyncio.run(play(base))
+    token = guest_token(base, a.repo)
+    if token is None:
+        check("oauth", None, "GET /.well-known/oauth-protected-resource/mcp")
+    proto, server, sid = raw_initialize(base, token)
+    print(f"mcp      initialize: protocol {proto}, server {server!r}, Mcp-Session-Id {sid}"
+          f"{', with the guest bearer token' if token else ''}")
+    asyncio.run(play(base, token))
 
     if a.sha:
         status, _, body = get(base + "/version")

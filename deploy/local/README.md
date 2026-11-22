@@ -27,7 +27,8 @@ image tree once per sha under `$OBGL_LOCAL_ROOT/trees/<sha>/` by running
 anything else, so an image change cannot silently go missing locally.
 
 Files: `run.sh`, `common.sh` (env handling), `image.py` (Dockerfile emulator), `stage-data.sh` (bot data),
-`bot-data.sha256` (manifest), `smoke.py` (HTTP proof).
+`bot-data.sha256` (manifest), `smoke.py` (HTTP proof; signs in as a guest through the real
+OAuth flow when the server advertises OAuth).
 
 ## Bot data and the manifest
 
@@ -58,6 +59,10 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
   this was written on already holds 9790. `entrypoint.sh` hard-codes `TABLE_ADDR=127.0.0.1:9790`, so run.sh
   `sed`s that one line in the per-sha copy (it must match exactly once, or run.sh stops).
   `OBGL_TABLE_URL` follows, since the entrypoint exports it from `TABLE_ADDR`.
+- `OBGL_PUBLIC_URL=http://127.0.0.1:<port>`, not the image's `https://obgl.truemirrorgames.com`:
+  it is the OAuth issuer and token audience, so it must be the URL clients actually use.
+  No GitHub/Google credentials are set, so the sign-in page offers guest only; the OAuth
+  file store is `<state dir>/oauth.json`, fresh per run (tokens do not outlive a run).
 - `HOST=127.0.0.1` (server.py defaults to 0.0.0.0, which is what Cloud Run gets). No
   TLS, no Cloud Run front end: no HTTPS termination or `X-Forwarded-*`, request timeout,
   concurrency limit, scale-to-zero/cold start, or instance limit.

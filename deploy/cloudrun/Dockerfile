@@ -31,7 +31,9 @@ WORKDIR /app
 # (OBGL_TRANSPORT=http, set below) -- same code mcp/ ships for stdio.
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
-COPY mcp/server.py mcp/session.py mcp/table_client.py ./mcp/
+COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py ./mcp/
+# OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).
+COPY mcp/oauth/ ./mcp/oauth/
 # server.py reads the docs from ../docs and ../README.md relative to its
 # own file (./docs and ./README.md here, since server.py lives in ./mcp)
 # and serves them three ways: the obgl://docs/ resources, the docs() tool,
@@ -59,6 +61,14 @@ ENV OBGL_TRANSPORT=http
 # the baked-in bot data under ./table/data/ -- see entrypoint.sh and
 # CLOUDRUN.md's "Session state" section for why.
 ENV OBGL_STATE_DIR=/state
+# OAuth: the public origin is the token issuer and turns OAuth on (/mcp
+# then needs a bearer token; the sign-in page offers GitHub, Google and
+# guest). Tokens, clients and accounts go in the file store,
+# $OBGL_STATE_DIR/oauth.json. The GitHub/Google app credentials
+# are NOT baked in: the deploy sets OBGL_GITHUB_CLIENT_ID/_SECRET and
+# OBGL_GOOGLE_CLIENT_ID/_SECRET from Secret Manager (CLOUDRUN.md).
+ENV OBGL_PUBLIC_URL=https://obgl.truemirrorgames.com
+ENV OBGL_AUTH_STORE=file
 # The git sha this image was built from, served at GET /version on the
 # MCP server (mcp/server.py). Pass it at build time:
 #   docker build --build-arg OBGL_GIT_SHA=$(git rev-parse HEAD) ...

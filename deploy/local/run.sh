@@ -83,6 +83,10 @@ cmp -s "$DATA/served.json" "$TREE/context/deploy/cloudrun/served.example.json" \
 STATE=$ROOT/state/$SHA-$(date -u +%Y%m%dT%H%M%SZ)   # fresh per run, like a new instance
 mkdir -p "$STATE"
 export PORT HOST=127.0.0.1 OBGL_STATE_DIR=$STATE
+# OAuth's issuer is the URL clients reach us at: here, not the image's public
+# origin (a sha without OAuth ignores it). The image's file store lands in
+# $STATE, so tokens last one run, like a new instance's.
+export OBGL_PUBLIC_URL=http://127.0.0.1:$PORT
 # The image only has OBGL_GIT_SHA if its Dockerfile has the ARG (the /version commit).
 echo "run.sh: $SHA on 127.0.0.1:$PORT (table 127.0.0.1:$TABLE_PORT, state $STATE)"
 cd "$IMAGE_WORKDIR"

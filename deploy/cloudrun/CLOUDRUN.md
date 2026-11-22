@@ -19,7 +19,7 @@ the same image tree on a machine without Docker, see
   `deploy/cloudrun/data/`, which git ignores and the build needs.
 
 The service answers on `/mcp` (the connector), `/` and `/docs/` (see
-"Docs" below) and `/version`.
+"Docs" below), `/version`, and the OAuth routes (see "OAuth" below).
 
 ## How the MCP server handles connections
 
@@ -90,7 +90,8 @@ at `/state` does not hide it.
   the mount behave before relying on it.
 
 Either way keep `--max-instances 1`: sessions live in one table
-process, and the hands file has one writer.
+process, and the hands file and the OAuth file store (`/state/oauth.json`)
+each have one writer.
 
 ## Build and deploy
 
@@ -113,7 +114,8 @@ gcloud run deploy obgl-bot-poker \
   --port 8080 \
   --memory 2Gi --cpu 1 --cpu-boost \
   --min-instances 0 --max-instances 1 --concurrency 80 \
-  --allow-unauthenticated
+  --allow-unauthenticated \
+  --set-secrets OBGL_GITHUB_CLIENT_ID=obgl-github-client-id:latest,OBGL_GITHUB_CLIENT_SECRET=obgl-github-client-secret:latest,OBGL_GOOGLE_CLIENT_ID=obgl-google-client-id:latest,OBGL_GOOGLE_CLIENT_SECRET=obgl-google-client-secret:latest
 ```
 
 Without Docker, Cloud Build can run the same `docker build` step on an
@@ -125,6 +127,10 @@ upload of the repo root (`gcloud builds submit`).
   files are first read.
 - `--concurrency 80`: the Cloud Run default. Connections to the one
   instance are kept apart by `Mcp-Session-Id`.
+- `--allow-unauthenticated`: no Cloud Run IAM check; the service signs
+  users in itself ("Access", "OAuth").
+- `--set-secrets`: the GitHub and Google OAuth apps' credentials
+  ("OAuth" below). Without them the sign-in page offers guest only.
 
 To check a revision before it takes traffic, add `--no-traffic --tag
 cand` to the deploy, run the post-deploy check against the tagged URL
@@ -142,13 +148,91 @@ gcloud run services update-traffic obgl-bot-poker --project PROJECT --region REG
 
 ## Access
 
-`--allow-unauthenticated`: there is no login. Anyone who has the URL
-can call the MCP endpoint, through claude.ai or directly. What bounds
-it: the game is play money; `--max-instances 1` caps compute at one
-instance; the table keeps at most 200 sessions and drops the oldest
-when a new one would exceed that (`main.go`, `dropOldest`). What does
-not: a caller who opens sessions fast enough pushes other people's
-sessions out of that 200.
+`--allow-unauthenticated` turns off Cloud Run's IAM check: claude.ai and
+browsers reach the service without a Google identity. With
+`OBGL_PUBLIC_URL` set (the image sets it), `/mcp` answers 401 without a
+bearer token from the service's own OAuth server ("OAuth" below). Guest
+sign-in is one click, and client registration (`/register`) is open, as
+claude.ai needs it. What bounds use: the game is play money;
+`--max-instances 1` caps compute at one instance; the table keeps at
+most 200 sessions and drops the oldest when a new one would exceed that
+(`main.go`, `dropOldest`). What does not: a caller who opens sessions
+fast enough pushes other people's sessions out of that 200, and the
+number of registered clients has no cap.
+
+## OAuth
+
+The MCP server is the OAuth authorization server for the connector
+(code: `mcp/oauth/`, start at `__init__.py`). Routes:
+`/.well-known/oauth-authorization-server`,
+`/.well-known/oauth-protected-resource/mcp`, `/register`, `/authorize`,
+`/token`, `/revoke`, and the sign-in page `/login` with **Sign in with
+GitHub**, **Sign in with Google** (each shown when configured),
+**Continue as guest** and **Cancel**. GitHub and Google only identify
+the person; the service issues its own tokens (access 1 h, refresh 30
+days, rotated on refresh). An account is provider + provider user id +
+display name (GitHub login; Google `name`). No email is requested
+(GitHub: no scope; Google: `openid profile`). claude.ai registers itself
+through `/register`.
+
+Privacy: what an account stores is listed above.
+
+### Create
+
+1. **GitHub OAuth App** under the `open-bot-gaming-league` org (Settings >
+   Developer settings > OAuth Apps > New; an OAuth App, not a GitHub App):
+   - Homepage URL: `https://obgl.truemirrorgames.com`
+   - Authorization callback URL: `https://obgl.truemirrorgames.com/login/github/callback`
+   - Generate a client secret. No scopes to configure.
+2. **Google OAuth client** in the `tmg-obgl` project:
+   - OAuth consent screen: External; app name, support email, the
+     `https://obgl.truemirrorgames.com` domain; scopes `openid` and
+     `profile` only. Publish it ("In production"); otherwise only listed
+     test users can sign in.
+   - Credentials > Create OAuth client ID > Web application; Authorized
+     redirect URI: `https://obgl.truemirrorgames.com/login/google/callback`.
+3. **Secret Manager** (same project as the service), one secret each:
+   `obgl-github-client-id`, `obgl-github-client-secret`,
+   `obgl-google-client-id`, `obgl-google-client-secret`. Grant the
+   service account `roles/secretmanager.secretAccessor` on them.
+4. **Deploy** with `--set-secrets` as in "Build and deploy".
+
+### Environment
+
+| name | set by | meaning |
+|---|---|---|
+| `OBGL_PUBLIC_URL` | Dockerfile: `https://obgl.truemirrorgames.com` | the issuer and token audience (`<it>/mcp`); set = OAuth on. `--update-env-vars OBGL_PUBLIC_URL=` turns OAuth off without a rebuild |
+| `OBGL_AUTH_STORE` | Dockerfile: `file` | `memory` or `file` |
+| `OBGL_AUTH_FILE` | unset | the file store's path; default `$OBGL_STATE_DIR/oauth.json` (`/state/oauth.json`) |
+| `OBGL_GITHUB_CLIENT_ID`, `OBGL_GITHUB_CLIENT_SECRET` | Secret Manager | both or neither; neither = no GitHub button |
+| `OBGL_GOOGLE_CLIENT_ID`, `OBGL_GOOGLE_CLIENT_SECRET` | Secret Manager | same, for Google |
+| `OBGL_GITHUB_REDIRECT_URI`, `OBGL_GOOGLE_REDIRECT_URI` | unset | default `<OBGL_PUBLIC_URL>/login/<github\|google>/callback`; the path must be exactly that |
+
+### Storage
+
+The image uses the file store at `/state/oauth.json`: registered
+clients, pending sign-ins, codes, tokens (by sha256), accounts. Tokens
+outlast a cold start only when `/state` is the Cloud Storage volume
+("Session state"); on the container's own disk a new instance has no
+tokens and users sign in again.
+
+### Check
+
+```sh
+B=https://obgl.truemirrorgames.com
+curl -fsS $B/.well-known/oauth-authorization-server   # issuer $B, endpoints under $B
+curl -fsS $B/.well-known/oauth-protected-resource/mcp # resource $B/mcp
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp  # 401
+# A guest sign-in through the OAuth flow, then initialize + new_session + act
+# with its token (registers one client with a loopback redirect URI):
+python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs
+```
+
+Then a person, in claude.ai with a fresh account: add the connector, take
+the OAuth option, sign in with GitHub, then with Google, then as a
+guest; each plays a hand. With `/state` on the Cloud Storage volume,
+deploy the same image again; the connector still works without signing
+in again.
 
 ## Docs: what the service serves
 
@@ -188,11 +272,10 @@ server.)
    curl -fsS "$B/" | grep -c 'href="/docs/"'
    ```
 
-3. The connector answers (any machine with the `mcp` package): connect
-   a `Client("https://obgl.truemirrorgames.com/mcp")`, call `docs` with
-   each of the four names, then with `nope` (expect an error result
-   that lists the valid names), then `new_session` (expect a dealt
-   hand).
+3. The connector answers: run `deploy/local/smoke.py` as in "OAuth",
+   "Check". With the guest token it gets, a `Client` on `$B/mcp` can
+   call `docs` with each of the four names, then with `nope` (expect an
+   error result that lists the valid names).
 
 4. A person, in claude.ai: in a brand-new chat with web search and
    fetch turned off and only the OBGL connector enabled, paste no URL
