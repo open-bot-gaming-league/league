@@ -78,6 +78,7 @@ async def test_play_watch_take_over_and_tag_in_in_a_browser(site):
         browser = Browser(site.base, s["watch_url"])
         try:
             await browser.do("PLAY")  # its own session, in Play
+            await browser.do("RAISE")  # a bet off the menu, through the slider, at phone width
             assert await browser.do("WATCH") == [str(s["hand"]), str(s["step"])]
             # Every move the agent makes shows up on the page, in order.
             for _ in range(6):

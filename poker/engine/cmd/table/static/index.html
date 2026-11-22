@@ -28,6 +28,13 @@
   </div>
   <div id="bar">
     <div id="actions"></div>
+    <div id="sizer" hidden>
+      <div id="presets"><button data-preset="0.5">1/2 pot</button><button data-preset="0.75">3/4 pot</button><button data-preset="1">Pot</button><button data-preset="allin">All-in</button></div>
+      <input id="size-range" type="range" step="1" aria-label="Bet or raise to, in chips">
+      <input id="size-amount" type="number" step="1" inputmode="numeric" aria-label="Bet or raise to, in chips">
+      <button id="size-go" class="bet"><span></span><kbd>R</kbd></button>
+      <span id="size-note"></span>
+    </div>
     <div id="next-wrap" hidden><span id="outcome"></span><button id="next">Next hand <kbd>N</kbd></button></div>
     <div id="watch-bar" hidden><span id="watch-status"></span><button id="take-over">Take over <kbd>T</kbd></button></div>
     <div id="error" role="alert"></div>
@@ -67,7 +74,7 @@
     <div class="row play-only" id="opp-row" hidden>Opponent (from the next hand): <select id="opponent"></select></div>
     <div class="row play-only"><button id="new-session">New session</button></div>
     <div class="dim small" id="menu"></div>
-    <div class="dim small play-only" id="keys">Keys: F fold, C check/call, 1&ndash;3 bet sizes, A all-in, N next hand.</div>
+    <div class="dim small play-only" id="keys">Keys: F fold, C check/call, 1&ndash;3 bet sizes, A all-in, R bet or raise the slider&rsquo;s amount (Enter in its box), N next hand.</div>
   </section>
 </aside>
 </body>

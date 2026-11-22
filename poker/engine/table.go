@@ -136,8 +136,9 @@ func (h *TableHand) Put(seat int) int { return h.g.Config.contributed(&h.st, sea
 // Pot is both seats' chips in, uncalled bets included.
 func (h *TableHand) Pot() int { return h.st.pot }
 
-// inRound is the chips a seat has put in during this betting round.
-func (h *TableHand) inRound(seat int) int { return h.Put(seat) - h.roundStart[seat] }
+// InRound is the chips a seat has put in during this betting round,
+// blinds included: the base of a "raise to" amount.
+func (h *TableHand) InRound(seat int) int { return h.Put(seat) - h.roundStart[seat] }
 
 // Legal is what the seat to act may do; the zero TableLegal when the
 // hand is over.
@@ -146,12 +147,12 @@ func (h *TableHand) Legal() TableLegal {
 		return TableLegal{}
 	}
 	c, st, me := h.g.Config, &h.st, h.st.toAct
-	l := TableLegal{Fold: c.canFold(st), Raise: h.inRound(1-me) > 0}
+	l := TableLegal{Fold: c.canFold(st), Raise: h.InRound(1-me) > 0}
 	if c.canCall(st) {
 		l.Check, l.Call = st.call == 0, st.call
 	}
 	if minExtra, maxExtra, ok := c.wagerRange(st); ok {
-		base := h.inRound(me) + st.call
+		base := h.InRound(me) + st.call
 		l.Wager, l.MinTo, l.MaxTo = true, base+min(minExtra, maxExtra), base+maxExtra
 	}
 	return l
@@ -168,7 +169,7 @@ func (h *TableHand) option(act Action) TableOption {
 		o.Cost = st.call + int(act.Amount)
 		o.PotFraction = float64(act.Amount) / float64(st.pot+st.call)
 	}
-	o.To = h.inRound(me) + o.Cost
+	o.To = h.InRound(me) + o.Cost
 	return o
 }
 
@@ -232,7 +233,7 @@ func (h *TableHand) Play(kind ActionKind, to int) error {
 		case to < l.MinTo || to > l.MaxTo:
 			return fmt.Errorf("engine: a wager here goes to %d-%d chips (all-in %d), not %d", l.MinTo, l.MaxTo, l.MaxTo, to)
 		}
-		act.Amount, act.AllIn = int32(to-h.inRound(st.toAct)-st.call), to == l.MaxTo
+		act.Amount, act.AllIn = int32(to-h.InRound(st.toAct)-st.call), to == l.MaxTo
 	default:
 		return fmt.Errorf("engine: no action kind %d", kind)
 	}

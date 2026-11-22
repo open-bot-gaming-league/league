@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -307,6 +308,19 @@ func TestTableAnySize(t *testing.T) {
 		}
 		if (l.Wager != "") != (l.MaxTo > 0) || l.MinTo > l.MaxTo || l.MaxTo > st.You.Put+st.You.Stack {
 			t.Fatalf("hand %d: legal %+v with %d behind", st.Hand, l, st.You.Stack)
+		}
+		// inRound is where "raise to" counts from: a call adds what the bot is
+		// ahead by, and each menu bet is to inRound + call + its pot fraction of
+		// the pot after calling (how the page prices its pot-fraction presets).
+		if st.You.InRound != h.InRound(se.seat) || st.Bot.InRound != h.InRound(1-se.seat) ||
+			l.Call > 0 && l.Wager != "" && st.You.InRound+l.Call != st.Bot.InRound {
+			t.Fatalf("hand %d: in round you %d, bot %d, call %d", st.Hand, st.You.InRound, st.Bot.InRound, l.Call)
+		}
+		for _, o := range h.Options() {
+			want := float64(st.You.InRound+l.Call) + o.PotFraction*float64(st.Pot+l.Call)
+			if o.Kind == engine.ActBet && math.Abs(float64(o.To)-want) > 0.5 {
+				t.Fatalf("hand %d: menu bet to %d, pot fraction %.3f prices it at %.1f", st.Hand, o.To, o.PotFraction, want)
+			}
 		}
 		send := func(b any) int { return do(t, ts, "POST", "/api/act", b, nil) }
 		body := func(kind string, amount *int) moveBody { return moveBody{session, st.Hand, st.Step, kind, amount} }

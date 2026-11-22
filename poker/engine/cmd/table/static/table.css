@@ -46,7 +46,7 @@ main{display:grid;grid-template-rows:1fr auto;min-height:0;min-width:0;padding:.
 .rm .seat .said.pop{animation:none}
 
 /* the action bar */
-#bar{min-height:4.4rem;padding:.6rem 0 0;display:flex;flex-direction:column;gap:.3rem}
+#bar{min-height:7.8rem;padding:.6rem 0 0;display:flex;flex-direction:column;gap:.3rem}
 #actions,#next-wrap,#watch-bar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:center}
 #next-wrap[hidden]{display:none}
 #watch-status{font-size:1.05rem;color:var(--glow)}
@@ -65,6 +65,16 @@ kbd{font:700 .75em "Liberation Mono",monospace;background:#0004;border:1px solid
 #next{background:#2f5c86;border-color:#4a7aa6;font-size:1.1rem}
 #error{color:var(--neg);text-align:center;min-height:0}
 #error:empty{display:none}
+/* the bet slider, under the menu (#bar's min-height keeps room for both, so the felt does not jump at each decision) */
+#sizer{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;justify-content:center}
+#sizer[hidden]{display:none}
+#presets{display:flex;gap:.3rem}
+#presets button{padding:.35rem .6rem}
+#presets button.on{border-color:var(--glow);color:var(--glow)}
+#size-range{flex:1 1 12rem;min-width:8rem;max-width:26rem;accent-color:#a07a30}
+#size-amount{width:6.5em;font:inherit;padding:.4rem;background:#1b1f22;color:var(--txt);border:1px solid var(--line);border-radius:.35rem}
+#size-go{font-size:1.1rem;padding:.5rem .9rem;display:flex;gap:.5rem;align-items:center;background:#7a5a1e;border-color:#a07a30}
+#size-note{color:var(--dim);font-size:.85rem;min-width:9em}
 
 /* the side panel */
 #side{background:var(--panel);border-left:1px solid var(--line);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.7rem;min-height:0;overflow:hidden;font-size:.95rem}
@@ -106,4 +116,6 @@ body.busy #skip{border-color:var(--glow)}
 /* short screens (phone landscape): no keyboard, little height */
 @media (max-height:500px){ main{padding:.3rem} #felt{border-radius:1rem} #side{padding:.4rem .6rem;gap:.4rem} #side h1{font-size:1rem}
   kbd,#keys,#menu{display:none} #controls{gap:.25rem} }
+/* narrow screens (phone portrait): the slider gets its own row, and bigger targets for a thumb */
+@media (max-width:600px){ #size-range{flex-basis:100%;max-width:none;height:2rem} #sizer button{padding:.6rem .8rem} }
 

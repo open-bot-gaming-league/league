@@ -34,8 +34,9 @@ A state:
   "opponent": "cfrbr",         // the bot's id in this hand (see api/info)
   "seat": "big blind",         // yours in this hand
   "round": "flop",             // "before the flop", "flop", "turn", "river", "showdown"
-  "you": {"cards": ["As","Kd"], "stack": 4700, "put": 300, "holds": "two pair"},
-  "bot": {"stack": 4700, "put": 300},   // "cards" and "holds" only after a showdown
+  "you": {"cards": ["As","Kd"], "stack": 4700, "put": 300, "inRound": 0, "holds": "two pair"},
+  "bot": {"stack": 4700, "put": 300, "inRound": 0},   // "cards" and "holds" only after a showdown;
+                               // put: chips in the pot this hand; inRound: chips in this betting round, blinds included
   "board": ["7c","9d","Kh"],   // what is visible: 0, 3, 4 or 5 cards (all 5 at a showdown, also after an all-in)
   "pot": 600,                  // you.put + bot.put
   "over": false,
@@ -132,6 +133,15 @@ Notes for a page:
   (this server alone) it is the page described here. The extra ids it
   uses: `#watch-bar` (`#watch-status`, `#take-over`), `#league`
   (`#account-name`, `#sign-out`, `#tag-in`), `#you-name`.
+- The page always sends the `{kind, amount}` form of `api/act`: a menu
+  button its own kind and amount, the bet slider (`#sizer`: presets
+  `#presets button[data-preset]` = 0.5, 0.75, 1 or `allin`, `#size-range`,
+  the number box `#size-amount`, the button `#size-go`, key R) `legal.wager`
+  and any amount from `legal.minTo` to `legal.maxTo`. A preset's amount is
+  `you.inRound + call + f * (pot + call)`, clamped to that range: the
+  fraction f of the pot after calling, counted from where a call leaves
+  you, the way the menu's sizes are. The slider shows only when the range
+  has more than one amount.
 - `scripts/table_browser_test.py` drives the page. It relies on:
   `#actions button.<kind>` (with `data-key`, the shortcut) for the action
   buttons, `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,

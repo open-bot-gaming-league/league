@@ -186,7 +186,7 @@ func (v *TreeView) Play(h *TableHand, a int) error {
 		if !act.AllIn {
 			frac := float64(act.Amount) / float64(v.st.pot+v.st.call)
 			extra := int(math.Round(frac * float64(h.st.pot+h.st.call)))
-			to = min(max(h.inRound(h.st.toAct)+h.st.call+extra, l.MinTo), l.MaxTo)
+			to = min(max(h.InRound(h.st.toAct)+h.st.call+extra, l.MinTo), l.MaxTo)
 		}
 	}
 	if err := h.Play(kind, to); err != nil {

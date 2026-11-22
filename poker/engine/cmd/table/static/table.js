@@ -12,7 +12,10 @@
    session the user owns, polled about once a second; each move is animated as it lands. Every state says
    who is in control (`control`): the mode follows it. Take over (Watch -> Play) and Tag in my agent (Play ->
    the user's agent, which claims it over MCP) switch it. On the bare table (no `league`) it is Play only,
-   as before. */
+   as before.
+
+   On your turn the menu's buttons are shortcuts; the bet slider under them (presets, a range, a number box)
+   bets or raises any legal amount (API.md "Bet sizes"). */
 import { Motion, cardElement } from './cardmotion.js';
 
 const $ = id => document.getElementById(id);
@@ -281,7 +284,9 @@ function ui() {
   document.body.classList.toggle('watching', mode === 'watch');
   showControl();
   $('next-wrap').hidden = !(ready && st.over && mode === 'play');
-  if (!ready || st.over || mode === 'watch') return;
+  const deciding = ready && !st.over && mode === 'play';
+  sizer(deciding);
+  if (!deciding) return;
   let n = 0;
   for (const a of st.actions) {
     const b = document.createElement('button');
@@ -289,11 +294,54 @@ function ui() {
     const key = a.kind === 'bet' ? String(++n) : KEYS_OF[a.kind];
     b.dataset.key = key;
     b.innerHTML = `<span></span><kbd>${key}</kbd>`; b.firstChild.textContent = a.label;
-    b.onclick = () => act(a.index);
+    b.onclick = () => act(a.kind === 'bet' ? { kind: 'bet', amount: a.amount } : { kind: a.kind });
     bar.append(b);
   }
 }
 M.onIdle = ui;
+
+/* ---------- the bet slider: any legal size ---------- */
+// Amounts are "raise to" chips (API.md "Bet sizes"): any whole number from legal.minTo to legal.maxTo. The
+// menu buttons above stay as shortcuts. Presets are fractions of the pot after calling, counted from what
+// you have in this round plus the call, as the menu's own sizes and the bots' translation count them.
+const toLegal = n => Math.min(st.legal.maxTo, Math.max(st.legal.minTo, Math.round(n)));
+function potTo(f) {
+  const call = st.legal.call || 0;
+  return toLegal(st.you.inRound + call + f * (st.pot + call));
+}
+const presetTo = p => p === 'allin' ? st.legal.maxTo : potTo(+p);
+let sizedFor = null;                              // the decision the sizer was set for: re-renders keep the amount
+function sizer(deciding) {
+  const l = deciding && st.legal, show = !!(l && l.wager && l.minTo < l.maxTo);   // minTo == maxTo: only all-in
+  $('sizer').hidden = !show;
+  if (!show) return;
+  const at = [st.session, st.hand, st.step].join(':');
+  if (at === sizedFor) return;
+  sizedFor = at;
+  for (const el of [$('size-range'), $('size-amount')]) { el.min = l.minTo; el.max = l.maxTo; }
+  setSize(l.minTo);
+}
+function setSize(n, typing = false) {               // typing: leave the number box as typed
+  const l = st.legal, call = l.call || 0;
+  n = toLegal(n);
+  $('size-range').value = n;
+  if (!typing) $('size-amount').value = n;
+  $('size-go').firstChild.textContent = (l.wager === 'raise' ? 'Raise to ' : 'Bet ') + chips(n);
+  const f = (n - st.you.inRound - call) / (st.pot + call);
+  $('size-note').textContent = `${bb(n)} bb, ${f.toLocaleString('en-US', { maximumFractionDigits: 2 })}x pot`;
+  for (const b of document.querySelectorAll('#presets button')) b.classList.toggle('on', presetTo(b.dataset.preset) === n);
+}
+function sizedBet() {
+  const n = toLegal(+$('size-amount').value || st.legal.minTo);
+  setSize(n);
+  act({ kind: st.legal.wager, amount: n });
+}
+for (const b of document.querySelectorAll('#presets button')) b.onclick = () => setSize(presetTo(b.dataset.preset));
+$('size-range').oninput = e => setSize(+e.target.value);
+$('size-amount').oninput = e => { if (e.target.value !== '') setSize(+e.target.value, true); };
+$('size-amount').onchange = e => setSize(+e.target.value || st.legal.minTo);
+for (const el of [$('size-range'), $('size-amount')]) el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); sizedBet(); } });
+$('size-go').onclick = sizedBet;
 // The score from the hands shown, so it never runs ahead of the table: all hands, and per opponent when
 // the session has met more than one. bb/100 carries its standard error; a few hundred hands are noise.
 function score(recs) {
@@ -387,7 +435,7 @@ async function send(fn, whole) {
 }
 const seatChoice = () => (document.querySelector('input[name=seat]:checked') || { value: 'alternate' }).value;
 const choice = () => ({ seat: seatChoice(), opponent: $('opponent').value || undefined });   // both apply from the next hand dealt
-const act = index => send(() => call('POST', 'api/act', { session: st.session, hand: st.hand, step: st.step, action: index }));
+const act = move => send(() => call('POST', 'api/act', { session: st.session, hand: st.hand, step: st.step, ...move }));   // move: {kind, amount}
 const nextHand = () => { if (st && st.over) send(() => call('POST', 'api/next', { session: st.session, hand: st.hand, ...choice() })); };
 
 /* ---------- the league: who is in control, Watch and Play, the hand-overs ---------- */
@@ -475,10 +523,11 @@ document.addEventListener('keydown', e => {
   if (k === 'ESCAPE') { skip(); return; }
   if (mode === 'watch') { if (k === 'T') { e.preventDefault(); takeOver(); } return; }
   if (st && st.over && (k === 'ENTER' || k === 'N' || k === ' ')) { e.preventDefault(); nextHand(); return; }
+  if (k === 'R' && !$('sizer').hidden) { e.preventDefault(); sizedBet(); return; }
   const b = [...document.querySelectorAll('#actions button')].find(b => b.dataset.key === k);
   if (b) { e.preventDefault(); b.click(); }
 });
-addEventListener('resize', layout);
+new ResizeObserver(layout).observe(felt);         // the window, and the bar growing when the bet slider shows
 
 /* ---------- boot ---------- */
 (async function start() {

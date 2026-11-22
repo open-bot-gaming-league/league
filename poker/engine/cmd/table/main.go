@@ -621,10 +621,11 @@ type state struct {
 }
 
 type player struct {
-	Cards []string `json:"cards,omitempty"`
-	Stack int      `json:"stack"` // chips behind
-	Put   int      `json:"put"`   // chips in the pot
-	Holds string   `json:"holds,omitempty"`
+	Cards   []string `json:"cards,omitempty"`
+	Stack   int      `json:"stack"`   // chips behind
+	Put     int      `json:"put"`     // chips in the pot
+	InRound int      `json:"inRound"` // chips in this betting round, blinds included: where "raise to" amounts count from
+	Holds   string   `json:"holds,omitempty"`
 }
 
 // event is one action of the hand as the page animates it.
@@ -699,8 +700,8 @@ func (s *server) state(se *session, all bool) state {
 	bot := 1 - se.seat
 	st := state{Session: se.id, Hand: se.number, Step: len(h.Log), SeatMode: se.seatMode, Opponent: se.opponent.ID, Seat: seatName(se.seat),
 		Round: roundNames[h.Round()], Board: names(h.Board()), Pot: h.Put(0) + h.Put(1), Over: h.Over(),
-		You:   player{Cards: names(h.Hole(se.seat)), Stack: s.g.Stack() - h.Put(se.seat), Put: h.Put(se.seat)},
-		Bot:   player{Stack: s.g.Stack() - h.Put(bot), Put: h.Put(bot)},
+		You:   player{Cards: names(h.Hole(se.seat)), Stack: s.g.Stack() - h.Put(se.seat), Put: h.Put(se.seat), InRound: h.InRound(se.seat)},
+		Bot:   player{Stack: s.g.Stack() - h.Put(bot), Put: h.Put(bot), InRound: h.InRound(bot)},
 		Lines: s.lines(se), Events: s.events(se), Actions: []button{}}
 	if h.Showdown() {
 		st.Round = "showdown"

@@ -8,7 +8,10 @@ Reads commands from stdin, one per line, and answers each with one line
 on stdout ("OK ..." or "FAIL ..."):
 
     PLAY             sign in at /table/ (GitHub), play one hand by clicking, check the history
-    WATCH            open the watch link; the table shows the agent's session, no action buttons
+    RAISE            at phone width, in Play: price the Pot preset from the state, then type an
+                     amount no menu button offers into the bet slider's box and bet it; the
+                     table's log shows that amount; answer "OK <amount>"
+    WATCH            open the watch link; the table shows the agent's session, no action buttons or slider
     EXPECT <h> <s>   within 2 s the page shows hand h at step s, and the table settles
     TAKEOVER         click Take over: action buttons appear; click one; answer "OK <hand> <step>"
     TAGIN            click Tag in my agent: the page drops to Watch
@@ -53,6 +56,56 @@ def play_hand(page):
     raise AssertionError("the hand did not end")
 
 
+PHONE = {"width": 390, "height": 844}
+
+
+def within_viewport(page, selector):
+    """Every element matching `selector` lies wholly inside the viewport."""
+    return page.evaluate(
+        """sel => [...document.querySelectorAll(sel)].every(el => {
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+        })""",
+        selector,
+    )
+
+
+def raise_off_menu(page):
+    """Play on (check/call, next hand) until a decision with a range of
+    sizes, then bet an amount none of the menu's buttons offers, through
+    the bet slider's number box. Returns that amount."""
+    for _ in range(60):
+        st = page.evaluate("() => window.table.st")
+        legal = st.get("legal") or {}
+        if not st["over"] and legal.get("wager") and legal["maxTo"] - legal["minTo"] >= 2:
+            break
+        page.locator("#next" if st["over"] else "#actions button.check, #actions button.call").first.click()
+        settle(page)
+    else:
+        raise AssertionError("no decision with a range of sizes in 60 steps")
+    assert page.locator("#sizer").is_visible(), "no bet slider on a decision with a range of sizes"
+    assert within_viewport(page, "#sizer button, #sizer input"), "the bet slider does not fit the phone's width"
+    lo, hi, call = legal["minTo"], legal["maxTo"], legal.get("call", 0)
+    pot_to = min(hi, max(lo, round(st["you"]["inRound"] + call + st["pot"] + call)))
+    page.locator('#presets button[data-preset="1"]').click()
+    assert page.locator("#size-amount").input_value() == str(pot_to), "the Pot preset's amount"
+    assert page.locator("#size-range").input_value() == str(pot_to), "the slider did not follow the Pot preset"
+    menu = {a["amount"] for a in st["actions"] if "amount" in a}
+    amount = next(n for n in range(lo + (hi - lo) // 3, hi) if n not in menu)
+    page.locator("#size-amount").fill(str(amount))
+    assert page.locator("#size-range").input_value() == str(amount), "the slider did not follow the number box"
+    word = "Raise to" if legal["wager"] == "raise" else "Bet"
+    assert page.locator("#size-go").inner_text().startswith(f"{word} {amount:,}"), page.locator("#size-go").inner_text()
+    shot(page, "slider-phone")
+    step = st["step"]
+    page.locator("#size-go").click()
+    settle(page)
+    after = page.evaluate("() => window.table.st")
+    mine = after["events"][step] if after["hand"] == st["hand"] else None
+    assert mine and mine["seat"] == "you" and mine["to"] == amount, f"the table logged {mine} for a bet to {amount}"
+    return amount
+
+
 def main():
     with sync_playwright() as p:
         chrome = os.environ.get("OBGL_BROWSER_CHROME")
@@ -76,11 +129,22 @@ def main():
                     assert page.locator(f'#history details.hand[data-number="{hand}"]').count() == 1
                     shot(page, "play")
                     say(f"OK played hand {hand}")
+                elif cmd[0] == "RAISE":
+                    size = page.viewport_size
+                    page.set_viewport_size(PHONE)
+                    try:
+                        amount = raise_off_menu(page)
+                        shot(page, "raise-phone")
+                    finally:
+                        page.set_viewport_size(size)
+                    settle(page)
+                    say(f"OK {amount}")
                 elif cmd[0] == "WATCH":
                     page.goto(WATCH)
                     settle(page)
                     assert page.locator("#watch-bar").is_visible(), "no watch bar"
                     assert page.locator("#actions button").count() == 0, "action buttons while watching"
+                    assert page.locator("#sizer").is_hidden(), "the bet slider while watching"
                     assert page.locator("#you-name").inner_text() == "Your agent"
                     assert page.evaluate("() => window.table.st.session") is None, "a watcher holds the session id"
                     down = page.evaluate("() => [...document.querySelectorAll('#felt .card[data-who=bot]')].every(c => c.classList.contains('down'))")
