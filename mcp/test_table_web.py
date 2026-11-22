@@ -10,9 +10,11 @@ localhost:9777/poker/ is not reachable.
     python -m pytest mcp/test_table_web.py -q
 """
 
+import base64
 import json
 import os
 import sys
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -75,6 +77,32 @@ async def test_the_table_needs_sign_in_but_its_files_do_not(site):
         r = await http.get("/table/signin", params={"next": "https://evil.example/"})
         assert r.status_code == 303
         assert "evil" not in r.cookies.get("obgl_table_signin", "")
+
+
+@pytest.mark.asyncio
+async def test_a_hand_made_signin_cookie_is_refused_or_sent_to_the_table(site):
+    """The sign-in cookie comes back from the browser: a malformed one is a
+    clean 400, and one without `next` finishes the sign-in at /table/."""
+    def cookie(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode()
+
+    async with httpx2.AsyncClient(base_url=site.base, timeout=10) as http:
+        for bad in ("", "not base64!", cookie(["a list"]), cookie({"state": "s"}), cookie({"verifier": "v", "next": "/table/"}),
+                    cookie({"state": 1, "verifier": "v"})):
+            r = await http.get("/table/signin/callback", params={"state": "s", "code": "c"},
+                               headers={"Cookie": f"obgl_table_signin={bad}"})
+            assert r.status_code == 400, (bad, r.status_code)
+        # A real sign-in whose cookie lost its `next`: back to the table, signed in.
+        r = await http.get("/table/signin", params={"next": "/table/"})
+        pending = json.loads(base64.urlsafe_b64decode(r.cookies["obgl_table_signin"]))
+        r = await http.get(r.headers["location"])  # /authorize
+        login = urlparse(r.headers["location"])
+        back = await ot.click_sign_in(http, site.base, parse_qs(login.query)["request"][0])
+        http.cookies.clear()
+        del pending["next"]
+        r = await http.get(back, headers={"Cookie": f"obgl_table_signin={cookie(pending)}"})
+        assert r.status_code == 303 and r.headers["location"] == "/table/", (r.status_code, r.text)
+        assert "obgl_table_at" in r.cookies
 
 
 @pytest.mark.asyncio

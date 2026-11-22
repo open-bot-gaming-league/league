@@ -111,6 +111,17 @@ def _unb64(value: str) -> dict | None:
         return None
 
 
+def _pending_signin(value: str) -> dict | None:
+    """The sign-in cookie as {state, verifier, next}, or None unless it has
+    a string state and verifier; `next` is made safe (default: the table)."""
+    pending = _unb64(value)
+    if not isinstance(pending, dict) or not all(isinstance(pending.get(k), str) and pending[k] for k in ("state", "verifier")):
+        return None
+    next_path = pending.get("next")
+    return {"state": pending["state"], "verifier": pending["verifier"],
+            "next": _safe_next(next_path if isinstance(next_path, str) else None)}
+
+
 class TableWeb:
     def __init__(
         self,
@@ -211,7 +222,7 @@ class TableWeb:
         return response
 
     async def callback(self, request: Request) -> Response:
-        pending = _unb64(request.cookies.get(SIGNIN_COOKIE, ""))
+        pending = _pending_signin(request.cookies.get(SIGNIN_COOKIE, ""))
         q = request.query_params
         if not pending or not q.get("state") or q.get("state") != pending.get("state"):
             return self._signin_failed("This sign-in was not started here, or it took too long.")
@@ -233,7 +244,7 @@ class TableWeb:
             tok = await self.provider.exchange_authorization_code(client, code)
         except Exception:  # noqa: BLE001  (TokenError: redeemed twice)
             return self._signin_failed("That sign-in link was already used.", next_path=pending["next"])
-        response = RedirectResponse(_safe_next(pending.get("next")), status_code=303, headers={"Cache-Control": "no-store"})
+        response = RedirectResponse(pending["next"], status_code=303, headers={"Cache-Control": "no-store"})
         self._set_tokens(response, tok)
         response.delete_cookie(SIGNIN_COOKIE, path=COOKIE_PATH + "/signin")
         return response
