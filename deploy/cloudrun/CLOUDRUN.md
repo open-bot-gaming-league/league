@@ -17,6 +17,8 @@ the same image tree on a machine without Docker, see
 - `../../.gcloudignore` -- what a `gcloud` source upload includes. It
   mirrors the repo's `.gitignore` files except that it keeps
   `deploy/cloudrun/data/`, which git ignores and the build needs.
+- `delete_account.py` -- the operator's tool for deleting one account's
+  Firestore records ("Deleting an account", under OAuth). Not in the image.
 
 The service answers on `/mcp` (the connector), `/` and `/docs/` (see
 "Docs" below), `/version`, the OAuth routes (see "OAuth" below) and
@@ -175,7 +177,9 @@ display name (GitHub login; Google `name`). No email is requested
 (GitHub: no scope; Google: `openid profile`). claude.ai registers itself
 through `/register`.
 
-Privacy: what an account stores is listed above.
+Privacy: what an account stores, and what deleting it does, is in
+[docs/PRIVACY.md](../../docs/PRIVACY.md) (served at `/docs/privacy`). To
+delete an account, see "Deleting an account" below.
 
 ### Create
 
@@ -253,6 +257,51 @@ Create, in `PROJECT`:
 Check: after a sign-in, `oauth_accounts` and `oauth_clients` hold
 documents (the Firestore console's data view). Deploy the same image
 again; the connector still works without signing in again.
+
+### Deleting an account
+
+A person asks by email (docs/PRIVACY.md, section 6); the operator, with
+the project's credentials, deletes. The account id is `<provider>:<id>`:
+`github:<numeric user id>`, `google:<sub>`, or `guest:<random>`. We hold
+no email, so find it in the Firestore console's data view: open
+`oauth_accounts`; each document's id is the account id and its `record`
+field holds the provider and display name.
+
+An account's data, and where it lives (every collection is `oauth_<kind>`,
+document fields `record` and, on some, `expires_at`):
+
+| collection | document id | how to find the account's documents |
+|---|---|---|
+| `oauth_accounts` | the account id | by id |
+| `oauth_account-tables` | the account id | by id. Its `sessions` list holds only the newest 20 session ids; do not use it to find them all |
+| `oauth_table-sessions` | the table session id | every document whose `record.owner` is the account id: scan the collection (`record` is one unindexed JSON string) |
+| `oauth_watch-tokens` | sha256 of the session's `record.watch` | computed from each session found above |
+| `oauth_access`, `oauth_refresh`, `oauth_codes` | sha256 of the token (not reversible) | scan each for `record.subject` equal to the account id |
+
+`oauth_clients` and `oauth_pending` hold no account id and are left alone.
+
+`deploy/cloudrun/delete_account.py` does the scans and the deletes (it
+needs `google-cloud-firestore`, as in `mcp/requirements.txt`, and
+Application Default Credentials for the project). It is a dry run unless
+given `--delete`:
+
+```sh
+python deploy/cloudrun/delete_account.py github:12345 --project PROJECT            # lists
+python deploy/cloudrun/delete_account.py github:12345 --project PROJECT --delete   # deletes
+```
+
+It prints one `collection/document` line per document and exits 1 if
+there is no account record. Delete, then check that the dry run now
+exits 1 with "no account record". The person's still-valid tokens stop
+working at once (their records are gone); signing in again with GitHub or
+Google makes a new, empty account under the same id.
+
+Not covered: the hands. They are in the game server's `hands.jsonl` on
+the container's disk (Session state, above), which nothing prunes by
+account; a restart of the service clears it. If `/state` is ever moved to
+a Cloud Storage volume, hands then outlive restarts and docs/PRIVACY.md
+section 4 stops being true: change it first. Cloud Run's request logs
+are Google's, kept for its default retention.
 
 ### Check
 

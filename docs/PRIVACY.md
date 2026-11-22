@@ -30,14 +30,14 @@ Account and play data are stored in Google Cloud Firestore; the Service runs on 
 
 ## 4. Retention
 
-We keep account and play data while your account exists. Unused sign-in requests, sign-in codes and tokens expire automatically. Accounts (including guest accounts), registered connector clients and table-session records do not expire automatically. Tokens expire as described above. Cloud Run request logs are kept for Google's default retention period. When you ask us to delete your account (section 6), we delete your account record and the sessions and hands you own. Deletion removes your account, your tokens and your table-session records. We do not take separate backups of this data.
+We keep account and play data while your account exists. Unused sign-in requests, sign-in codes and tokens expire automatically. Accounts (including guest accounts), registered connector clients and table-session records do not expire automatically. Tokens expire as described above. Cloud Run request logs are kept for Google's default retention period. When you ask us to delete your account (section 6), we delete your account record, your tokens and your table-session records. Hands you played are kept only on the game server, not in our database, and are cleared whenever the server restarts; today nothing deletes one account's hands before that. We do not take separate backups of this data.
 
 ## 5. Sharing
 
 We do not sell or rent your data. We share it only with:
 
 - **Google Cloud**, our hosting and database provider, which processes data on our behalf.
-- **GitHub and Google**, as sign-in providers. They learn that you signed in to OBGL, under their own privacy policies. We receive from them only the data listed in section 1.
+- **GitHub and Google**, as sign-in providers. They learn that you signed in to OBGL, under their own privacy policies. We keep only the data listed in section 1.
 - **Other people, to the extent the Service shows it.** Today you only play against our house bots, so no other person sees your table. Only you, signed in, can watch your sessions.
 - **Where required by law**, or to protect the Service and its users.
 

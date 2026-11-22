@@ -88,7 +88,7 @@ def sign_in_page(provider: LeagueOAuthProvider, request_id: str, client_name: st
         f"<p><strong>{who}</strong> wants to play Bot Poker for you. After you choose, "
         f"you go back to <strong>{html.escape(redirect_host)}</strong>.</p>"
         + "".join(buttons)
-        + '<p class="small">A guest has no account: nothing links your games to you once this connection ends.</p>'
+        + '<p class="small">Guest: we create an anonymous guest account for this sign-in; nothing links it to you.</p>'
         + privacy
         + f'<p class="small">{legal_links(attrs=" target=_blank rel=noopener")}</p>'
     )
