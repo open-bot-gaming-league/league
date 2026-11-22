@@ -60,7 +60,7 @@ from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 from mcp.server.streamable_http import MCP_SESSION_ID_HEADER  # noqa: E402
 from mcp_types import DiscoverResult, RequestParams  # noqa: E402
 from starlette.requests import Request  # noqa: E402
-from starlette.responses import HTMLResponse, Response  # noqa: E402
+from starlette.responses import HTMLResponse, JSONResponse, Response  # noqa: E402
 
 from session import (  # noqa: E402
     InvalidActionError,
@@ -374,6 +374,14 @@ def build_server(base_url: str | None = None) -> MCPServer:
             return {"error": str(e)}
         except TableError as e:
             return {"error": e.message}
+
+    @server.custom_route("/version", methods=["GET"])
+    async def version(request: Request) -> Response:  # noqa: ARG001
+        # The git sha this process was built from, so anyone can check
+        # what is running without a deploy log. Cloud Run: baked into
+        # the image by the Dockerfile's OBGL_GIT_SHA build arg; local:
+        # deploy/local/run.sh. "unknown" = nobody set it (a bare run).
+        return JSONResponse({"sha": os.environ.get("OBGL_GIT_SHA") or "unknown"})
 
     return server
 

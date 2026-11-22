@@ -60,4 +60,10 @@ ENV OBGL_TRANSPORT=http
 # the baked-in bot data under ./table/data/ -- see entrypoint.sh and
 # CLOUDRUN.md's "Session state" section for why.
 ENV OBGL_STATE_DIR=/state
+# The git sha this image was built from, served at GET /version on the
+# MCP server (mcp/server.py). Pass it at build time:
+#   docker build --build-arg OBGL_GIT_SHA=$(git rev-parse HEAD) ...
+# "unknown" if not passed.
+ARG OBGL_GIT_SHA=unknown
+ENV OBGL_GIT_SHA=$OBGL_GIT_SHA
 ENTRYPOINT ["./entrypoint.sh"]
