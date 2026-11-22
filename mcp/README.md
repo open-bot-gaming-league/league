@@ -16,20 +16,21 @@ Two transports, one codebase: **stdio** (default, for Claude Desktop and local u
 - `conftest.py` — the `run_server` fixture (starts `server.py` over HTTP on a free or given port) and `serve_asgi` (an in-process app on a real socket).
 - `test_oauth_provider.py` — the OAuth server in-process over ASGI: register, authorize, code, token, refresh, revoke, PKCE, single-use codes, resource binding, the sign-in page, expiry, table-session ownership, the stores, env config. No network.
 - `test_oauth_upstream.py` — GitHub and Google sign-in against a fake upstream IdP on a local socket.
-- `test_oauth_http.py` — `server.py` with OAuth on, over real HTTP: 401 without a token, guest sign-in then tools (and, if the table is up, one hand, and each table session's owner recorded durably and readable only by that account), the SDK's own OAuth client discovering everything from the 401, MCP sessions bound to their account, tokens surviving a restart with the file store.
+- `test_oauth_http.py` — `server.py` with OAuth on, over real HTTP: 401 without a token, guest sign-in then tools (and, if the table is up, one hand, and each table session's owner recorded durably and readable only by that account), the SDK's own OAuth client discovering everything from the 401, MCP sessions bound to their account, tokens surviving a restart. Each test runs with the file store, and with Firestore when an emulator is up (`FIRESTORE_EMULATOR_HOST`).
+- `test_oauth_store.py` — one contract for every store backend (memory, file, Firestore): round trips, copies, single-use `take` under 20 concurrent takers, reopen; plus Firestore's layout, TTL field and expiry. The Firestore cases need the emulator (the file's docstring says how to start one) and skip without it.
 - `test_docs.py` — the `/docs/*` pages (exact file bytes, content types) and the `docs()` tool. Needs no table.
 - `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
 - `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.
 
 ## Running it locally
 
-Needs Python with the `mcp` package (tested with 2.3.0) and a reachable table; the tests also need `pytest` and `pytest-asyncio`.
+Needs Python 3.12 with `pip install -r mcp/requirements.txt` (a hash-locked file compiled from `requirements.in`: `mcp`, `google-cloud-firestore`) and a reachable table; the tests also need `pytest` and `pytest-asyncio`.
 
 ```sh
 python -m pytest mcp/ -q                            # unit tests + both e2e suites (table-touching tests skip without a table)
 python mcp/server.py                                # stdio, for a local MCP client
 OBGL_TRANSPORT=http PORT=8080 python mcp/server.py   # Streamable HTTP at :8080/mcp
-OBGL_TRANSPORT=http PORT=8080 OBGL_PUBLIC_URL=http://127.0.0.1:8080 python mcp/server.py   # same, OAuth on (guest sign-in)
+OBGL_TRANSPORT=http PORT=8080 OBGL_PUBLIC_URL=http://127.0.0.1:8080 OBGL_AUTH_STORE=memory python mcp/server.py   # same, OAuth on (guest sign-in); without OBGL_AUTH_STORE it wants Firestore
 ```
 
 `OBGL_TABLE_URL` sets the table's base URL (default `http://localhost:9777/poker/`). `HOST`/`PORT` only matter for the HTTP transport (defaults `0.0.0.0`/`8080`).

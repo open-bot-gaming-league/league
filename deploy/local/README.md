@@ -61,8 +61,12 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
   `OBGL_TABLE_URL` follows, since the entrypoint exports it from `TABLE_ADDR`.
 - `OBGL_PUBLIC_URL=http://127.0.0.1:<port>`, not the image's `https://obgl.truemirrorgames.com`:
   it is the OAuth issuer and token audience, so it must be the URL clients actually use.
-  No GitHub/Google credentials are set, so the sign-in page offers guest only; the OAuth
-  file store is `<state dir>/oauth.json`, fresh per run (tokens do not outlive a run).
+  No GitHub/Google credentials are set, so the sign-in page offers guest only.
+- The OAuth store is the file store `<state dir>/oauth.json`, fresh per run (tokens do not
+  outlive a run), not the image's Firestore. `OBGL_LOCAL_AUTH_STORE=firestore` keeps the
+  image's Firestore store against a local emulator: it needs `FIRESTORE_EMULATOR_HOST` and
+  `GOOGLE_CLOUD_PROJECT` (any `demo-*` id) in the environment, and refuses to start without
+  the emulator host (`mcp/test_oauth_store.py` says how to start one).
 - `HOST=127.0.0.1` (server.py defaults to 0.0.0.0, which is what Cloud Run gets). No
   TLS, no Cloud Run front end: no HTTPS termination or `X-Forwarded-*`, request timeout,
   concurrency limit, scale-to-zero/cold start, or instance limit.

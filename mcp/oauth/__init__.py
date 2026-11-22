@@ -10,7 +10,8 @@ Environment (HTTP transport only):
     OBGL_PUBLIC_URL     the server's public origin, e.g. https://obgl.truemirrorgames.com.
                         Set: OAuth is on, and /mcp needs a bearer token. Unset: no auth
                         (a bare local run; tests without OAuth).
-    OBGL_AUTH_STORE     memory (default) | file -- see store.py
+    OBGL_AUTH_STORE     firestore (default) | file | memory -- see store.py
+    GOOGLE_CLOUD_PROJECT  Firestore's project (default: the one ADC reports)
     OBGL_AUTH_FILE      the file store's path (default $OBGL_STATE_DIR/oauth.json)
     OBGL_GITHUB_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI    see idp.py
     OBGL_GOOGLE_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI

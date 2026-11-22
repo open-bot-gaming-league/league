@@ -29,6 +29,9 @@ WORKDIR /app
 
 # Python side: the MCP server, run in Streamable HTTP mode
 # (OBGL_TRANSPORT=http, set below) -- same code mcp/ ships for stdio.
+# requirements.txt is a lock (mcp/requirements.in says how it is made):
+# every package pinned with its sha256, so pip runs in hash-checking mode
+# and installs exactly those files or fails.
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
 COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py ./mcp/
@@ -63,12 +66,15 @@ ENV OBGL_TRANSPORT=http
 ENV OBGL_STATE_DIR=/state
 # OAuth: the public origin is the token issuer and turns OAuth on (/mcp
 # then needs a bearer token; the sign-in page offers GitHub, Google and
-# guest). Tokens, clients and accounts go in the file store,
-# $OBGL_STATE_DIR/oauth.json. The GitHub/Google app credentials
+# guest). Tokens, clients, accounts and table-session owners go in
+# Firestore (mcp/oauth/store.py): the project's (default) database, found
+# through the Cloud Run service account (ADC; set GOOGLE_CLOUD_PROJECT to
+# point elsewhere). Firestore is also the default whenever
+# OBGL_PUBLIC_URL is set. The GitHub/Google app credentials
 # are NOT baked in: the deploy sets OBGL_GITHUB_CLIENT_ID/_SECRET and
 # OBGL_GOOGLE_CLIENT_ID/_SECRET from Secret Manager (CLOUDRUN.md).
 ENV OBGL_PUBLIC_URL=https://obgl.truemirrorgames.com
-ENV OBGL_AUTH_STORE=file
+ENV OBGL_AUTH_STORE=firestore
 # The git sha this image was built from, served at GET /version on the
 # MCP server (mcp/server.py). Pass it at build time:
 #   docker build --build-arg OBGL_GIT_SHA=$(git rev-parse HEAD) ...

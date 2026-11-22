@@ -13,6 +13,8 @@
 #   OBGL_LOCAL_PORT        MCP server port (default 9792; $PORT inside the container)
 #   OBGL_LOCAL_TABLE_PORT  the table's loopback port (default 9793; 9790 in the image)
 #   OBGL_LOCAL_ROOT        (required) where trees, venvs, data and state live
+#   OBGL_LOCAL_AUTH_STORE  file (default) or firestore (the Firestore emulator at
+#                          FIRESTORE_EMULATOR_HOST, project GOOGLE_CLOUD_PROJECT)
 #   OBGL_REPO              the git repo to take <sha> from (default: the one this
 #                          script is in); `git fetch origin` (anonymous read) if the
 #                          sha is not there
@@ -84,9 +86,21 @@ STATE=$ROOT/state/$SHA-$(date -u +%Y%m%dT%H%M%SZ)   # fresh per run, like a new 
 mkdir -p "$STATE"
 export PORT HOST=127.0.0.1 OBGL_STATE_DIR=$STATE
 # OAuth's issuer is the URL clients reach us at: here, not the image's public
-# origin (a sha without OAuth ignores it). The image's file store lands in
-# $STATE, so tokens last one run, like a new instance's.
+# origin (a sha without OAuth ignores it).
 export OBGL_PUBLIC_URL=http://127.0.0.1:$PORT
+# The OAuth store: the image's is Firestore; locally that is an emulator.
+# Default here: the file store in $STATE, so tokens last one run,
+# like a new instance's. OBGL_LOCAL_AUTH_STORE=firestore uses the image's
+# choice instead, against the emulator FIRESTORE_EMULATOR_HOST names (and
+# GOOGLE_CLOUD_PROJECT, any demo-* id), both taken from the environment.
+case ${OBGL_LOCAL_AUTH_STORE:-file} in
+  file) export OBGL_AUTH_STORE=file ;;
+  firestore)
+    [ -n "${FIRESTORE_EMULATOR_HOST:-}" ] || die "OBGL_LOCAL_AUTH_STORE=firestore needs FIRESTORE_EMULATOR_HOST (the local emulator; never a real project)"
+    need GOOGLE_CLOUD_PROJECT
+    export OBGL_AUTH_STORE=firestore ;;
+  *) die "OBGL_LOCAL_AUTH_STORE must be file or firestore" ;;
+esac
 # The image only has OBGL_GIT_SHA if its Dockerfile has the ARG (the /version commit).
 echo "run.sh: $SHA on 127.0.0.1:$PORT (table 127.0.0.1:$TABLE_PORT, state $STATE)"
 cd "$IMAGE_WORKDIR"

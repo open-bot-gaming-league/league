@@ -19,16 +19,20 @@ clients' secrets are the exception: the SDK's ClientAuthenticator compares
 
 A record with an "expires_at" field (unix seconds) is the caller's to
 expire: the provider checks it on read. Stores may drop expired records
-whenever convenient (FileStore does on load).
+whenever convenient (FileStore does on load; FirestoreStore by TTL policy,
+and it reads an expired record as absent).
 
 Backends: MemoryStore (tests; a bare local run), FileStore (one JSON file,
 rewritten atomically on every change: survives a restart on the same
-disk). `store_from_env` picks one.
+disk, one process only), FirestoreStore (Cloud Run: durable, shared by
+every instance). `store_from_env` picks one.
 """
 
 from __future__ import annotations
 
+import asyncio
 import copy
+import datetime
 import json
 import os
 import tempfile
@@ -139,11 +143,140 @@ class FileStore(MemoryStore):
             raise
 
 
+class FirestoreStore:
+    """Firestore (native mode): the durable store for Cloud Run, shared by
+    every instance, so a cold start or a second instance signs no one out.
+
+    Layout: one collection per kind, `oauth_<kind>` (`oauth_codes`,
+    `oauth_table-sessions`, ...); document id = the key. Each document has
+    two fields:
+
+        record      the record, JSON-encoded (a string), so it reads back
+                    exactly as written -- the same round trip FileStore
+                    makes, with none of Firestore's own type rules (no
+                    nested arrays, ints vs floats) in the way
+        expires_at  a Timestamp, present only when the record has an
+                    "expires_at": the field a Firestore TTL policy on each
+                    collection deletes by (CLOUDRUN.md, OAuth, Storage)
+
+    TTL deletion is lazy (typically within a day of expiry), so reads also
+    treat a record past its expires_at as absent.
+
+    `take` reads the document, then deletes it with a precondition: only
+    if it is unchanged since that read (its update time). Of concurrent
+    takers exactly one delete succeeds; the others' preconditions fail and
+    they read again, finding nothing.
+
+    The project comes from the argument (store_from_env passes
+    GOOGLE_CLOUD_PROJECT), else Application Default Credentials (on Cloud Run: the service's own
+    project). With FIRESTORE_EMULATOR_HOST set, the client talks to that
+    emulator instead, without credentials.
+
+    The async client's gRPC channel belongs to the event loop it was made
+    on, so the client is made on first use and remade if the loop changes
+    (pytest gives each test its own loop; the server has one)."""
+
+    def __init__(self, project: str | None = None) -> None:
+        # Imported here, not at the top: the Google client (gRPC and all)
+        # loads only in a process that uses Firestore, not in stdio runs
+        # or the memory/file-store tests.
+        from google.cloud import firestore
+
+        self._firestore = firestore
+        self.project = project or _adc_project()
+        if not self.project:
+            raise ValueError(
+                "OBGL_AUTH_STORE=firestore: no Google Cloud project "
+                "(set GOOGLE_CLOUD_PROJECT, or run where Application Default Credentials name one)"
+            )
+        self._client = None
+        self._loop = None
+
+    def _db(self):
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._loop is not loop:
+            self._client = self._firestore.AsyncClient(project=self.project)
+            self._loop = loop
+        return self._client
+
+    def _doc(self, kind: str, key: str):
+        _check_kind(kind)
+        _check_doc_id(key)
+        return self._db().collection(f"oauth_{kind}").document(key)
+
+    @staticmethod
+    def _live(snapshot) -> Record | None:
+        if not snapshot.exists:
+            return None
+        value = json.loads(snapshot.get("record"))
+        expires_at = value.get("expires_at")
+        if expires_at is not None and expires_at < time.time():
+            return None
+        return value
+
+    async def get(self, kind: str, key: str) -> Record | None:
+        return self._live(await self._doc(kind, key).get())
+
+    async def put(self, kind: str, key: str, value: Record) -> None:
+        ref = self._doc(kind, key)
+        body: dict[str, Any] = {"record": json.dumps(value, separators=(",", ":"))}
+        expires_at = value.get("expires_at")
+        if expires_at is not None:
+            body["expires_at"] = datetime.datetime.fromtimestamp(expires_at, tz=datetime.timezone.utc)
+        await ref.set(body)
+
+    async def delete(self, kind: str, key: str) -> None:
+        await self._doc(kind, key).delete()
+
+    async def take(self, kind: str, key: str) -> Record | None:
+        from google.api_core import exceptions
+
+        ref = self._doc(kind, key)
+        client = self._db()
+        while True:
+            snapshot = await ref.get()
+            if not snapshot.exists:
+                return None
+            try:
+                await ref.delete(option=client.write_option(last_update_time=snapshot.update_time))
+            except (exceptions.FailedPrecondition, exceptions.Aborted):
+                # FailedPrecondition: someone else took (or rewrote) it since
+                # our read. Aborted: write contention. Either way, look again.
+                continue
+            # Ours, and gone. An expired one is gone too, but was never there to take.
+            return self._live(snapshot)
+
+
+def _adc_project() -> str | None:
+    import google.auth
+    import google.auth.exceptions
+
+    try:
+        return google.auth.default()[1]
+    except google.auth.exceptions.DefaultCredentialsError:
+        return None
+
+
+def _check_doc_id(key: str) -> None:
+    """Firestore's document-id rules, checked here so a bad key fails with
+    its name instead of as a path error deep in the client."""
+    if (
+        not key
+        or "/" in key
+        or key in (".", "..")
+        or (key.startswith("__") and key.endswith("__"))
+        or len(key.encode()) > 1500
+    ):
+        raise ValueError(f"key {key!r} cannot be a Firestore document id")
+
+
 def store_from_env(env: Mapping[str, str]) -> AuthStore:
     """OBGL_AUTH_STORE picks the backend:
-    - `memory` (the default): lost on restart.
+    - `firestore`: the default when OBGL_PUBLIC_URL is set (OAuth on: a
+      deployed server). Project: GOOGLE_CLOUD_PROJECT, else ADC.
+    - `memory`: the default otherwise; lost on restart.
     - `file`: OBGL_AUTH_FILE, else $OBGL_STATE_DIR/oauth.json."""
-    kind = env.get("OBGL_AUTH_STORE") or "memory"
+    kind = env.get("OBGL_AUTH_STORE") or ("firestore" if env.get("OBGL_PUBLIC_URL") else "memory")
     if kind == "memory":
         return MemoryStore()
     if kind == "file":
@@ -154,4 +287,6 @@ def store_from_env(env: Mapping[str, str]) -> AuthStore:
                 raise ValueError("OBGL_AUTH_STORE=file needs OBGL_AUTH_FILE or OBGL_STATE_DIR")
             path = os.path.join(state_dir, "oauth.json")
         return FileStore(path)
-    raise ValueError(f"OBGL_AUTH_STORE={kind!r}: choose memory or file")
+    if kind == "firestore":
+        return FirestoreStore(env.get("GOOGLE_CLOUD_PROJECT"))
+    raise ValueError(f"OBGL_AUTH_STORE={kind!r}: choose memory, file or firestore")

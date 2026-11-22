@@ -1,0 +1,7 @@
+# The MCP server's direct runtime dependencies. requirements.txt is the
+# lock compiled from this file (every transitive package, exact version,
+# sha256 hashes) and is what the image installs; regenerate it with:
+#   uv pip compile mcp/requirements.in --generate-hashes --python-version 3.12 \
+#     --python-platform x86_64-unknown-linux-gnu -o mcp/requirements.txt
+mcp==2.3.0
+google-cloud-firestore==2.34.1

@@ -23,7 +23,7 @@ import server as server_module
 from oauth import OAuthConfig
 from oauth.idp import idps_from_env
 from oauth.provider import PENDING_TTL, LeagueOAuthProvider, SignInError
-from oauth.store import FileStore, MemoryStore, store_from_env
+from oauth.store import FileStore, FirestoreStore, MemoryStore, store_from_env
 
 BASE = "http://127.0.0.1:8123"
 RESOURCE = BASE + "/mcp"
@@ -308,6 +308,12 @@ def test_store_from_env(tmp_path):
     assert store_from_env({"OBGL_AUTH_STORE": "file", "OBGL_AUTH_FILE": str(tmp_path / "a.json")}).path.endswith("a.json")
     with pytest.raises(ValueError):
         store_from_env({"OBGL_AUTH_STORE": "file"})
+    # OAuth on (a public URL) and no choice made: Firestore. Constructing
+    # one makes no network call; the project is all it needs up front.
+    s = store_from_env({"OBGL_PUBLIC_URL": "https://obgl.example", "GOOGLE_CLOUD_PROJECT": "p"})
+    assert isinstance(s, FirestoreStore) and s.project == "p"
+    assert isinstance(store_from_env({"OBGL_AUTH_STORE": "firestore", "GOOGLE_CLOUD_PROJECT": "p"}), FirestoreStore)
+    assert isinstance(store_from_env({"OBGL_PUBLIC_URL": "https://obgl.example", "OBGL_AUTH_STORE": "memory"}), MemoryStore)
     with pytest.raises(ValueError):
         store_from_env({"OBGL_AUTH_STORE": "s3"})
 
@@ -340,7 +346,7 @@ def test_idps_from_env():
 
 def test_oauth_config():
     assert OAuthConfig.from_env({}, "/mcp") is None
-    c = OAuthConfig.from_env({"OBGL_PUBLIC_URL": "https://obgl.example/"}, "/mcp")
+    c = OAuthConfig.from_env({"OBGL_PUBLIC_URL": "https://obgl.example/", "OBGL_AUTH_STORE": "memory"}, "/mcp")
     assert c.public_url == "https://obgl.example" and c.resource_url == "https://obgl.example/mcp"
     for bad in ["obgl.example", "https://obgl.example/sub", "https://obgl.example?x=1"]:
         with pytest.raises(ValueError):

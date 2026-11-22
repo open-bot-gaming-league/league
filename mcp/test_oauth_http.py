@@ -1,7 +1,9 @@
 """OAuth over real HTTP: server.py as a subprocess (OBGL_TRANSPORT=http,
 OBGL_PUBLIC_URL set, so /mcp needs a bearer token), the guest sign-in
 driven end to end, the MCP tools called with the token it yields, and
-the file store carrying tokens across a server restart.
+the store carrying tokens across a server restart. Every test runs with
+the file store, and again with Firestore when FIRESTORE_EMULATOR_HOST
+names an emulator (test_oauth_store.py says how to start one).
 
 The table-touching test (new_session + act) skips itself if the live
 table at localhost:9777/poker/ is not reachable; the rest need no table.
@@ -12,6 +14,7 @@ table at localhost:9777/poker/ is not reachable; the rest need no table.
 import json
 import os
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,7 +23,7 @@ import pytest
 
 import oauth_testing as ot
 from oauth.provider import LeagueOAuthProvider
-from oauth.store import FileStore
+from oauth.store import FileStore, FirestoreStore
 from table_client import TableClient
 
 
@@ -41,20 +44,28 @@ INIT = {
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 
 
+@pytest.fixture(params=["file", "firestore"])
+def store_env(request, tmp_path):
+    """The server's store settings, and how to open the same store from
+    the test (a restarted server's view of it)."""
+    if request.param == "file":
+        path = str(tmp_path / "oauth.json")
+        return {"OBGL_AUTH_STORE": "file", "OBGL_AUTH_FILE": path}, lambda: FileStore(path)
+    if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
+        pytest.skip("FIRESTORE_EMULATOR_HOST not set (no Firestore emulator)")
+    project = f"demo-obgl-{uuid.uuid4().hex[:12]}"  # a fresh, empty emulator project
+    return {"OBGL_AUTH_STORE": "firestore", "GOOGLE_CLOUD_PROJECT": project}, lambda: FirestoreStore(project)
+
+
 @pytest.fixture
-def oauth_server(run_server, free_port, tmp_path):
-    """A server with OAuth on and a file store; yields (base, start) where
-    start() is a context manager running it on the same port and file
-    (call it again after the first exits: a restart)."""
+def oauth_server(run_server, free_port, store_env):
+    """A server with OAuth on and a durable store; yields (base, start)
+    where start() is a context manager running it on the same port and
+    store (call it again after the first exits: a restart)."""
     base = f"http://127.0.0.1:{free_port}"
 
     def start():
-        return run_server(
-            port=free_port,
-            OBGL_PUBLIC_URL=base,
-            OBGL_AUTH_STORE="file",
-            OBGL_AUTH_FILE=str(tmp_path / "oauth.json"),
-        )
+        return run_server(port=free_port, OBGL_PUBLIC_URL=base, **store_env[0])
 
     return base, start
 
@@ -113,7 +124,7 @@ async def test_guest_plays_a_hand(oauth_server):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777")
-async def test_new_session_records_its_owner_durably(oauth_server, tmp_path):
+async def test_new_session_records_its_owner_durably(oauth_server, store_env):
     """Each table session opened over MCP is recorded against the account
     that opened it, in the OAuth store, so it outlives the server process;
     and only that account can read the record."""
@@ -124,8 +135,8 @@ async def test_new_session_records_its_owner_durably(oauth_server, tmp_path):
             _, tok = await ot.guest_tokens(base)
             async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
                 sessions[who] = (tok["access_token"], _payload(await mcp.call_tool("new_session", {}))["session"])
-    # The server is gone; read the file a restarted one would load.
-    provider = LeagueOAuthProvider(FileStore(str(tmp_path / "oauth.json")), issuer_url=base, resource_url=f"{base}/mcp")
+    # The server is gone; read the store a restarted one would.
+    provider = LeagueOAuthProvider(store_env[1](), issuer_url=base, resource_url=f"{base}/mcp")
     owner = {who: (await provider.load_access_token(tok)).subject for who, (tok, _) in sessions.items()}
     assert owner["a"].startswith("guest:") and owner["b"].startswith("guest:") and owner["a"] != owner["b"]
     sid_a, sid_b = sessions["a"][1], sessions["b"][1]
@@ -210,11 +221,11 @@ async def test_an_mcp_session_belongs_to_the_account_that_opened_it(oauth_server
 
 
 @pytest.mark.asyncio
-async def test_tokens_survive_a_restart_with_the_file_store(oauth_server):
+async def test_tokens_survive_a_restart(oauth_server):
     base, start = oauth_server
     with start():
         client, tok = await ot.guest_tokens(base)
-    # Server stopped; a new process on the same port and the same file.
+    # Server stopped; a new process on the same port and the same store.
     with start():
         async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
             assert "new_session" in _payload(await mcp.call_tool("state", {}))["error"]

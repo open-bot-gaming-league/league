@@ -90,8 +90,7 @@ at `/state` does not hide it.
   the mount behave before relying on it.
 
 Either way keep `--max-instances 1`: sessions live in one table
-process, and the hands file and the OAuth file store (`/state/oauth.json`)
-each have one writer.
+process, and the hands file has one writer.
 
 ## Build and deploy
 
@@ -202,20 +201,52 @@ Privacy: what an account stores is listed above.
 | name | set by | meaning |
 |---|---|---|
 | `OBGL_PUBLIC_URL` | Dockerfile: `https://obgl.truemirrorgames.com` | the issuer and token audience (`<it>/mcp`); set = OAuth on. `--update-env-vars OBGL_PUBLIC_URL=` turns OAuth off without a rebuild |
-| `OBGL_AUTH_STORE` | Dockerfile: `file` | `memory` or `file` |
-| `OBGL_AUTH_FILE` | unset | the file store's path; default `$OBGL_STATE_DIR/oauth.json` (`/state/oauth.json`) |
+| `OBGL_AUTH_STORE` | Dockerfile: `firestore` | `firestore`, `file` or `memory`; `firestore` is also the default when `OBGL_PUBLIC_URL` is set |
+| `GOOGLE_CLOUD_PROJECT` | unset | Firestore's project; default: the one Application Default Credentials report |
+| `FIRESTORE_EMULATOR_HOST` | unset | tests and `deploy/local` only: a local Firestore emulator. Never set on the service |
+| `OBGL_AUTH_FILE` | unset | file store only: its path; default `$OBGL_STATE_DIR/oauth.json` |
 | `OBGL_GITHUB_CLIENT_ID`, `OBGL_GITHUB_CLIENT_SECRET` | Secret Manager | both or neither; neither = no GitHub button |
 | `OBGL_GOOGLE_CLIENT_ID`, `OBGL_GOOGLE_CLIENT_SECRET` | Secret Manager | same, for Google |
 | `OBGL_GITHUB_REDIRECT_URI`, `OBGL_GOOGLE_REDIRECT_URI` | unset | default `<OBGL_PUBLIC_URL>/login/<github\|google>/callback`; the path must be exactly that |
 
-### Storage
+### Storage: Firestore
 
-The image uses the file store at `/state/oauth.json`: registered
-clients, pending sign-ins, codes, tokens (by sha256), accounts, and
-which account owns each table session. Tokens
-outlast a cold start only when `/state` is the Cloud Storage volume
-("Session state"); on the container's own disk a new instance has no
-tokens and users sign in again.
+The OAuth records -- registered clients, pending sign-ins, codes, tokens
+(by sha256), accounts, and which account owns each table session -- live
+in Firestore (`FirestoreStore`, `mcp/oauth/store.py`). Layout: one
+collection per record kind, `oauth_<kind>`; document id = the record's
+key; fields `record` (the record as a JSON string) and `expires_at` (a
+Timestamp, on the kinds that expire). Records past `expires_at` read as
+absent. The server reads and writes documents by id only.
+
+Create, in `tmg-obgl`:
+
+1. Enable the Firestore API (`firestore.googleapis.com`).
+2. The database: Native mode, standard edition, id `(default)`, in or
+   near the service's region (a database's location cannot be changed
+   later):
+   `gcloud firestore databases create --project tmg-obgl --location REGION`.
+3. TTL policies on `expires_at` for the collections whose records
+   expire:
+
+   ```sh
+   for c in oauth_pending oauth_codes oauth_access oauth_refresh; do
+     gcloud firestore fields ttls update expires_at --project tmg-obgl \
+       --collection-group=$c --enable-ttl
+   done
+   ```
+
+4. Index exemptions: for every `oauth_*` collection group, exempt
+   `record` and `expires_at` from indexing
+   (`gcloud firestore indexes fields update <field> --collection-group=<c>
+   --disable-indexes`).
+5. IAM: the service account gets `roles/datastore.user` on the project.
+   The server finds the project and credentials through Application
+   Default Credentials; no key file or env var.
+
+Check: after a sign-in, `oauth_accounts` and `oauth_clients` hold
+documents (the Firestore console's data view). Deploy the same image
+again; the connector still works without signing in again.
 
 ### Check
 
@@ -231,9 +262,8 @@ python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oa
 
 Then a person, in claude.ai with a fresh account: add the connector, take
 the OAuth option, sign in with GitHub, then with Google, then as a
-guest; each plays a hand. With `/state` on the Cloud Storage volume,
-deploy the same image again; the connector still works without signing
-in again.
+guest; each plays a hand. Deploy the same image again; the connector
+still works without signing in again.
 
 ## Docs: what the service serves
 
@@ -293,5 +323,7 @@ server.)
 - `poker/engine`: `go build ./...` and `go test ./...`
   (`poker/engine/README.md`).
 - `mcp/`: `python -m pytest mcp/ -q` (`mcp/README.md`; the end-to-end
-  suites skip without a running table).
+  suites skip without a running table, the Firestore cases without
+  `FIRESTORE_EMULATOR_HOST`; `mcp/test_oauth_store.py` says how to start
+  the emulator).
 - The whole image tree at a sha, without Docker: `deploy/local/README.md`.
