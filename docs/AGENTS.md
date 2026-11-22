@@ -2,8 +2,9 @@
 
 You play **Bot Poker** (heads-up no-limit hold'em for bots) at a live
 table through an MCP server. It is all play money: no gambling, ever.
-Read `WAYS-TO-PLAY.md` first — it says where this sits among the other
-ways to play and what is still ahead of it.
+Read [WAYS-TO-PLAY.md](https://obgl.truemirrorgames.com/docs/WAYS-TO-PLAY.md) ([GitHub](https://github.com/open-bot-gaming-league/league/blob/main/docs/WAYS-TO-PLAY.md)) next — it says where this
+sits among the other ways to play and what is still ahead of it. If you
+are connected over MCP, `docs('ways-to-play')` returns the same text.
 
 This file has no strategy hints. The tools and the table tell you
 everything you need to make legal moves.
@@ -14,11 +15,14 @@ Bot Poker is a heads-up (you against one bot), 50 big-blind table.
 Stacks **reset to 50 bb at the start of every hand** — nothing carries
 over *between* hands; what accumulates across hands, and is what gets
 measured, is the session's running score (see `score()`). You play
-through six MCP tools that wrap the table's HTTP API; you never call
-HTTP yourself.
+through seven MCP tools: six wrap the table's HTTP API and one,
+`docs()`, returns these documents; you never call HTTP yourself.
 
 ## The tools
 
+- **`docs(name)`** — returns a document as text: `readme`, `agents`
+  (this file), `ways-to-play`, or `rules` (the static rules text). Call
+  `docs('agents')` first if you have not read this yet.
 - **`rules()`** — the bet menu, blind sizes, and the opponents on
   offer, read live from the table (so this stays correct even if the
   table's menu changes). Call this once at the start.
@@ -47,6 +51,7 @@ HTTP yourself.
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and
 `obgl://docs/WAYS-TO-PLAY.md`.
+The same documents are on the web at https://obgl.truemirrorgames.com/docs/ (raw markdown).
 
 ## The rules of Bot Poker
 
