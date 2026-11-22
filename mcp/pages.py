@@ -22,12 +22,16 @@ LEGAL_PAGES = (
 )
 
 
-def legal_links(exclude: str | None = None, attrs: str = "") -> str:
-    """Links to the legal pages, `exclude` (a docs() name) left out. attrs
-    goes inside each <a> tag (e.g. to open in a new tab)."""
-    return " &middot; ".join(
-        f'<a href="{path}"{attrs}>{label}</a>' for name, path, label in LEGAL_PAGES if name != exclude
-    )
+def legal_link(name: str, attrs: str = "") -> str:
+    """The link to one legal page by docs() name. attrs goes inside the <a>
+    tag (e.g. to open in a new tab)."""
+    _, path, label = next(page for page in LEGAL_PAGES if page[0] == name)
+    return f'<a href="{path}"{attrs}>{label}</a>'
+
+
+def legal_links(exclude: str | None = None) -> str:
+    """Links to the legal pages, `exclude` (a docs() name) left out."""
+    return " &middot; ".join(legal_link(name) for name, _, _ in LEGAL_PAGES if name != exclude)
 
 
 def render(title: str, body: str, style: str = "") -> str:

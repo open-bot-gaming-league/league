@@ -1,16 +1,18 @@
 # Open Bot Gaming League — Privacy Policy
 
-**Effective date:** November 2026
+**Effective date:** November 22, 2026
 
 Open Bot Gaming League ("OBGL", "we", "us") is operated by True Mirror Games. This policy explains what we collect when you use https://obgl.truemirrorgames.com (the "Service"): heads-up no-limit hold'em for bots and their human coaches, played through an MCP connector (such as claude.ai) or the browser table at /table. The Service is play money only.
 
 ## 1. What we collect
 
-**Account data.** When you sign in with GitHub or Google, we store three things: the sign-in provider, your provider user ID, and your display name. From Google we request only the `openid` and `profile` scopes; we do not request or receive your email address. You can also play as a guest. For a guest we store a randomly generated account ID and the display name "Guest"; each guest sign-in creates a new guest account.
+**Account data.** When you sign in with GitHub or Google, we store three things: the sign-in provider, your provider user ID, and your display name (your GitHub username or your Google profile name). From Google we request only the `openid` and `profile` scopes; we do not request or receive your email address. You can also play as a guest. For a guest we store a randomly generated account ID and the display name "Guest"; each guest sign-in creates a new guest account.
 
 **Sign-in tokens.** We issue access tokens (valid 1 hour) and refresh tokens (valid 30 days). We store them only in hashed form.
 
 **Play data.** For each table session you own we store the owner, the current controller, a watch token, and a switch log (the record of who controlled the seat). We also store the hands played. A hand record contains the cards dealt, each action and bet amount, and the result. A watch link works only for the signed-in owner of the session; nobody else can use it to view your table.
+
+**Cookies and tracking.** The browser table uses cookies only to keep you signed in. We set no tracking or advertising cookies. We do not track you across other sites, so we do not respond to Do Not Track signals.
 
 **Server logs.** Our hosting platform (Google Cloud Run) keeps request logs that include IP address and user agent.
 
@@ -26,11 +28,11 @@ We do not sell your data and we show no ads.
 
 ## 3. Where it is stored
 
-Account and play data are stored in Google Cloud Firestore; the Service runs on Google Cloud Run. Both are in the United States (Google Cloud region us-west1, Oregon).
+Account and table-session records are stored in Google Cloud Firestore; hands are kept on the game server, which runs on Google Cloud Run. Both are in the United States (Google Cloud region us-west1, Oregon).
 
 ## 4. Retention
 
-We keep account and play data while your account exists. Unused sign-in requests, sign-in codes and tokens expire automatically. Accounts (including guest accounts), registered connector clients and table-session records do not expire automatically. Tokens expire as described above. Cloud Run request logs are kept for Google's default retention period. When you ask us to delete your account (section 6), we delete your account record, your tokens and your table-session records. Hands you played are kept only on the game server, not in our database, and are cleared whenever the server restarts; today nothing deletes one account's hands before that. We do not take separate backups of this data.
+We keep account data and table-session records while your account exists; hands are kept only as described below. Unused sign-in requests, sign-in codes and tokens expire automatically. Accounts (including guest accounts), registered connector clients and table-session records do not expire automatically. Tokens expire as described above. Cloud Run request logs are kept for Google's default retention period. When you ask us to delete your account (section 6), we delete your account record, your tokens and your table-session records. Hands you played are kept only on the game server, not in our database, and are cleared whenever the server restarts; today nothing deletes one account's hands before that. We do not take separate backups of this data.
 
 ## 5. Sharing
 
@@ -45,10 +47,10 @@ If you connect a bot or agent (for example through claude.ai), the data it sends
 
 ## 6. Your choices
 
-- **Delete your account:** email support-obgl@truemirrorgames.com from any address, telling us which account (provider and display name). Because we hold no email address, we confirm a request by asking you to sign in with that account and take a step we name.
+- **Delete your account:** email support-obgl@truemirrorgames.com from any address, telling us which account (provider and display name). Because we hold no email address, for a GitHub or Google account we confirm a request by asking you to sign in with that account and take a step we name.
 - **Access or correct your data:** email us the same way.
 - **Sign-in provider data:** manage or revoke OBGL's access in your GitHub or Google account settings. Revoking does not delete data we already hold; ask us to delete it.
-- **Guests:** you can stop using a guest account at any time; ask us to delete it if you wish.
+- **Guests:** we cannot identify an individual guest account, and guest records hold no personal data. You can stop using a guest account at any time; if you can give us the account's ID, we will delete it.
 
 ## 7. Children
 

@@ -23,7 +23,7 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
-from pages import SMALL_STYLE, legal_links, render
+from pages import SMALL_STYLE, legal_link, render
 
 from .idp import callback_path
 from .provider import LeagueOAuthProvider, SignInError
@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # A line about what an account stores, rendered under the sign-in buttons
 # when non-empty.
 PRIVACY_NOTE = ""
+
+# The legal links open in a new tab: the sign-in page stays where it is.
+NEW_TAB = " target=_blank rel=noopener"
 
 _HEADERS = {
     "Cache-Control": "no-store",
@@ -88,9 +91,9 @@ def sign_in_page(provider: LeagueOAuthProvider, request_id: str, client_name: st
         f"<p><strong>{who}</strong> wants to play Bot Poker for you. After you choose, "
         f"you go back to <strong>{html.escape(redirect_host)}</strong>.</p>"
         + "".join(buttons)
-        + '<p class="small">Guest: we create an anonymous guest account for this sign-in; nothing links it to you.</p>'
+        + '<p class="small">Guest: we create an anonymous guest account for this sign-in; it holds no name or sign-in identity.</p>'
         + privacy
-        + f'<p class="small">{legal_links(attrs=" target=_blank rel=noopener")}</p>'
+        + f'<p class="small">By continuing you agree to the {legal_link("terms", NEW_TAB)} and {legal_link("privacy", NEW_TAB)}.</p>'
     )
 
 

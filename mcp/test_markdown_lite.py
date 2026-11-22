@@ -18,6 +18,11 @@ def test_headings_paragraphs_and_the_title():
     assert body == "<h1>The <em>Title</em></h1>\n<h2>1. Part</h2>\n<p>One two.</p>\n<p>Three.</p>"
 
 
+def test_bold_can_span_a_whole_paragraph():
+    _, body = render_markdown('**All of it, "quoted" and US$100, in one paragraph.\nOn two lines.**')
+    assert body == "<p><strong>All of it, &quot;quoted&quot; and US$100, in one paragraph. On two lines.</strong></p>"
+
+
 def test_bullet_list():
     _, body = render_markdown("- **a:** x\n- b")
     assert body == "<ul>\n<li><strong>a:</strong> x</li>\n<li>b</li>\n</ul>"

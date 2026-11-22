@@ -265,7 +265,9 @@ the project's credentials, deletes. The account id is `<provider>:<id>`:
 `github:<numeric user id>`, `google:<sub>`, or `guest:<random>`. We hold
 no email, so find it in the Firestore console's data view: open
 `oauth_accounts`; each document's id is the account id and its `record`
-field holds the provider and display name.
+field holds the provider and display name. A guest account cannot be
+matched to a person (its display name is "Guest"): delete one only by id,
+if the person can supply it.
 
 An account's data, and where it lives (every collection is `oauth_<kind>`,
 document fields `record` and, on some, `expires_at`):

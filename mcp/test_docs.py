@@ -100,6 +100,12 @@ def test_legal_page_is_html_with_its_heading(base, path):
     assert "<script" not in page
 
 
+def test_terms_disclaimers_and_liability_are_bold(base):
+    page = _get(base + "/docs/terms")[2].decode()
+    for heading, start in (("8. Disclaimers", "The Service is provided"), ("9. Limitation of liability", "To the maximum extent")):
+        assert f"<h2>{heading}</h2>\n<p><strong>{start}" in page
+
+
 @pytest.mark.parametrize("path", sorted(LEGAL))
 def test_legal_page_links_home_and_the_other_legal_page(base, path):
     page = _get(base + path)[2].decode()
@@ -115,7 +121,7 @@ def test_legal_pages_carry_no_drafting_markers(base, path):
     for text in (_get(base + path)[2].decode(), _get(base + LEGAL[path][1])[2].decode()):
         for marker in ("[CHECK", "DRAFT", "PLACEHOLDER", "[EFFECTIVE DATE]"):
             assert marker not in text, (path, marker)
-        assert "Effective date" in text and "November 2026" in text
+        assert "Effective date" in text and "November 22, 2026" in text
 
 
 def test_unknown_doc_is_404(base):

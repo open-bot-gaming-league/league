@@ -185,9 +185,12 @@ async def test_sign_in_page(http):
     assert "127.0.0.1:9" in page.text  # where the user will be sent back
     assert "Continue as guest" in page.text
     assert "we create an anonymous guest account for this sign-in" in page.text  # a guest does have an account (Privacy 1, 4)
-    # Small links to the legal pages, opening in a new tab (the sign-in page stays put).
-    assert 'href="/docs/privacy" target=_blank rel=noopener' in page.text
-    assert 'href="/docs/terms" target=_blank rel=noopener' in page.text
+    assert "it holds no name or sign-in identity" in page.text
+    # Consent line with links to the legal pages, opening in a new tab (the sign-in page stays put).
+    assert (
+        'By continuing you agree to the <a href="/docs/terms" target=_blank rel=noopener>Terms of Service</a>'
+        ' and <a href="/docs/privacy" target=_blank rel=noopener>Privacy Policy</a>.'
+    ) in page.text
     # No IdP configured in this fixture: no GitHub / Google buttons.
     assert "GitHub" not in page.text and "Google" not in page.text
     assert page.headers["x-frame-options"] == "DENY"
