@@ -211,7 +211,8 @@ Privacy: what an account stores is listed above.
 ### Storage
 
 The image uses the file store at `/state/oauth.json`: registered
-clients, pending sign-ins, codes, tokens (by sha256), accounts. Tokens
+clients, pending sign-ins, codes, tokens (by sha256), accounts, and
+which account owns each table session. Tokens
 outlast a cold start only when `/state` is the Cloud Storage volume
 ("Session state"); on the container's own disk a new instance has no
 tokens and users sign in again.

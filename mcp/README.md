@@ -14,9 +14,9 @@ Two transports, one codebase: **stdio** (default, for Claude Desktop and local u
 - `oauth_testing.py` — a scripted OAuth client (register, PKCE, the guest button, `/token`) for the tests and `deploy/local/smoke.py`. Not shipped in the image.
 - `test_session.py` — unit tests (no network).
 - `conftest.py` — the `run_server` fixture (starts `server.py` over HTTP on a free or given port) and `serve_asgi` (an in-process app on a real socket).
-- `test_oauth_provider.py` — the OAuth server in-process over ASGI: register, authorize, code, token, refresh, revoke, PKCE, single-use codes, resource binding, the sign-in page, expiry, the stores, env config. No network.
+- `test_oauth_provider.py` — the OAuth server in-process over ASGI: register, authorize, code, token, refresh, revoke, PKCE, single-use codes, resource binding, the sign-in page, expiry, table-session ownership, the stores, env config. No network.
 - `test_oauth_upstream.py` — GitHub and Google sign-in against a fake upstream IdP on a local socket.
-- `test_oauth_http.py` — `server.py` with OAuth on, over real HTTP: 401 without a token, guest sign-in then tools (and one hand if the table is up), the SDK's own OAuth client discovering everything from the 401, MCP sessions bound to their account, tokens surviving a restart with the file store.
+- `test_oauth_http.py` — `server.py` with OAuth on, over real HTTP: 401 without a token, guest sign-in then tools (and, if the table is up, one hand, and each table session's owner recorded durably and readable only by that account), the SDK's own OAuth client discovering everything from the 401, MCP sessions bound to their account, tokens surviving a restart with the file store.
 - `test_docs.py` — the `/docs/*` pages (exact file bytes, content types) and the `docs()` tool. Needs no table.
 - `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
 - `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.

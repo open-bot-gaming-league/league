@@ -19,6 +19,8 @@ import httpx2
 import pytest
 
 import oauth_testing as ot
+from oauth.provider import LeagueOAuthProvider
+from oauth.store import FileStore
 from table_client import TableClient
 
 
@@ -107,6 +109,30 @@ async def test_guest_plays_a_hand(oauth_server):
                 assert "error" not in state, state
             assert state["over"]
             assert _payload(await mcp.call_tool("score", {}))["hands"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777")
+async def test_new_session_records_its_owner_durably(oauth_server, tmp_path):
+    """Each table session opened over MCP is recorded against the account
+    that opened it, in the OAuth store, so it outlives the server process;
+    and only that account can read the record."""
+    base, start = oauth_server
+    sessions = {}
+    with start():
+        for who in ("a", "b"):
+            _, tok = await ot.guest_tokens(base)
+            async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
+                sessions[who] = (tok["access_token"], _payload(await mcp.call_tool("new_session", {}))["session"])
+    # The server is gone; read the file a restarted one would load.
+    provider = LeagueOAuthProvider(FileStore(str(tmp_path / "oauth.json")), issuer_url=base, resource_url=f"{base}/mcp")
+    owner = {who: (await provider.load_access_token(tok)).subject for who, (tok, _) in sessions.items()}
+    assert owner["a"].startswith("guest:") and owner["b"].startswith("guest:") and owner["a"] != owner["b"]
+    sid_a, sid_b = sessions["a"][1], sessions["b"][1]
+    assert (await provider.table_session_for(sid_a, owner["a"]))["owner"] == owner["a"]
+    assert (await provider.table_session_for(sid_b, owner["b"]))["owner"] == owner["b"]
+    assert await provider.table_session_for(sid_a, owner["b"]) is None
+    assert await provider.table_session_for(sid_b, owner["a"]) is None
 
 
 @pytest.mark.asyncio

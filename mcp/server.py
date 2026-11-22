@@ -59,6 +59,8 @@ from __future__ import annotations
 import os
 import sys
 
+import anyio.to_thread
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.auth.middleware.auth_context import get_access_token  # noqa: E402
@@ -228,6 +230,19 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     # ownership made explicit, not the only guard.
     poker_by_key: dict[str, PokerSession] = {}  # leaks on idle/disconnect; see deploy/cloudrun/CLOUDRUN.md
 
+    def _account() -> str | None:
+        """The signed-in account calling this tool ("github:<id>",
+        "google:<sub>", "guest:<random>"), from the request's access token;
+        None with OAuth off. Display name etc.: provider.account(id)."""
+        if oauth is None:
+            return None
+        token = get_access_token()
+        if token is None or not token.subject:
+            # The bearer check in front of /mcp makes this unreachable;
+            # refuse rather than run unowned.
+            raise RuntimeError("OAuth is on but this request carries no signed-in account")
+        return token.subject
+
     def _poker_for(ctx: Context) -> PokerSession:
         headers = ctx.headers
         if headers is None:
@@ -246,13 +261,9 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
                     "scope poker state to a connection"
                 )
             key = session_id
-            if oauth is not None:
-                token = get_access_token()
-                if token is None or not token.subject:
-                    # The bearer check in front of /mcp makes this
-                    # unreachable; refuse rather than run unowned.
-                    raise RuntimeError("OAuth is on but this request carries no signed-in account")
-                key = f"{token.subject}/{session_id}"
+            account = _account()
+            if account is not None:
+                key = f"{account}/{session_id}"
         poker = poker_by_key.get(key)
         if poker is None:
             poker = PokerSession(client)
@@ -345,15 +356,23 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         }
 
     @server.tool()
-    def new_session(ctx: Context, opponent: str | None = None, seat: str | None = None) -> dict:
+    async def new_session(ctx: Context, opponent: str | None = None, seat: str | None = None) -> dict:
         """Start a new session and deal hand 1. opponent: a bot id from
         rules()'s `bots` (default: the first/least-exploitable). seat:
         "sb", "bb" or "alternate" (default -- alternates seat each
         hand, so neither seat's advantage dominates the score)."""
+        poker = _poker_for(ctx)
+        account = _account()
         try:
-            state = _poker_for(ctx).new(opponent=opponent, seat=seat)
+            # The table call blocks (urllib); keep it off the event loop,
+            # as the SDK does for the sync tools.
+            state = await anyio.to_thread.run_sync(lambda: poker.new(opponent=opponent, seat=seat))
         except TableError as e:
             return {"error": e.message}
+        if account is not None:
+            # Who owns this table session, for owner-only table features
+            # (oauth/provider.py, "table-session ownership").
+            await provider.record_table_session(state["session"], account)
         return summarize_state(state)
 
     @server.tool()

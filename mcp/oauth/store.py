@@ -10,6 +10,7 @@ with a durable backend, across restarts) is a JSON object filed under a
     access    access tokens, by sha256 of the token
     refresh   refresh tokens, by sha256 of the token
     accounts  provider + provider user id + display name, by account id
+    table-sessions  who owns a table session (the account that opened it), by table session id
 
 Bearer secrets (codes, tokens) are filed by their sha256, never in the
 clear, so a copy of the store is not a copy of anyone's tokens. (Registered
@@ -35,7 +36,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-KINDS = ("clients", "pending", "codes", "access", "refresh", "accounts")
+KINDS = ("clients", "pending", "codes", "access", "refresh", "accounts", "table-sessions")
 
 Record = dict[str, Any]
 
