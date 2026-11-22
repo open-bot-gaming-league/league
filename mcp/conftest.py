@@ -21,14 +21,16 @@ def _free_port() -> int:
 
 
 @contextmanager
-def _running_server(**env_extra: str):
-    """Starts server.py (OBGL_TRANSPORT=http) bound to a free local port
-    and yields its base URL (no path), e.g. http://127.0.0.1:41234.
-    Extra keyword arguments are added to the server's environment
-    (OBGL_TABLE_URL is left at its default, the live table at
-    localhost:9777/poker/, unless given). Waits for /mcp to answer
-    before yielding; stops the process on exit."""
-    port = _free_port()
+def _running_server(port: int | None = None, **env_extra: str):
+    """Starts server.py (OBGL_TRANSPORT=http) bound to `port` (default: a
+    free local port) and yields its base URL (no path), e.g.
+    http://127.0.0.1:41234. Extra keyword arguments are added to the
+    server's environment (OBGL_TABLE_URL is left at its default, the live
+    table at localhost:9777/poker/, unless given). Pass the port to start
+    a second server where a first one was (a restart), or to know the URL
+    before start (OBGL_PUBLIC_URL). Waits for /mcp to answer before
+    yielding; stops the process on exit."""
+    port = port or _free_port()
     env = dict(os.environ)
     env["OBGL_TRANSPORT"] = "http"
     env["PORT"] = str(port)
@@ -61,6 +63,43 @@ def _running_server(**env_extra: str):
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+@contextmanager
+def _serving_asgi(app, port: int | None = None):
+    """Serves an ASGI app in-process (uvicorn on a thread) on `port`
+    (default: a free one); yields its base URL. For tests that need a
+    real socket but an app built in the test (the fake upstream IdP, a
+    server wired to it)."""
+    import threading
+
+    import uvicorn
+
+    port = port or _free_port()
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="on"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started:
+        if time.monotonic() > deadline or not thread.is_alive():
+            raise RuntimeError("in-process server did not start")
+        time.sleep(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+@pytest.fixture
+def free_port():
+    return _free_port()
+
+
+@pytest.fixture
+def serve_asgi():
+    """The context manager above, as a fixture: `with serve_asgi(app) as base: ...`."""
+    return _serving_asgi
 
 
 @pytest.fixture

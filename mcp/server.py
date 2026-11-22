@@ -42,6 +42,12 @@ read from the repo files on every request. A client that cannot reach
 GitHub (claude.ai's fetcher was rate-limited there) still gets them
 from here, or from the docs() tool.
 
+Over HTTP with OBGL_PUBLIC_URL set, OAuth is on (oauth/__init__.py):
+this server is the connector's OAuth authorization server, /mcp needs a
+bearer token, and /login is the sign-in page (GitHub, Google, guest).
+Each poker session then belongs to the signed-in account as well as to
+its connection (see `_poker_for`). Unset: no auth, as before.
+
 OBGL_TABLE_URL points at the table; defaults to
 http://localhost:9777/poker/ for a local non-container run. Inside the
 deploy/cloudrun/ container the entrypoint sets it to the table's own
@@ -55,6 +61,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from mcp.server.auth.middleware.auth_context import get_access_token  # noqa: E402
 from mcp.server.mcpserver import Context, MCPServer  # noqa: E402
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 from mcp.server.streamable_http import MCP_SESSION_ID_HEADER  # noqa: E402
@@ -62,6 +69,8 @@ from mcp_types import DiscoverResult, RequestParams  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import HTMLResponse, JSONResponse, Response  # noqa: E402
 
+from oauth import OAuthConfig, register_login_routes  # noqa: E402
+from pages import render  # noqa: E402
 from session import (  # noqa: E402
     InvalidActionError,
     NoSessionError,
@@ -113,18 +122,9 @@ never need to track those yourself -- just call state() if a result
 looks unexpected before acting again.
 """
 
-CONNECTOR_URL = "https://obgl.truemirrorgames.com/mcp"
+MCP_PATH = "/mcp"
+CONNECTOR_URL = "https://obgl.truemirrorgames.com" + MCP_PATH
 GITHUB_URL = "https://github.com/open-bot-gaming-league/league"
-
-_PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
-<style>body{{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}</style>
-</head><body>
-{body}
-</body></html>
-"""
 
 _DOC_LINKS = """<ul>
 <li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
@@ -132,22 +132,31 @@ _DOC_LINKS = """<ul>
 <li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
 </ul>"""
 
-LANDING_HTML = _PAGE.format(
-    title="Open Bot Gaming League",
-    body=f"""<h1>Open Bot Gaming League</h1>
+_SIGN_IN_LINE = {
+    False: "No signup.",
+    True: "Claude will ask you to sign in: with GitHub, with Google, or choose "
+    "<em>Continue as guest</em> (no signup).",
+}
+
+
+def landing_html(oauth: bool) -> str:
+    return render(
+        "Open Bot Gaming League",
+        f"""<h1>Open Bot Gaming League</h1>
 <p>Heads-up no-limit hold'em for bots, all play money. To play, add
 <code>{CONNECTOR_URL}</code> as a custom connector in Claude (Settings &gt;
 Connectors &gt; Add custom connector), then ask Claude to play a hand against
-one of our house bots. No signup.</p>
+one of our house bots. {_SIGN_IN_LINE[oauth]}</p>
 <ul>
 <li><a href="/docs/">Docs</a> (README, AGENTS, WAYS-TO-PLAY)</li>
 <li><a href="{GITHUB_URL}">Source on GitHub</a></li>
 </ul>""",
-)
+    )
 
-DOCS_INDEX_HTML = _PAGE.format(
-    title="OBGL docs",
-    body=f"""<h1>OBGL docs</h1>
+
+DOCS_INDEX_HTML = render(
+    "OBGL docs",
+    f"""<h1>OBGL docs</h1>
 <p>Raw markdown, served from the same release as the connector.</p>
 {_DOC_LINKS}
 <p><a href="/">Back</a> &middot; <a href="{GITHUB_URL}">GitHub</a></p>""",
@@ -166,14 +175,15 @@ def read_doc(name: str) -> str:
         return f.read()
 
 
-def _register_docs_routes(server: MCPServer) -> None:
+def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
     """The docs as plain web pages next to /mcp (HTTP transport only in
     practice, harmless under stdio). Files are read as bytes on every
     request so what is served is exactly what is in the repo/image."""
+    landing_page = landing_html(oauth)
 
     @server.custom_route("/", methods=["GET"])
     async def landing(request: Request) -> Response:  # noqa: ARG001
-        return HTMLResponse(LANDING_HTML)
+        return HTMLResponse(landing_page)
 
     # Both spellings answer directly: Starlette's slash redirect would be
     # built from the request scheme, which behind Cloud Run's TLS
@@ -195,7 +205,7 @@ def _register_docs_routes(server: MCPServer) -> None:
         _file_route(filename, path)
 
 
-def build_server(base_url: str | None = None) -> MCPServer:
+def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) -> MCPServer:
     client = TableClient(base_url) if base_url else TableClient()
 
     # One PokerSession per connection that has one (see _SHARED_SESSION_KEY
@@ -208,6 +218,14 @@ def build_server(base_url: str | None = None) -> MCPServer:
     # handle over HTTP is the transport's own `mcp-session-id` header
     # (`ctx.headers`), which every SDK client resends on every request
     # after the one that received it from `initialize`'s response.
+    #
+    # With OAuth on, a poker session also belongs to the signed-in
+    # account (the access token's subject: "github:<id>", "google:<sub>",
+    # "guest:<random>"), and the key says so: "<account>/<mcp-session-id>".
+    # The SDK already refuses a request whose token's (client, issuer,
+    # subject) differs from the one that opened the mcp session
+    # (streamable_http_manager.py: "Session not found"), so this is
+    # ownership made explicit, not the only guard.
     poker_by_key: dict[str, PokerSession] = {}  # leaks on idle/disconnect; see deploy/cloudrun/CLOUDRUN.md
 
     def _poker_for(ctx: Context) -> PokerSession:
@@ -228,21 +246,33 @@ def build_server(base_url: str | None = None) -> MCPServer:
                     "scope poker state to a connection"
                 )
             key = session_id
+            if oauth is not None:
+                token = get_access_token()
+                if token is None or not token.subject:
+                    # The bearer check in front of /mcp makes this
+                    # unreachable; refuse rather than run unowned.
+                    raise RuntimeError("OAuth is on but this request carries no signed-in account")
+                key = f"{token.subject}/{session_id}"
         poker = poker_by_key.get(key)
         if poker is None:
             poker = PokerSession(client)
             poker_by_key[key] = poker
         return poker
 
+    provider = oauth.provider() if oauth else None
     server = MCPServer(
         name="obgl-bot-poker",
+        auth=oauth.auth_settings() if oauth else None,
+        auth_server_provider=provider,
         instructions=(
             "Play Bot Poker (50 bb heads-up) at the live table. Call "
             "docs('agents') first, then rules(), then new_session(). "
             "docs() also has 'readme', 'ways-to-play' and 'rules'."
         ),
     )
-    _register_docs_routes(server)
+    _register_docs_routes(server, oauth=oauth is not None)
+    if provider is not None:
+        register_login_routes(server, provider)
 
     # mcp 2.3.0 also speaks a newer "modern" Streamable HTTP mode
     # (protocol version 2026-07-28): a self-contained POST per call, no
@@ -388,13 +418,15 @@ def build_server(base_url: str | None = None) -> MCPServer:
 
 def main() -> None:
     base_url = os.environ.get("OBGL_TABLE_URL")
-    server = build_server(base_url)
     if os.environ.get("OBGL_TRANSPORT", "stdio") == "http":
+        # OAuth only exists over HTTP: stdio has no bearer tokens (its one
+        # client is whoever launched the process).
+        server = build_server(base_url, OAuthConfig.from_env(os.environ, MCP_PATH))
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8080"))
-        server.run("streamable-http", host=host, port=port, streamable_http_path="/mcp")
+        server.run("streamable-http", host=host, port=port, streamable_http_path=MCP_PATH)
     else:
-        server.run("stdio")
+        build_server(base_url).run("stdio")
 
 
 if __name__ == "__main__":

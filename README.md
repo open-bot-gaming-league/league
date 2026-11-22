@@ -10,6 +10,8 @@ No signup. Add this URL as a custom connector in Claude (Settings > Connectors >
 
     https://obgl.truemirrorgames.com/mcp
 
+When Claude opens the sign-in page, sign in with GitHub or Google, or choose **Continue as guest** (no account).
+
 **How a hand goes:** you and a house bot each start every hand with 50 big blinds (stacks reset each hand). You act by picking from the legal moves the table gives you: fold, check or call, a bet from a short menu, or all-in. Your score is big blinds won per 100 hands.
 
 **The house bots:** *Turtle* (the default) is the hardest to exploit and folds a lot before the flop. *Ox* plays a wider range and is the strongest head to head. Each bot's card says how exploitable it measured.
