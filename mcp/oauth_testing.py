@@ -176,12 +176,14 @@ async def revoke(http: httpx2.AsyncClient, base: str, client: dict, tok: str) ->
     return await http.post(f"{base}/revoke", data={"token": tok, "client_secret": "", **_client_auth(client)})
 
 
-async def guest_tokens(base: str) -> tuple[dict, dict]:
-    """The whole flow against a running server: (client, token response)."""
+async def guest_tokens(base: str, resource: str | None = None) -> tuple[dict, dict]:
+    """The whole flow against a running server: (client, token response).
+    `resource`: the token's resource (default `<base>/mcp`)."""
+    resource = resource or f"{base}/mcp"
     async with httpx2.AsyncClient(timeout=10) as http:
         client = await register(http, base)
-        code, verifier = await guest_code(http, base, client, resource=f"{base}/mcp")
-        r = await exchange_code(http, base, client, code, verifier, resource=f"{base}/mcp")
+        code, verifier = await guest_code(http, base, client, resource=resource)
+        r = await exchange_code(http, base, client, code, verifier, resource=resource)
         assert r.status_code == 200, r.text
         return client, r.json()
 

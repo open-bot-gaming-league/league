@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """smoke.py: prove a running OBGL stack answers, over HTTP only.
 
-  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs]
+  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs] [--stay-on-base]
 
 Needs the `mcp` package (run it with the venv python run.sh built, or any
 venv with mcp==2.3.0). Checks, printing one line each:
@@ -22,6 +22,11 @@ venv with mcp==2.3.0). Checks, printing one line each:
            without the cookie the API answers 401
 A check whose route is missing (404) prints "absent" and passes unless it is
 named in --require. Exit 1 on any failure.
+
+--stay-on-base: the table check's browser follows redirects to the OAuth issuer
+(the server's OBGL_PUBLIC_URL) on --url's origin instead. Use it when --url is not
+the issuer, e.g. a Cloud Run revision tagged with --no-traffic, so every request
+goes to the revision under test.
 """
 
 import argparse
@@ -32,6 +37,7 @@ import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -67,13 +73,18 @@ def raw_initialize(base, token=None):
     return result["protocolVersion"], result["serverInfo"]["name"], sid
 
 
-def guest_token(base, repo):
-    """A guest access token through the server's real OAuth flow, or None
-    if this sha has no OAuth (no protected-resource metadata)."""
+def protected_resource(base):
+    """The server's protected-resource metadata, or None without OAuth."""
     status, _, body = get(base + "/.well-known/oauth-protected-resource/mcp")
-    if status == 404:
+    return None if status == 404 else json.loads(body)
+
+
+def guest_token(base, repo, prm):
+    """A guest access token through the server's real OAuth flow, or None
+    if this sha has no OAuth (no protected-resource metadata). The token is
+    for the resource the server names, which is the issuer's /mcp."""
+    if prm is None:
         return None
-    prm = json.loads(body)
     try:
         raw_initialize(base)
         raise AssertionError("OAuth is advertised but /mcp answered without a token")
@@ -83,7 +94,7 @@ def guest_token(base, repo):
     sys.path.insert(0, os.path.join(repo, "mcp"))
     import oauth_testing
 
-    client, tok = asyncio.run(oauth_testing.guest_tokens(base))
+    client, tok = asyncio.run(oauth_testing.guest_tokens(base, resource=prm["resource"]))
     print(f"oauth    guest sign-in: resource {prm['resource']}, client {client['client_id']} registered, "
           f"code -> token {tok['access_token'][:12]}... (expires_in {tok['expires_in']}, refresh token "
           f"{'yes' if tok.get('refresh_token') else 'no'})")
@@ -148,13 +159,28 @@ async def play(base, token):
         print(f"mcp      hand {st['hand']} played out: {st['outcome']}")
 
 
-def table(base):
-    """The browser table, as a guest browser: (ok, detail) or None if /table is absent."""
+class StayOnBase(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect to `issuer`'s origin on `base`'s origin instead."""
+
+    def __init__(self, issuer, base):
+        self.issuer, self.base = urlparse(issuer), urlparse(base)
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        u = urlparse(urllib.parse.urljoin(req.full_url, newurl))
+        if (u.scheme, u.netloc) == (self.issuer.scheme, self.issuer.netloc):
+            newurl = u._replace(scheme=self.base.scheme, netloc=self.base.netloc).geturl()
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def table(base, issuer=None):
+    """The browser table, as a guest browser: (ok, detail) or None if /table is absent.
+    With `issuer`, redirects to the issuer's origin stay on `base` (--stay-on-base)."""
     status, _, _ = get(base + "/table/api/info")
     if status == 404:
         return None
     jar = http.cookiejar.CookieJar()
-    browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    handlers = [urllib.request.HTTPCookieProcessor(jar)] + ([StayOnBase(issuer, base)] if issuer else [])
+    browser = urllib.request.build_opener(*handlers)
 
     def call(method, path, body=None):
         req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body is not None else None,
@@ -199,6 +225,8 @@ def main():
     ap.add_argument("--repo", required=True, help="checkout the server was built from")
     ap.add_argument("--sha")
     ap.add_argument("--require", default="")
+    ap.add_argument("--stay-on-base", action="store_true",
+                    help="the table check follows redirects to the OAuth issuer on --url's origin")
     a = ap.parse_args()
     base, required, failed = a.url.rstrip("/"), set(filter(None, a.require.split(","))), False
 
@@ -208,7 +236,8 @@ def main():
         if ok is False or (ok is None and name in required):
             failed = True
 
-    token = guest_token(base, a.repo)
+    prm = protected_resource(base)
+    token = guest_token(base, a.repo, prm)
     if token is None:
         check("oauth", None, "GET /.well-known/oauth-protected-resource/mcp")
     proto, server, sid = raw_initialize(base, token)
@@ -225,7 +254,8 @@ def main():
             check("version", got == a.sha, f"GET /version -> {status} {body.decode().strip()}")
 
     # The browser table signs in through the same OAuth server: none without it.
-    result = table(base) if token is not None else None
+    issuer = (prm.get("authorization_servers") or [prm["resource"]])[0] if a.stay_on_base and prm else None
+    result = table(base, issuer) if token is not None else None
     if result is None:
         check("table", None, "GET /table/api/info")
     else:

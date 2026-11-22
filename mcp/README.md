@@ -26,6 +26,7 @@ Two transports, one codebase: **stdio** (default, for Claude Desktop and local u
 - `test_docs.py` — the `/docs/*` pages (exact file bytes, content types) and the `docs()` tool. Needs no table.
 - `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
 - `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.
+- `test_smoke.py` — `deploy/local/smoke.py --stay-on-base` against a server whose OAuth issuer is another origin: the table check's sign-in stays on the given URL. Skips without a table.
 
 ## Running it locally
 

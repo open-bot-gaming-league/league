@@ -266,6 +266,12 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp  # 401
 python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs,table
 ```
 
+Against a revision deployed with `--no-traffic --tag cand`, set `B` to
+the tagged URL and add `--stay-on-base` to the smoke command. The
+revision's issuer is still `https://obgl.truemirrorgames.com` (the
+metadata lines show it); the flag keeps the table check's sign-in
+redirects on `$B`, so every request reaches the revision under test.
+
 Then a person, in claude.ai with a fresh account: add the connector, take
 the OAuth option, sign in with GitHub, then with Google, then as a
 guest; each plays a hand. Deploy the same image again; the connector
