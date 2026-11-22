@@ -257,6 +257,139 @@ func TestTableSmoke(t *testing.T) {
 	}
 }
 
+type moveBody struct {
+	Session string `json:"session"`
+	Hand    int    `json:"hand"`
+	Step    int    `json:"step"`
+	Kind    string `json:"kind"`
+	Amount  *int   `json:"amount,omitempty"`
+}
+
+func chips(n int) *int { return &n }
+
+// Bets of any size over HTTP: 400 hands where the person sends kind and
+// amount, often off the menu. legal is in the state exactly on the
+// person's turn and is the hand's; every legal amount is accepted, and
+// everything outside legal is refused without changing the hand; a
+// button's kind and amount is the same move as its index; the chips add
+// up and the bot (uniform play, which bets every menu size, through
+// translation) never stops the hand.
+func TestTableAnySize(t *testing.T) {
+	ts, s := testTable(t)
+	stack := s.g.Stack()
+	rnd := rand.New(rand.NewPCG(5, 6))
+	var st state
+	if code := do(t, ts, "POST", "/api/new", map[string]string{"seat": "alternate"}, &st); code != 200 {
+		t.Fatalf("new: status %d", code)
+	}
+	session := st.Session
+	offMenu, byButton, refused := 0, 0, 0
+	for st.Totals.Hands < 400 {
+		se := s.sessions[session]
+		h := se.hand
+		if st.You.Stack+st.You.Put != stack || st.Bot.Stack+st.Bot.Put != stack || st.Pot != st.You.Put+st.Bot.Put {
+			t.Fatalf("hand %d: chips do not add up: you %+v, bot %+v, pot %d", st.Hand, st.You, st.Bot, st.Pot)
+		}
+		if st.Over {
+			if st.Legal != nil {
+				t.Fatalf("hand %d is over with legal %+v", st.Hand, st.Legal)
+			}
+			hand := st.Hand
+			st = state{}
+			if code := do(t, ts, "POST", "/api/next", map[string]any{"session": session, "hand": hand}, &st); code != 200 {
+				t.Fatalf("next after hand %d: status %d", hand, code)
+			}
+			continue
+		}
+		l := st.Legal
+		if l == nil || *l != *legalOf(h.Legal()) || h.ToAct() != se.seat {
+			t.Fatalf("hand %d: legal %+v on the person's turn, the hand's %+v", st.Hand, l, h.Legal())
+		}
+		if (l.Wager != "") != (l.MaxTo > 0) || l.MinTo > l.MaxTo || l.MaxTo > st.You.Put+st.You.Stack {
+			t.Fatalf("hand %d: legal %+v with %d behind", st.Hand, l, st.You.Stack)
+		}
+		send := func(b any) int { return do(t, ts, "POST", "/api/act", b, nil) }
+		body := func(kind string, amount *int) moveBody { return moveBody{session, st.Hand, st.Step, kind, amount} }
+		// Now and then, everything just outside legal, which must change nothing.
+		if rnd.IntN(8) == 0 {
+			bad := []moveBody{body("", nil), body("shove", nil), body("fold", chips(100)), body("bet", nil)}
+			if l.Wager != "" {
+				bad = append(bad, body(l.Wager, chips(l.MinTo-1)), body(l.Wager, chips(l.MaxTo+1)), body("allin", chips(l.MaxTo-1)))
+			} else {
+				bad = append(bad, body("allin", nil), body("raise", chips(l.MaxTo)))
+			}
+			if !l.Fold {
+				bad = append(bad, body("fold", nil))
+			}
+			if !l.Check {
+				bad = append(bad, body("check", nil))
+			}
+			if l.Call == 0 {
+				bad = append(bad, body("call", nil))
+			} else {
+				bad = append(bad, body("call", chips(l.Call+1)))
+			}
+			for _, b := range bad {
+				if code := send(b); code != 400 {
+					t.Fatalf("hand %d: %+v (legal %+v) was answered %d", st.Hand, b, l, code)
+				}
+				refused++
+			}
+			if code := send(map[string]any{"session": session, "hand": st.Hand, "step": st.Step, "action": 0, "kind": "fold"}); code != 400 {
+				t.Fatalf("hand %d: both forms at once were answered %d", st.Hand, code)
+			}
+			if len(h.Log) != st.Step {
+				t.Fatalf("hand %d: refused moves changed the hand", st.Hand)
+			}
+		}
+		// The move: a button by kind and amount, or any legal size, or a
+		// check, call or fold.
+		var b moveBody
+		switch k := rnd.IntN(10); {
+		case k < 3:
+			btn := st.Actions[rnd.IntN(len(st.Actions))]
+			b = body(btn.Kind, nil)
+			if btn.Kind == "bet" {
+				b.Amount = chips(btn.Amount)
+			}
+			byButton++
+		case k < 7 && l.Wager != "":
+			b = body(l.Wager, chips(l.MinTo+rnd.IntN(l.MaxTo-l.MinTo+1)))
+			if rnd.IntN(2) == 0 {
+				b.Kind = map[string]string{"bet": "raise", "raise": "bet"}[l.Wager] // the two words are one move
+			}
+			onMenu := false
+			for _, btn := range st.Actions {
+				onMenu = onMenu || btn.Amount == *b.Amount
+			}
+			if !onMenu {
+				offMenu++
+			}
+		case l.Check:
+			b = body("check", nil)
+		case l.Call > 0 && rnd.IntN(3) > 0:
+			b = body("call", chips(l.Call))
+		case l.Fold:
+			b = body("fold", nil)
+		default:
+			b = body("allin", nil)
+		}
+		step := st.Step
+		st = state{}
+		if code := do(t, ts, "POST", "/api/act", b, &st); code != 200 {
+			t.Fatalf("legal move %+v: status %d", b, code)
+		}
+		mine := h.Log[step]
+		if mine.Seat != se.seat || (b.Amount != nil && (b.Kind == "bet" || b.Kind == "raise") && mine.To != *b.Amount) {
+			t.Fatalf("hand %d: %+v was played as %+v", st.Hand, b, mine)
+		}
+	}
+	t.Logf("400 hands: %d moves off the menu, %d by a button's kind and amount, %d refusals", offMenu, byButton, refused)
+	if offMenu < 100 || byButton < 100 {
+		t.Errorf("off menu %d, by button %d", offMenu, byButton)
+	}
+}
+
 // A request for a session the server does not have is a 404 (the page
 // starts a new one), and the page and the bot's description are served.
 func TestTableServesPageAndInfo(t *testing.T) {

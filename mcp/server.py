@@ -110,15 +110,25 @@ Cards are two characters, rank then suit: `As`, `Td`, `2c`. Ranks:
 2-9, T, J, Q, K, A. Suits: s, h, d, c. The board shows 0 (before the
 flop), 3 (flop), 4 (turn) or 5 (river, and at a showdown/all-in) cards.
 
-The bet menu (from api/info, read live so it stays correct if it
-changes): a round's first bet is 0.5x, 1x or 2x pot; a raise is 1x pot;
-a re-raise is 1x pot; all-in is always offered. Actions are chosen by
-`index` into the `actions` list the last state gave you -- never guess
-an index, read it from state().
+Bet sizes: you may bet or raise any whole number of chips from the
+minimum raise to all-in. Amounts are "raise to" amounts: the chips you
+will have in this betting round, blinds included. Each state's `legal`
+says what is open on your turn: fold, check, call (chips to call), and
+`wager` ("bet" or "raise") with `minTo`..`maxTo` (maxTo is all-in). Act
+with act("call"), act("raise", 650), act("allin"), act("check"),
+act("fold"). The `actions` list is the bet menu as shortcuts (each bet
+button has its `amount`); act(index) also takes one.
+
+The house bots bet only their menu (from api/info, read live): a
+round's first bet is 0.5x, 1x or 2x pot; a raise is 1x pot; a re-raise
+is 1x pot; all-in. Other sizes they read as the menu sizes around them.
+Their exploitability numbers are measured inside that menu, so against
+any size they are a lower bound.
 
 Each poker tool (state/act/next_hand/score) returns the same compact
 shape: hand, step, round, seat, opponent, you, bot, board, pot, over,
-actions, lines, and (once a hand is over) outcome and net. `act()` fills
+actions, legal (your turn only), lines, and (once a hand is over)
+outcome and net. `act()` fills
 in which hand/step you mean from the last state this session saw, so you
 never need to track those yourself -- just call state() if a result
 looks unexpected before acting again.
@@ -351,6 +361,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "smallBlind": info["smallBlind"],
             "bigBlind": info["bigBlind"],
             "menu": info["menu"],
+            "sizing": info.get("sizing"),
             "bots": info["bots"],
             "docs": ["obgl://docs/AGENTS.md", "obgl://docs/WAYS-TO-PLAY.md"],
         }
@@ -389,12 +400,17 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         return summarize_state(s)
 
     @server.tool()
-    def act(ctx: Context, action: int) -> dict:
-        """Take action `index` from the current state's `actions` list.
-        Fills in which hand/step you mean from the last state this
-        session saw -- you never pass those yourself."""
+    def act(ctx: Context, action: int | str, amount: int | None = None) -> dict:
+        """Make your move. action: "fold", "check", "call", "bet",
+        "raise" or "allin"; amount, for a bet or raise: any whole number
+        of chips from the state's legal.minTo to legal.maxTo, as a
+        "raise to" amount (the chips you will have in this betting round,
+        blinds included). Also accepted: action = an `index`
+        from the state's `actions` list, no amount. Fills in which
+        hand/step you mean from the last state this session saw -- you
+        never pass those yourself."""
         try:
-            s = _poker_for(ctx).act(action)
+            s = _poker_for(ctx).act(action, amount)
         except (NoSessionError, StaleStateError, InvalidActionError) as e:
             return {"error": str(e)}
         except TableError as e:

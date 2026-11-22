@@ -19,7 +19,11 @@ class StaleStateError(Exception):
 
 
 class InvalidActionError(Exception):
-    """The requested action index is not one of the current legal actions."""
+    """The requested action is not one the current state allows."""
+
+
+# act()'s move kinds (API.md "Bet sizes"); bet and raise are one move.
+MOVE_KINDS = ("fold", "check", "call", "bet", "raise", "allin")
 
 
 # Keys from a table state we keep in the compact view handed to the agent.
@@ -31,7 +35,7 @@ class InvalidActionError(Exception):
 # the table's api/state directly, and it costs a few tokens.
 _STATE_VIEW_KEYS = (
     "session", "hand", "step", "round", "seat", "opponent",
-    "you", "bot", "board", "pot", "over", "actions", "lines",
+    "you", "bot", "board", "pot", "over", "actions", "legal", "lines",
 )
 
 
@@ -113,27 +117,55 @@ class PokerSession:
         self.last_state = state
         return state
 
-    def act(self, action: int) -> dict:
+    def act(self, action: int | str, amount: int | None = None) -> dict:
+        """action: a move kind (MOVE_KINDS) with `amount` for a bet or
+        raise, or (the old form) a button's index from `actions`. The
+        table checks the amount against the state's `legal`; a refusal
+        comes back as InvalidActionError with the table's reason."""
         self._require_session()
         assert self.last_state is not None
         if self.last_state.get("over"):
             raise StaleStateError(
                 "the current hand is over: call next_hand() before acting again"
             )
-        valid = {a["index"] for a in self.last_state.get("actions", [])}
-        if action not in valid:
-            raise InvalidActionError(
-                f"action {action} is not one of the current legal actions "
-                f"{sorted(valid)}; call state() if you are not sure what is legal"
-            )
+        if isinstance(action, str) and action.strip().isdigit():
+            action = int(action)  # an index sent as text
+        form: dict[str, Any]
+        if isinstance(action, bool) or not isinstance(action, (int, str)):
+            raise InvalidActionError(f"action must be a kind ({', '.join(MOVE_KINDS)}) or an index, not {action!r}")
+        if isinstance(action, int):
+            valid = {a["index"] for a in self.last_state.get("actions", [])}
+            if action not in valid:
+                raise InvalidActionError(
+                    f"action {action} is not one of the current legal actions "
+                    f"{sorted(valid)}; call state() if you are not sure what is legal"
+                )
+            if amount is not None:
+                raise InvalidActionError(
+                    "an index already says the amount: send act(index) alone, "
+                    "or act(kind, amount) for any size"
+                )
+            form = {"action": action}
+        else:
+            kind = action.strip().lower().replace("-", "").replace(" ", "")
+            if kind not in MOVE_KINDS:
+                raise InvalidActionError(
+                    f"action {action!r} is not a move: use one of {', '.join(MOVE_KINDS)} "
+                    "(with amount for bet/raise), or an index from actions"
+                )
+            form = {"kind": kind, "amount": amount}
         try:
             state = self.client.act(
-                self.session_id, self.last_state["hand"], self.last_state["step"], action
+                self.session_id, self.last_state["hand"], self.last_state["step"], **form
             )
         except TableError as e:
             if e.status == 409:
                 raise StaleStateError(
                     f"stale: {e.message}; call state() to refresh, then act() again"
+                ) from e
+            if e.status == 400:
+                raise InvalidActionError(
+                    f"{e.message}; see legal in the last state (call state() if unsure)"
                 ) from e
             raise
         self.last_state = state

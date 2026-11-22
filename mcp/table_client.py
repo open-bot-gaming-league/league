@@ -80,8 +80,22 @@ class TableClient:
     def state(self, session: str) -> dict:
         return self._get("api/state", session=session)
 
-    def act(self, session: str, hand: int, step: int, action: int) -> dict:
-        return self._post("api/act", {"session": session, "hand": hand, "step": step, "action": action})
+    def act(
+        self,
+        session: str,
+        hand: int,
+        step: int,
+        action: int | None = None,
+        kind: str | None = None,
+        amount: int | None = None,
+    ) -> dict:
+        """Either form of api/act: `action`, a button's index (the old
+        form, kept for one release), or `kind` with `amount` (any legal
+        size; amount is the "raise to" chips -- see API.md "Bet sizes")."""
+        return self._post(
+            "api/act",
+            {"session": session, "hand": hand, "step": step, "action": action, "kind": kind, "amount": amount},
+        )
 
     def next(self, session: str, hand: int, seat: str | None = None, opponent: str | None = None) -> dict:
         return self._post(

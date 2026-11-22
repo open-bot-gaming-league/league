@@ -24,7 +24,7 @@ of code.
 | blueprint | `blueprint.go` | 1 byte per (infoset, action), written to a file and served through mmap |
 | responders | `responder.go` | real-card players that exploit a blueprint by play, a lower bound that works on any tree: local best response (one-step lookahead) and a rollout responder |
 | head-to-head | `match.go` | two blueprints on the same tree, every deal in both seatings |
-| table | `table.go`, `cmd/table` | a person against a blueprint in the browser: one hand at a time on the blueprint's own tree, integer chips, session score and hand history (`cmd/table/API.md`) |
+| table | `table.go`, `translate.go`, `cmd/table` | a person against a blueprint in the browser: one hand at a time, integer chips, any legal bet size; the blueprint plays its own tree's menu through pseudo-harmonic action translation; session score and hand history (`cmd/table/API.md`) |
 
 Go standard library only. Linux only (mmap through `syscall`).
 
@@ -95,8 +95,10 @@ rebuild from the command above, bit for bit (fixed seed).
 ## Running the table
 
 `cmd/table` serves the browser page in `cmd/table/static`: a person
-against a blueprint, one hand at a time, on the blueprint's own betting
-tree. `cmd/table/API.md` documents the HTTP routes the page calls.
+against a blueprint, one hand at a time. The person bets any legal size;
+the blueprint bets its own tree's menu and reads other sizes by action
+translation (`translate.go`). `cmd/table/API.md` documents the HTTP
+routes the page calls.
 
 ```
 go run ./cmd/table -config configs/table_50bb.json -bots bots.json -hands hands.jsonl -addr 127.0.0.1:9790

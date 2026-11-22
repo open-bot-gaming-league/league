@@ -11,7 +11,8 @@ venv with mcp==2.3.0). Checks, printing one line each:
            button, /token (DIR/mcp/oauth_testing.py) -- used by every mcp step below
   mcp      raw JSON-RPC `initialize` POST to /mcp (shows the protocol version
            and the Mcp-Session-Id header), then, with the MCP client:
-           new_session(turtle) and one act() on its first legal action
+           new_session(turtle), one act() on its first legal action, and (a sha with
+           any-size betting) one off-menu raise by kind and amount, played to the end
   version  GET /version == {"sha": SHA}        (only if --sha)
   docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte
 A check whose route is missing (404) prints "absent" and passes unless it is
@@ -107,6 +108,36 @@ async def play(base, token):
         st2 = payload(await c.call_tool("act", {"action": first["index"]}))
         assert "error" not in st2, st2
         print(f"mcp      act({first['index']}={first['kind']}): step {st['step']} -> {st2['step']}, over={st2.get('over')}")
+        # Any bet size (a sha with real sizing has `legal`): one off-menu
+        # wager by kind and amount, then check/call the hand to its end,
+        # so the bot answers an off-menu size through translation.
+        st = st2
+        for _ in range(10):  # to a decision of ours with a wager open
+            if st.get("over"):
+                st = payload(await c.call_tool("next_hand", {}))
+                continue
+            if "legal" not in st:
+                print("mcp      sizing absent: this sha's state has no `legal` (menu-only)")
+                return
+            if st["legal"].get("wager"):
+                break
+            st = payload(await c.call_tool("act", {"action": "check" if st["legal"]["check"] else "call"}))
+        legal, menu = st["legal"], {a.get("amount") for a in st["actions"]}
+        assert legal.get("wager"), st
+        amount = next(x for x in range(legal["minTo"] + (legal["maxTo"] - legal["minTo"]) // 7, legal["maxTo"]) if x not in menu)
+        st2 = payload(await c.call_tool("act", {"action": legal["wager"], "amount": amount}))
+        assert "error" not in st2, st2
+        mine = [line for line in st2["lines"] if line.startswith("You ")][-1]
+        assert mine.endswith(f" {amount}") or f" {amount}," in mine, (mine, amount)
+        print(f"mcp      act({legal['wager']!r}, {amount}) off the menu (legal {legal['minTo']}-{legal['maxTo']}): \"{mine}\", step {st['step']} -> {st2['step']}")
+        st, moves = st2, 0
+        while not st.get("over") and moves < 20:
+            legal = st["legal"]
+            st = payload(await c.call_tool("act", {"action": "check" if legal["check"] else "call"}))
+            assert "error" not in st, st
+            moves += 1
+        assert st.get("over"), st
+        print(f"mcp      hand {st['hand']} played out: {st['outcome']}")
 
 
 def main():

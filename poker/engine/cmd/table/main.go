@@ -1,6 +1,7 @@
 // table serves a web page where a person plays heads-up no-limit hold'em
-// against a blueprint, on the blueprint's own betting tree: both players
-// choose among the tree's bet sizes, stacks reset every hand.
+// against a blueprint: the person bets any legal size (the page offers
+// the tree's menu as buttons), the blueprint plays its own tree's sizes
+// through action translation (engine.TreeView), stacks reset every hand.
 //
 //	go run ./cmd/table -config configs/table_50bb.json -bots served.json \
 //	    -hands hands.jsonl -addr 127.0.0.1:9790
@@ -191,6 +192,7 @@ type session struct {
 	seat     int    // the person's seat in the current hand: 0 is the small blind
 	opponent *bot   // in the current hand
 	hand     *engine.TableHand
+	view     *engine.TreeView   // the bot's view of the hand on its tree
 	number   int                // of the current hand, from 1
 	finished int                // hands finished
 	net      int                // chips the person has won over the finished hands
@@ -248,7 +250,12 @@ type request struct {
 	Opponent string `json:"opponent"`
 	Hand     int    `json:"hand"`   // act, next: the hand the page is looking at
 	Step     int    `json:"step"`   // act: the number of actions in that hand the page has seen
-	Action   *int   `json:"action"` // act: index into the state's actions
+	Action   *int   `json:"action"` // act, the old form: index into the state's actions
+	// act: a move of any legal size. Kind is fold, check, call, bet,
+	// raise or allin; Amount, for a bet or raise, is the chips the seat
+	// will have in this betting round ("raise to").
+	Kind   string `json:"kind"`
+	Amount *int   `json:"amount"`
 }
 
 // apiError is a refusal with its HTTP status.
@@ -300,6 +307,7 @@ type gameInfo struct {
 	SmallBlind int       `json:"smallBlind"`
 	BigBlind   int       `json:"bigBlind"`
 	Menu       string    `json:"menu"`
+	Sizing     string    `json:"sizing"`
 }
 
 func (s *server) gameInfo() gameInfo {
@@ -317,7 +325,10 @@ func (s *server) gameInfo() gameInfo {
 	}
 	return gameInfo{Bots: infos, StackBB: c.StackBB, SmallBlind: c.SB, BigBlind: c.BB,
 		Menu: fmt.Sprintf("first bet of a round %s pot; raise %s pot; re-raises %s pot; all-in always",
-			fr(c.Opening), fr(c.RaiseMenu), fr(c.ThreebetMenu))}
+			fr(c.Opening), fr(c.RaiseMenu), fr(c.ThreebetMenu)),
+		Sizing: "You may bet or raise any whole number of chips from the minimum raise to all-in; the menu is the sizes the buttons offer. " +
+			"The house bots bet only the menu's sizes and read other sizes as the menu sizes around them. " +
+			"Their exploitability numbers are measured inside the menu, so against any size they are a lower bound."}
 }
 
 func (s *server) session(id string) (*session, error) {
@@ -440,7 +451,7 @@ func (s *server) deal(se *session) error {
 	if err != nil {
 		return err
 	}
-	se.hand, se.recorded = hand, false
+	se.hand, se.view, se.recorded = hand, engine.NewTreeView(se.opponent.g), false
 	se.number++
 	return s.botActs(se)
 }
@@ -450,8 +461,7 @@ func (s *server) deal(se *session) error {
 func (s *server) botActs(se *session) error {
 	h := se.hand
 	for !h.Over() && h.ToAct() != se.seat {
-		a := se.opponent.bp.Action(h.Node(), h.Bucket(h.ToAct()), s.rnd.Uint32())
-		if err := h.Act(a); err != nil {
+		if err := se.view.Act(h, se.opponent.bp, s.rnd.Uint32); err != nil {
 			return err
 		}
 	}
@@ -487,16 +497,71 @@ func (s *server) act(q *request) (any, error) {
 	case q.Step != len(h.Log):
 		// A second click that was meant for an earlier decision.
 		return nil, refuse(http.StatusConflict, "the hand has moved on since that was sent")
-	case q.Action == nil || *q.Action < 0 || *q.Action >= len(h.Options()):
-		return nil, refuse(http.StatusBadRequest, "action must be one of the %d offered", len(h.Options()))
-	}
-	if err := h.Act(*q.Action); err != nil {
-		return nil, err
+	case q.Action != nil && (q.Kind != "" || q.Amount != nil):
+		return nil, refuse(http.StatusBadRequest, "send either action (a button's index) or kind and amount, not both")
+	case q.Action != nil:
+		if *q.Action < 0 || *q.Action >= len(h.Options()) {
+			return nil, refuse(http.StatusBadRequest, "action must be one of the %d offered", len(h.Options()))
+		}
+		if err := h.Act(*q.Action); err != nil {
+			return nil, err
+		}
+	default:
+		kind, to, err := move(h.Legal(), q.Kind, q.Amount)
+		if err != nil {
+			return nil, err
+		}
+		if err := h.Play(kind, to); err != nil {
+			return nil, refuse(http.StatusBadRequest, "%s", strings.TrimPrefix(err.Error(), "engine: "))
+		}
 	}
 	if err := s.botActs(se); err != nil {
 		return nil, err
 	}
 	return s.state(se, false), nil
+}
+
+// move reads an act request's kind and amount as a move: the kind for
+// TableHand.Play and the "to" amount of a wager. bet and raise are the
+// same move (a wager to amount; the state's legal.wager says which word
+// fits); allin is a wager to legal.maxTo. An amount on a fold or check,
+// or one that is not the call on a call, is refused rather than ignored:
+// it means the sender misread the state. The hand checks the range.
+func move(l engine.TableLegal, kind string, amount *int) (engine.ActionKind, int, error) {
+	bad := func(format string, args ...any) (engine.ActionKind, int, error) {
+		return 0, 0, refuse(http.StatusBadRequest, format, args...)
+	}
+	switch kind {
+	case "fold", "check":
+		if amount != nil && *amount != 0 {
+			return bad("%s takes no amount", kind)
+		}
+		if kind == "fold" {
+			return engine.ActFold, 0, nil
+		}
+		return engine.ActCheck, 0, nil
+	case "call":
+		if amount != nil && *amount != l.Call {
+			return bad("a call here is %d chips, not %d", l.Call, *amount)
+		}
+		return engine.ActCall, 0, nil
+	case "bet", "raise":
+		if amount == nil {
+			return bad("%s needs an amount: the chips you will have in this betting round (see legal.minTo, legal.maxTo)", kind)
+		}
+		return engine.ActBet, *amount, nil
+	case "allin":
+		if !l.Wager {
+			return bad("no bet or raise is possible here: call or fold")
+		}
+		if amount != nil && *amount != l.MaxTo {
+			return bad("all-in here is %d, not %d", l.MaxTo, *amount)
+		}
+		return engine.ActBet, l.MaxTo, nil
+	case "":
+		return bad("send action (a button's index) or kind (fold, check, call, bet, raise, allin) with amount")
+	}
+	return bad("kind must be fold, check, call, bet, raise or allin, not %q", kind)
 }
 
 func (s *server) next(q *request) (any, error) {
@@ -541,9 +606,10 @@ type state struct {
 	Board    []string `json:"board"`
 	Pot      int      `json:"pot"`
 	Over     bool     `json:"over"`
-	Actions  []button `json:"actions"` // empty unless it is the person's turn
-	Lines    []string `json:"lines"`   // the hand so far, one line per action
-	Events   []event  `json:"events"`  // the same actions in structured form, for the page to animate
+	Actions  []button `json:"actions"`         // empty unless it is the person's turn
+	Legal    *legal   `json:"legal,omitempty"` // every legal move, any size; only on the person's turn
+	Lines    []string `json:"lines"`           // the hand so far, one line per action
+	Events   []event  `json:"events"`          // the same actions in structured form, for the page to animate
 	Outcome  string   `json:"outcome,omitempty"`
 	Net      int      `json:"net"` // the person's result in this hand, once over
 	Totals   totals   `json:"totals"`
@@ -572,9 +638,36 @@ type event struct {
 }
 
 type button struct {
-	Index int    `json:"index"`
-	Label string `json:"label"`
-	Kind  string `json:"kind"` // fold, check, call, bet, allin
+	Index  int    `json:"index"`
+	Label  string `json:"label"`
+	Kind   string `json:"kind"`             // fold, check, call, bet, allin
+	Amount int    `json:"amount,omitempty"` // bet, allin: the "to" amount, as act's amount
+}
+
+// legal is every move open to the person, any size: what act's kind and
+// amount may be.
+type legal struct {
+	Fold  bool `json:"fold"`
+	Check bool `json:"check"`
+	Call  int  `json:"call,omitempty"` // chips a call adds; absent: no call
+	// Wager is "bet" or "raise", what a wager is called here; absent: no
+	// wager is possible. Its amount, the chips the seat will have in this
+	// betting round, is any whole number from MinTo to MaxTo; MaxTo is
+	// all-in, and MinTo == MaxTo when all-in is short of a full raise.
+	Wager string `json:"wager,omitempty"`
+	MinTo int    `json:"minTo,omitempty"`
+	MaxTo int    `json:"maxTo,omitempty"`
+}
+
+func legalOf(l engine.TableLegal) *legal {
+	out := &legal{Fold: l.Fold, Check: l.Check, Call: l.Call}
+	if l.Wager {
+		out.Wager, out.MinTo, out.MaxTo = "bet", l.MinTo, l.MaxTo
+		if l.Raise {
+			out.Wager = "raise"
+		}
+	}
+	return out
 }
 
 type totals struct {
@@ -619,8 +712,13 @@ func (s *server) state(se *session, all bool) state {
 		st.Finished = &se.history[len(se.history)-1]
 	} else if h.ToAct() == se.seat {
 		for i, o := range h.Options() {
-			st.Actions = append(st.Actions, button{Index: i, Label: label(o, onButton), Kind: kind(o)})
+			b := button{Index: i, Label: label(o, onButton), Kind: kind(o)}
+			if o.Kind == engine.ActBet {
+				b.Amount = o.To
+			}
+			st.Actions = append(st.Actions, b)
 		}
+		st.Legal = legalOf(h.Legal())
 	}
 	st.Totals = s.totals(se.finished, se.net)
 	st.Against = map[string]totals{}

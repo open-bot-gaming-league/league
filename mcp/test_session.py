@@ -53,6 +53,7 @@ class FakeClient:
         self._info = info
         self._script = list(script)  # list of (method_name, response_or_exception)
         self.calls = []
+        self.acts = []  # every act() call's arguments
 
     def _next(self, name):
         self.calls.append(name)
@@ -72,7 +73,8 @@ class FakeClient:
     def state(self, session):
         return self._next("state")
 
-    def act(self, session, hand, step, action):
+    def act(self, session, hand, step, action=None, kind=None, amount=None):
+        self.acts.append({"hand": hand, "step": step, "action": action, "kind": kind, "amount": amount})
         return self._next("act")
 
     def next(self, session, hand, seat=None, opponent=None):
@@ -238,3 +240,59 @@ def test_score_pulls_a_fresh_state_and_computes_from_its_history():
     assert out["hands"] == 2
     assert out["net_bb"] == -2.0
     assert out["bb_per100"] == -100.0
+
+
+# -- act(): kind + amount, and the old index form ------------------------
+
+_LEGAL = {"fold": True, "check": False, "call": 100, "wager": "raise", "minTo": 300, "maxTo": 5000}
+
+
+def _poker_at(state, *more):
+    client = FakeClient(INFO, [("new", state), *more])
+    poker = PokerSession(client)
+    poker.new()
+    return poker, client
+
+
+def test_summarize_state_keeps_legal():
+    s = _state(1, 0, actions=[{"index": 0, "label": "Fold", "kind": "fold"}])
+    s["legal"] = _LEGAL
+    assert summarize_state(s)["legal"] == _LEGAL
+
+
+def test_act_sends_kind_and_amount():
+    s1 = _state(1, 2, actions=[{"index": 0, "label": "Fold", "kind": "fold"}])
+    poker, client = _poker_at(s1, ("act", _state(1, 4)), ("act", _state(1, 6)))
+    poker.act("raise", 650)
+    assert client.acts[-1] == {"hand": 1, "step": 2, "action": None, "kind": "raise", "amount": 650}
+    poker.act(" All-In ")  # spelled loosely: still the allin kind
+    assert client.acts[-1]["kind"] == "allin" and client.acts[-1]["amount"] is None
+    assert client.acts[-1]["step"] == 4  # from the state the first act returned
+
+
+def test_act_old_index_form_still_sends_action():
+    s1 = _state(1, 0, actions=[{"index": 0, "label": "Fold", "kind": "fold"}, {"index": 1, "label": "Call 50", "kind": "call"}])
+    poker, client = _poker_at(s1, ("act", _state(1, 1)), ("act", _state(1, 2)))
+    poker.act(1)
+    assert client.acts[-1] == {"hand": 1, "step": 0, "action": 1, "kind": None, "amount": None}
+    poker.last_state = s1
+    poker.act("0")  # an index sent as text
+    assert client.acts[-1]["action"] == 0
+
+
+@pytest.mark.parametrize("action,amount", [("shove", None), (0, 300), (True, None), (None, None)])
+def test_act_refuses_what_is_not_a_move(action, amount):
+    s1 = _state(1, 0, actions=[{"index": 0, "label": "Fold", "kind": "fold"}])
+    poker, client = _poker_at(s1)
+    with pytest.raises(InvalidActionError):
+        poker.act(action, amount)
+    assert client.acts == []  # refused before the table was asked
+
+
+def test_act_400_from_table_becomes_invalid_action_with_the_reason():
+    s1 = _state(1, 0, actions=[{"index": 0, "label": "Fold", "kind": "fold"}])
+    err = TableError(400, "a wager here goes to 300-5000 chips (all-in 5000), not 250")
+    poker, _ = _poker_at(s1, ("act", err))
+    with pytest.raises(InvalidActionError, match="300-5000"):
+        poker.act("raise", 250)
+    assert poker.last_state is s1  # a refused move leaves the cached state alone

@@ -3,7 +3,7 @@
   "id": "turtle",
   "name": "Turtle",
   "trained": "CFR-BR, 200 buckets per street, 1,500 iterations (2026-11-19 17:03 to 2026-11-20 02:35, an early checkpoint of an overnight run)",
-  "exploitability": "0.556 bb/hand, exact (a full best response, no sampling; measured 2026-11-20): the most a perfect opponent who sees real cards and stays inside this bet menu can win per hand against it.",
+  "exploitability": "0.556 bb/hand, exact (a full best response, no sampling; measured 2026-11-20): the most a perfect opponent who sees real cards and stays inside this bet menu can win per hand against it. You may bet any size; Turtle bets only the menu and reads other sizes as the menu sizes around them, so against any size this number is a lower bound.",
   "note": "The default: the less exploitable of the two bots on offer for Milestone 1, by a factor of about 2.7.",
   "abs": "abs-200-200-200.bin",
   "blueprint": "turtle-k200-1500.bp"
@@ -12,7 +12,7 @@
   "id": "ox",
   "name": "Ox",
   "trained": "Plain MCCFR, 2,000 buckets per street, 1,000,000,000 iterations (by 2026-11-20 07:09)",
-  "exploitability": "1.493 bb/hand, exact (a full best response, no sampling; measured 2026-11-20 22:52).",
+  "exploitability": "1.493 bb/hand, exact (a full best response, no sampling; measured 2026-11-20 22:52), inside this bet menu. You may bet any size; Ox bets only the menu and reads other sizes as the menu sizes around them, so against any size this number is a lower bound.",
   "note": "More exploitable in the worst case than Turtle, by the measure above; which is harder for a person to beat in practice is not known -- play either.",
   "abs": "abs-2000-2000-2000-p3.bin",
   "blueprint": "ox-k2000-1e9.bp"

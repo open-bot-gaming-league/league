@@ -47,7 +47,9 @@ and `served.json` = this sha's-era `served.example.json`, verbatim.
 had no manifest before this (grep for sha256/manifest/checksum found nothing);
 the only numbers it states are sizes (CLOUDRUN.md: ~405 MB x2, ~3.8 MB,
 ~37.7 MB), which match the files (404,821,288 / 3,792,669 / 37,711,869 bytes).
-The manifest matches the deployed image's data (all five hashes, byte for byte).
+The four bot files' hashes match the deployed image's byte for byte. `served.json`'s
+is the repo's example file at this sha: when `served.example.json` changes, the manifest
+line changes with it, and the deployed image's `served.json` matches only once that sha is deployed.
 Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-data.sha256`.
 
 ## Where local differs from the image
@@ -98,4 +100,4 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
 - `OBGL_GIT_SHA` is passed as the Dockerfile's `--build-arg`, the way a real build
   passes it. A sha whose Dockerfile has no such `ARG` (before the /version commit) has no
   `/version` route either, and image.py says so.
-- `served.json` is the repo's example file; the deployed image's matches it (see the manifest).
+- `served.json` is the repo's example file; the deployed image's matches it when the image was built from the same sha (see the manifest).

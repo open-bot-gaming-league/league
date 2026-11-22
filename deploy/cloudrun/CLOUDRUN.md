@@ -314,8 +314,8 @@ server.)
    one hand." Pass when the chat (a) answers from the connector (it
    calls `docs('agents')`), with no github.com fetch in its tool log,
    (b) states the rules correctly (50 bb heads-up, stacks reset each
-   hand, the bet menu), and (c) completes a hand. Repeat once with web
-   access on and the prompt "Read
+   hand, any bet size from the minimum raise to all-in), and (c)
+   completes a hand. Repeat once with web access on and the prompt "Read
    https://obgl.truemirrorgames.com/docs/AGENTS.md and play".
 
 ## Tests
