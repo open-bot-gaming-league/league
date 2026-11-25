@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 """smoke.py: prove a running OBGL stack answers, over HTTP only.
 
-  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs] [--stay-on-base]
+  smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs] [--sign-in IDP] [--stay-on-base]
 
 Needs the `mcp` package (run it with the venv python run.sh built, or any
 venv with mcp==2.3.0). Checks, printing one line each:
   oauth    if the server advertises OAuth (GET /.well-known/oauth-protected-resource/mcp):
-           /mcp without a token is 401, then a guest token through the real flow --
-           dynamic registration, /authorize with PKCE, the sign-in page, the guest
-           button, /token (DIR/mcp/oauth_testing.py) -- used by every mcp step below
-  mcp      raw JSON-RPC `initialize` POST to /mcp (shows the protocol version
+           /mcp without a token is 401; dynamic registration and /authorize with PKCE
+           lead to the sign-in page, which offers no guest sign-in (POST /login/guest
+           is 404), keeps its CSP, links the Terms and Privacy pages, and whose Cancel
+           sends access_denied back to the client. With --sign-in: then a token
+           through the real flow (the sign-in page's IDP button, /token;
+           DIR/mcp/oauth_testing.py), used by every mcp step below
+  mcp      (with OAuth: only with --sign-in) raw JSON-RPC `initialize` POST to /mcp (shows the protocol version
            and the Mcp-Session-Id header), then, with the MCP client:
            new_session(turtle), one act() on its first legal action, and (a sha with
            any-size betting) one off-menu raise by kind and amount, played to the end
   version  GET /version == {"sha": SHA}        (only if --sha)
   docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte; and GET /docs/privacy
            and /docs/terms are 200 text/html (the pages the sign-in screens link to)
-  table    the browser table at /table/ (with OAuth): a browser (a cookie jar) signs
-           in as a guest through /table/signin and the sign-in page, gets the page,
+  table    GET /table/api/info is 200 and lists the bots (public: no sign-in). Then the
+           browser table at /table/ (with OAuth: only with --sign-in): a browser
+           (a cookie jar) signs in through /table/signin and the sign-in page, gets the page,
            starts a session, acts, watches it through its watch link (no session id
            in the answer), and the watch token is refused where a session id acts;
            without the cookie the API answers 401
+--sign-in IDP: click that IdP's button ("github") on the sign-in page. Only a server
+wired to a test IdP (mcp/oauth_testing.FakeIdP, as in mcp/test_smoke.py) lets a script
+through it; a real deployment or the local stack (run.sh) has no such IdP, so there the
+signed-in steps (mcp, table) are skipped, and printed as skipped.
 A check whose route is missing (404) prints "absent" and passes unless it is
 named in --require. Exit 1 on any failure.
 
@@ -80,12 +88,10 @@ def protected_resource(base):
     return None if status == 404 else json.loads(body)
 
 
-def guest_token(base, repo, prm):
-    """A guest access token through the server's real OAuth flow, or None
-    if this sha has no OAuth (no protected-resource metadata). The token is
-    for the resource the server names, which is the issuer's /mcp."""
-    if prm is None:
-        return None
+def sign_in_page_check(base, repo, prm):
+    """The unauthenticated half of OAuth, through the real routes: /mcp without a
+    token is 401; register a client, /authorize, read the sign-in page, then
+    Cancel. Returns (client, resource) for a sign-in that follows."""
     try:
         raw_initialize(base)
         raise AssertionError("OAuth is advertised but /mcp answered without a token")
@@ -93,10 +99,41 @@ def guest_token(base, repo, prm):
         assert e.code == 401, e.code
         print(f"oauth    /mcp without a token: 401, WWW-Authenticate {e.headers.get('www-authenticate')}")
     sys.path.insert(0, os.path.join(repo, "mcp"))
+    import httpx2
     import oauth_testing
 
-    client, tok = asyncio.run(oauth_testing.guest_tokens(base, resource=prm["resource"]))
-    print(f"oauth    guest sign-in: resource {prm['resource']}, client {client['client_id']} registered, "
+    async def go():
+        async with httpx2.AsyncClient(timeout=10) as http:
+            client = await oauth_testing.register(http, base)
+            _, challenge = oauth_testing.pkce_pair()
+            request_id = await oauth_testing.start_authorize(
+                http, base, client, challenge=challenge, state="smoke", resource=prm["resource"])
+            page = await http.get(f"{base}/login", params={"request": request_id})
+            assert page.status_code == 200, page.status_code
+            text = page.text
+            assert "guest" not in text.lower(), "the sign-in page still mentions guests"
+            csp = page.headers["content-security-policy"]
+            assert "default-src 'none'" in csp and "script-src" not in csp and "<script" not in text, csp
+            for link in ("/docs/terms", "/docs/privacy"):
+                assert f'href="{link}"' in text, f"the sign-in page lacks the {link} link"
+            guest = await http.post(f"{base}/login/guest", data={"request": request_id})
+            assert guest.status_code == 404, f"POST /login/guest -> {guest.status_code}"
+            cancel = await http.post(f"{base}/login/cancel", data={"request": request_id})
+            assert cancel.status_code == 303 and "error=access_denied" in cancel.headers["location"], cancel.headers
+            buttons = re.findall(r"Continue with (\w+)", text)
+            print(f"oauth    sign-in page: buttons {', '.join(buttons) or 'none'}, no guest, CSP kept, terms and privacy linked; "
+                  f"POST /login/guest 404; Cancel -> access_denied")
+
+    asyncio.run(go())
+
+
+def sign_in_token(base, repo, prm, idp):
+    """An access token through the server's real OAuth flow, signing in with
+    the `idp` button, for the resource the server names (the issuer's /mcp)."""
+    import oauth_testing
+
+    client, tok = asyncio.run(oauth_testing.sign_in_tokens(base, idp, resource=prm["resource"]))
+    print(f"oauth    {idp} sign-in: resource {prm['resource']}, client {client['client_id']} registered, "
           f"code -> token {tok['access_token'][:12]}... (expires_in {tok['expires_in']}, refresh token "
           f"{'yes' if tok.get('refresh_token') else 'no'})")
     return tok["access_token"]
@@ -173,12 +210,18 @@ class StayOnBase(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def table(base, issuer=None):
-    """The browser table, as a guest browser: (ok, detail) or None if /table is absent.
-    With `issuer`, redirects to the issuer's origin stay on `base` (--stay-on-base)."""
-    status, _, _ = get(base + "/table/api/info")
+def table_info(base):
+    """The table's public info route, no sign-in: (ok, detail), or None if /table is absent."""
+    status, _, body = get(base + "/table/api/info")
     if status == 404:
         return None
+    bots = [b["id"] for b in json.loads(body).get("bots", [])] if status == 200 else []
+    return status == 200 and bool(bots), f"GET /table/api/info -> {status}, bots {', '.join(bots) or 'none'} (no sign-in)"
+
+
+def table(base, idp, issuer=None):
+    """The browser table, as a browser signed in with `idp`: (ok, detail).
+    With `issuer`, redirects to the issuer's origin stay on `base` (--stay-on-base)."""
     jar = http.cookiejar.CookieJar()
     handlers = [urllib.request.HTTPCookieProcessor(jar)] + ([StayOnBase(issuer, base)] if issuer else [])
     browser = urllib.request.build_opener(*handlers)
@@ -192,17 +235,17 @@ def table(base, issuer=None):
         except urllib.error.HTTPError as e:
             return e.code, json.load(e)
 
-    # /table/ -> /table/signin -> /authorize -> the sign-in page; click "Continue as guest";
+    # /table/ -> /table/signin -> /authorize -> the sign-in page; click the `idp` button;
     # -> /table/signin/callback (sets the cookies) -> /table/, the page.
     with browser.open(base + "/table/", timeout=10) as r:
         request_id = parse_qs(urlparse(r.url).query)["request"][0]
     form = urlencode({"request": request_id}).encode()
-    with browser.open(urllib.request.Request(base + "/login/guest", data=form, method="POST"), timeout=10) as r:
+    with browser.open(urllib.request.Request(f"{base}/login/{idp}", data=form, method="POST"), timeout=10) as r:
         page = r.read().decode()
         assert urlparse(r.url).path == "/table/" and re.search(r'<base href="/table/">', page), r.url
-    print(f"table    guest sign-in at /table/: cookies {sorted(c.name for c in jar)}, page {len(page)} bytes")
+    print(f"table    {idp} sign-in at /table/: cookies {sorted(c.name for c in jar)}, page {len(page)} bytes")
     status, info = call("GET", "/table/api/info")
-    assert status == 200 and info["league"]["account"]["guest"], info
+    assert status == 200 and info["league"]["account"]["name"], info
     status, s = call("POST", "/table/api/new", {"seat": "alternate", "opponent": "turtle"})
     assert status == 200 and s["control"]["yours"], (status, s)
     a = next((x for x in s["actions"] if x["kind"] in ("check", "call")), s["actions"][0])
@@ -226,6 +269,7 @@ def main():
     ap.add_argument("--repo", required=True, help="checkout the server was built from")
     ap.add_argument("--sha")
     ap.add_argument("--require", default="")
+    ap.add_argument("--sign-in", metavar="IDP", help="sign in with this IdP's button (only a server wired to a test IdP allows it)")
     ap.add_argument("--stay-on-base", action="store_true",
                     help="the table check follows redirects to the OAuth issuer on --url's origin")
     a = ap.parse_args()
@@ -238,13 +282,20 @@ def main():
             failed = True
 
     prm = protected_resource(base)
-    token = guest_token(base, a.repo, prm)
-    if token is None:
+    token = None
+    if prm is None:
         check("oauth", None, "GET /.well-known/oauth-protected-resource/mcp")
-    proto, server, sid = raw_initialize(base, token)
-    print(f"mcp      initialize: protocol {proto}, server {server!r}, Mcp-Session-Id {sid}"
-          f"{', with the guest bearer token' if token else ''}")
-    asyncio.run(play(base, token))
+    else:
+        sign_in_page_check(base, a.repo, prm)
+        if a.sign_in:
+            token = sign_in_token(base, a.repo, prm, a.sign_in)
+    if prm is None or token is not None:
+        proto, server, sid = raw_initialize(base, token)
+        print(f"mcp      initialize: protocol {proto}, server {server!r}, Mcp-Session-Id {sid}"
+              f"{', with the bearer token' if token else ''}")
+        asyncio.run(play(base, token))
+    else:
+        print("mcp      skipped: needs a signed-in account (--sign-in against a server wired to a test IdP)")
 
     if a.sha:
         status, _, body = get(base + "/version")
@@ -256,11 +307,15 @@ def main():
 
     # The browser table signs in through the same OAuth server: none without it.
     issuer = (prm.get("authorization_servers") or [prm["resource"]])[0] if a.stay_on_base and prm else None
-    result = table(base, issuer) if token is not None else None
-    if result is None:
+    info = table_info(base)
+    if info is None:
         check("table", None, "GET /table/api/info")
     else:
-        check("table", *result)
+        check("table", *info)
+        if token is not None:
+            check("table", *table(base, a.sign_in, issuer))
+        elif prm is not None:
+            print("table    skipped: the signed-in steps need a signed-in account (--sign-in against a server wired to a test IdP)")
 
     status, hdrs, body = get(base + "/docs/AGENTS.md")
     if status == 404:

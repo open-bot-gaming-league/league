@@ -133,18 +133,33 @@ Notes for a page:
   (this server alone) it is the page described here. The extra ids it
   uses: `#watch-bar` (`#watch-status`, `#take-over`), `#league`
   (`#account-name`, `#sign-out`, `#tag-in`), `#you-name`.
-- The page always sends the `{kind, amount}` form of `api/act`: a menu
-  button its own kind and amount, the bet slider (`#sizer`: presets
-  `#presets button[data-preset]` = 0.5, 0.75, 1 or `allin`, `#size-range`,
-  the number box `#size-amount`, the button `#size-go`, key R) `legal.wager`
-  and any amount from `legal.minTo` to `legal.maxTo`. A preset's amount is
-  `you.inRound + call + f * (pot + call)`, clamped to that range: the
-  fraction f of the pot after calling, counted from where a call leaves
-  you, the way the menu's sizes are. The slider shows only when the range
-  has more than one amount.
+- The page always sends the `{kind, amount}` form of `api/act`. The dock
+  has three buttons: Fold, Check or Call, and the wager, `#size-go`
+  (`#actions button.fold|check|call|bet`, shortcuts F, C, R), which sends
+  `legal.wager` with the amount the sizer shows. The menu's own buttons
+  are gone from the page (`actions` is for other clients). The sizer
+  (`#sizer`: the detents `#detents button`, the track `#size-range`, the
+  box `#size-amount`) shows whenever the range has more than one amount.
+  All amounts on the page are in big blinds (the box takes 0.5 bb steps);
+  the server is sent chips, always the amount shown. Three spots have
+  their own detents and their own remembered size, `localStorage`
+  `poker50.size.pre|bet|raise`, kept as a unit, never as chips: preflop
+  in multiples of the bet faced (2x 2.5x 3x 4x), a postflop bet in
+  fractions of the pot after calling (1/3 1/2 3/4 1, counted as
+  `you.inRound + call + f * (pot + call)`, the way the menu's sizes are),
+  a postflop raise in multiples of the bet faced (2.5x 3x 4x); each also
+  has Min (`legal.minTo`) and All-in (`legal.maxTo`). The track spaces
+  the detents evenly, is linear in chips between them, snaps within 12%
+  of a gap of a detent, and moves in 0.5 bb steps otherwise. Keys: 1-6
+  pick a size (no bet), arrows 0.5 bb (Shift 1 bb), PageUp/PageDown the
+  next detent, R or Enter bets the size shown, F fold, C check or call,
+  N next hand.
+- Handed to the agent, the page shows a box with the prompt to paste
+  into the agent's chat (`#codebox`, `#handoff-text`) and a Copy button
+  (`#copy`; it selects the text when the clipboard is not available).
 - `scripts/table_browser_test.py` drives the page. It relies on:
   `#actions button.<kind>` (with `data-key`, the shortcut) for the action
-  buttons, `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,
+  buttons (fold, check, call, bet), `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,
   `#bot-name`, `#exploitability`, `#opponent` (the selector, shown when
   more than one bot is on offer), the card sprites `#felt .card` with
   `data-who` (you, bot, board), `data-card` once known and class `down`

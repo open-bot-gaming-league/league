@@ -47,7 +47,7 @@ from here, or from the docs() tool.
 
 Over HTTP with OBGL_PUBLIC_URL set, OAuth is on (oauth/__init__.py):
 this server is the connector's OAuth authorization server, /mcp needs a
-bearer token, and /login is the sign-in page (GitHub, Google, guest).
+bearer token, and /login is the sign-in page (GitHub or Google).
 Each poker session then belongs to the signed-in account as well as to
 its connection (see `_poker_for`). Unset: no auth, as before.
 
@@ -96,7 +96,7 @@ from session import (  # noqa: E402
 )
 from table_client import TableClient, TableError  # noqa: E402
 from table_web import TableWeb, register_table_routes  # noqa: E402
-from tables import BROWSER, NotInControl, Party, TableSessions, is_controller, is_guest  # noqa: E402
+from tables import BROWSER, NotInControl, Party, TableSessions, is_controller  # noqa: E402
 
 _REPO_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 DOCS_DIR = os.path.join(_REPO_DIR, "docs")
@@ -169,8 +169,7 @@ _DOC_LINKS = """<ul>
 
 _SIGN_IN_LINE = {
     False: "No signup.",
-    True: "Claude will ask you to sign in: with GitHub, with Google, or choose "
-    "<em>Continue as guest</em> (no signup).",
+    True: "Claude will ask you to sign in with GitHub or Google.",
 }
 
 
@@ -258,13 +257,6 @@ def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
         _legal_route(name, url_path)
 
 
-GUEST_WATCH_NOTE = (
-    "No watch link for a guest: a watch link opens only for the account that "
-    "started the session, and a guest is a new account at every sign-in. "
-    "Connect with GitHub or Google sign-in to watch your games in the browser."
-)
-
-
 class NotYoursError(Exception):
     """With sign-in: this connection's table session is being played by
     someone else (the user in the browser, or another connection)."""
@@ -304,8 +296,8 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     # after the one that received it from `initialize`'s response.
     #
     # With OAuth on, a poker session also belongs to the signed-in
-    # account (the access token's subject: "github:<id>", "google:<sub>",
-    # "guest:<random>"), and the key says so: "<account>/<mcp-session-id>".
+    # account (the access token's subject: "github:<id>" or
+    # "google:<sub>"), and the key says so: "<account>/<mcp-session-id>".
     # The SDK already refuses a request whose token's (client, issuer,
     # subject) differs from the one that opened the mcp session
     # (streamable_http_manager.py: "Session not found"), so this is
@@ -314,7 +306,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
 
     def _account() -> str | None:
         """The signed-in account calling this tool ("github:<id>",
-        "google:<sub>", "guest:<random>"), from the request's access token;
+        "google:<sub>"), from the request's access token;
         None with OAuth off. Display name etc.: provider.account(id)."""
         if oauth is None:
             return None
@@ -455,9 +447,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "docs": ["obgl://docs/AGENTS.md", "obgl://docs/WAYS-TO-PLAY.md"],
         }
 
-    def _watch_fields(account: str, record: dict) -> dict:
-        if is_guest(account):
-            return {"watch_url": None, "watch_note": GUEST_WATCH_NOTE}
+    def _watch_fields(record: dict) -> dict:
         return {"watch_url": web.watch_url(record)}
 
     async def _control_check(ctx: Context, poker: PokerSession) -> None:
@@ -507,7 +497,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             # Owned by the signed-in account, played by this connection.
             record = await tables.create(state["session"], account, Party.agent(_connection_key(ctx)))
             tables.observe(state["session"], state)
-            out.update(_watch_fields(account, record))
+            out.update(_watch_fields(record))
         return out
 
     @server.tool()
@@ -576,7 +566,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             account = _account()
             record = await tables.table_session_for(poker.session_id, account)
             if record is not None:
-                out.update(_watch_fields(account, record))
+                out.update(_watch_fields(record))
         return out
 
     if tables is not None:
@@ -606,7 +596,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
                         "playing": _controller_for_agent(record["controller"], me),
                         "yours": is_controller(record, me),
                         "switches": record["switches"][-5:],
-                        **_watch_fields(account, record),
+                        **_watch_fields(record),
                     }
                 )
             return {"sessions": out}
@@ -631,7 +621,7 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             except TableError as e:
                 return {"error": e.message}
             tables.observe(session, s)
-            return {**summarize_state(s), **_watch_fields(account, record)}
+            return {**summarize_state(s), **_watch_fields(record)}
 
     @server.custom_route("/version", methods=["GET"])
     async def version(request: Request) -> Response:  # noqa: ARG001

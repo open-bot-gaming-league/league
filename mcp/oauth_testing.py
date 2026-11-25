@@ -1,8 +1,8 @@
 """A scripted OAuth client for the connector, for tests and the local
 proof (deploy/local/smoke.py). It does what claude.ai does --
 dynamic client registration, /authorize with PKCE, the sign-in page,
-/token -- with "Continue as guest" (or "Sign in with <IdP>", against
-FakeIdP) clicked by a POST instead of a person; and what a browser does
+/token -- with "Continue with <IdP>" (against FakeIdP) clicked by a POST
+instead of a person; and what a browser does
 to sign in at the table (/table/signin, table_sign_in). Not used by the
 server and not copied into the image.
 """
@@ -134,15 +134,15 @@ def code_from_redirect(location: str, state: str) -> str:
     return q["code"][0]
 
 
-async def guest_code(
-    http: httpx2.AsyncClient, base: str, client: dict, *, resource: str | None = None
+async def sign_in_code(
+    http: httpx2.AsyncClient, base: str, client: dict, button: str = "github", *, resource: str | None = None
 ) -> tuple[str, str]:
-    """The browser half, as a guest: /authorize, the sign-in page, the
-    guest button. Returns (code, code_verifier)."""
+    """The browser half: /authorize, the sign-in page, the `button` IdP.
+    Returns (code, code_verifier)."""
     verifier, challenge = pkce_pair()
     state = secrets.token_urlsafe(8)
     request_id = await start_authorize(http, base, client, challenge=challenge, state=state, resource=resource)
-    return code_from_redirect(await click_sign_in(http, base, request_id), state), verifier
+    return code_from_redirect(await click_sign_in(http, base, request_id, button), state), verifier
 
 
 def _client_auth(client: dict) -> dict:
@@ -176,13 +176,13 @@ async def revoke(http: httpx2.AsyncClient, base: str, client: dict, tok: str) ->
     return await http.post(f"{base}/revoke", data={"token": tok, "client_secret": "", **_client_auth(client)})
 
 
-async def guest_tokens(base: str, resource: str | None = None) -> tuple[dict, dict]:
+async def sign_in_tokens(base: str, button: str = "github", resource: str | None = None) -> tuple[dict, dict]:
     """The whole flow against a running server: (client, token response).
     `resource`: the token's resource (default `<base>/mcp`)."""
     resource = resource or f"{base}/mcp"
     async with httpx2.AsyncClient(timeout=10) as http:
         client = await register(http, base)
-        code, verifier = await guest_code(http, base, client, resource=resource)
+        code, verifier = await sign_in_code(http, base, client, button, resource=resource)
         r = await exchange_code(http, base, client, code, verifier, resource=resource)
         assert r.status_code == 200, r.text
         return client, r.json()
@@ -199,25 +199,27 @@ async def mcp_client(url: str, access_token: str):
             yield client
 
 
-async def click_sign_in(http: httpx2.AsyncClient, base: str, request_id: str, button: str = "guest") -> str:
-    """On the sign-in page for `request_id`, click `button` ("guest", or an
-    IdP name: the fake IdP approves and sends the browser back). Returns
-    where our server then sends the browser (the client's redirect URI)."""
+async def click_sign_in(http: httpx2.AsyncClient, base: str, request_id: str, button: str = "github") -> str:
+    """On the sign-in page for `request_id`, click the `button` IdP (a name
+    like "github": the fake IdP approves and sends the browser back).
+    Returns where our server then sends the browser (the client's redirect
+    URI)."""
     page = await http.get(f"{base}/login", params={"request": request_id})
     assert page.status_code == 200, page.text
     assert f'action="/login/{button}"' in page.text, page.text
     r = await http.post(f"{base}/login/{button}", data={"request": request_id})
     assert r.status_code == 303, (r.status_code, r.text)
-    if button == "guest":
-        return r.headers["location"]
     r = await http.get(r.headers["location"])  # the (fake) IdP signs the user in
     assert r.status_code in (302, 307), (r.status_code, r.text)
-    r = await http.get(r.headers["location"])  # its redirect back to /login/<idp>/callback
+    back = urlparse(r.headers["location"])
+    # Its redirect back to /login/<idp>/callback; asked of `base` whatever
+    # origin the IdP was told (a revision tagged --no-traffic has the public issuer's).
+    r = await http.get(f"{base}{back.path}?{back.query}")
     assert r.status_code == 303, (r.status_code, r.text)
     return r.headers["location"]
 
 
-async def agent_tokens(base: str, button: str = "guest") -> dict:
+async def agent_tokens(base: str, button: str = "github") -> dict:
     """A connector's token response, signed in with `button` (see click_sign_in)."""
     async with httpx2.AsyncClient(timeout=10) as http:
         client = await register(http, base)
@@ -230,7 +232,7 @@ async def agent_tokens(base: str, button: str = "guest") -> dict:
         return r.json()
 
 
-async def table_sign_in(http: httpx2.AsyncClient, base: str, button: str = "guest", next_path: str = "/table/") -> str:
+async def table_sign_in(http: httpx2.AsyncClient, base: str, button: str = "github", next_path: str = "/table/") -> str:
     """A browser signing in at the table: /table/signin -> /authorize -> the
     sign-in page -> `button` -> /table/signin/callback, which sets the
     table's cookies in `http`'s jar. Returns where the callback sends it."""

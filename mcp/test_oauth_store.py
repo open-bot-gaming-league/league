@@ -130,11 +130,11 @@ async def test_twenty_concurrent_takes_one_winner(open_store):
 
 @pytest.mark.asyncio
 async def test_survives_reopen(open_store):
-    await open_store().put("accounts", "guest:abc", {"provider": "guest"})
-    await open_store().put("table-sessions", "t-1", {"owner": "guest:abc"})
+    await open_store().put("accounts", "github:abc", {"provider": "github"})
+    await open_store().put("table-sessions", "t-1", {"owner": "github:abc"})
     reopened = open_store()
-    assert await reopened.get("accounts", "guest:abc") == {"provider": "guest"}
-    assert await reopened.get("table-sessions", "t-1") == {"owner": "guest:abc"}
+    assert await reopened.get("accounts", "github:abc") == {"provider": "github"}
+    assert await reopened.get("table-sessions", "t-1") == {"owner": "github:abc"}
 
 
 # ---- Firestore only ---------------------------------------------------------
@@ -152,14 +152,14 @@ def fs():
 async def test_firestore_layout_and_ttl_field(fs):
     """What the deployer's TTL policy relies on: collection oauth_<kind>, document
     id = key, expires_at a Timestamp (absent when the record has none)."""
-    await fs.put("access", "h1", {"sub": "guest:a", "expires_at": FAR})
-    await fs.put("accounts", "guest:a", {"provider": "guest"})
+    await fs.put("access", "h1", {"sub": "github:a", "expires_at": FAR})
+    await fs.put("accounts", "github:a", {"provider": "github"})
     db = fs._db()
     doc = (await db.collection("oauth_access").document("h1").get()).to_dict()
     assert set(doc) == {"record", "expires_at"}
     assert isinstance(doc["expires_at"], datetime.datetime)
     assert doc["expires_at"] == datetime.datetime.fromtimestamp(FAR, tz=datetime.timezone.utc)
-    assert set((await db.collection("oauth_accounts").document("guest:a").get()).to_dict()) == {"record"}
+    assert set((await db.collection("oauth_accounts").document("github:a").get()).to_dict()) == {"record"}
 
 
 @firestore_only

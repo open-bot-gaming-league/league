@@ -13,9 +13,16 @@
   <div id="felt">
     <div id="deck"></div>
     <div id="hand-label">Hand <span id="hand-number">&ndash;</span></div>
+    <button id="drawer-btn" type="button" aria-label="History, bot and settings" aria-controls="side" aria-expanded="false"><span class="burger"></span><kbd>H</kbd></button>
+    <section id="stats" title="This session's running score: hands played, net big blinds won, big blinds won per 100 hands">
+      <div><span class="k">Hands</span><b id="stat-hands">0</b></div>
+      <div><span class="k">Net bb</span><b id="stat-net">0</b></div>
+      <div><span class="k">bb/100</span><b id="stat-bb100">&ndash;</b><small id="stat-se"></small></div>
+      <div id="stat-by"></div>
+    </section>
     <div class="seat" id="seat-bot">
       <div class="who">Bot <span class="pos" id="bot-pos"></span></div>
-      <div class="stk"><b id="bot-stack"></b> <span id="bot-stackbb"></span></div>
+      <div class="stk"><b id="bot-stack"></b></div>
       <div class="holds" id="bot-holds"></div>
       <div class="said" id="bot-said"></div>
     </div>
@@ -23,59 +30,75 @@
       <div class="said" id="you-said"></div>
       <div class="holds" id="you-holds"></div>
       <div class="who"><span id="you-name">You</span> <span class="pos" id="you-pos"></span></div>
-      <div class="stk"><b id="you-stack"></b> <span id="you-stackbb"></span></div>
+      <div class="stk"><b id="you-stack"></b></div>
     </div>
   </div>
   <div id="bar">
-    <div id="actions"></div>
-    <div id="sizer" hidden>
-      <div id="presets"><button data-preset="0.5">1/2 pot</button><button data-preset="0.75">3/4 pot</button><button data-preset="1">Pot</button><button data-preset="allin">All-in</button></div>
-      <input id="size-range" type="range" step="1" aria-label="Bet or raise to, in chips">
-      <input id="size-amount" type="number" step="1" inputmode="numeric" aria-label="Bet or raise to, in chips">
-      <button id="size-go" class="bet"><span></span><kbd>R</kbd></button>
-      <span id="size-note"></span>
+    <div id="status">
+      <div id="turn"></div>
+      <div id="potline" class="dim small"></div>
+      <div id="outcome"></div>
+      <button id="skip" type="button" title="Finish the animation now (Esc)">Skip <kbd>Esc</kbd></button>
     </div>
-    <div id="next-wrap" hidden><span id="outcome"></span><button id="next">Next hand <kbd>N</kbd></button></div>
-    <div id="watch-bar" hidden><span id="watch-status"></span><button id="take-over">Take over <kbd>T</kbd></button></div>
+    <div id="cluster">
+      <div id="sizer" hidden>
+        <div id="detents" role="group" aria-label="Sizes"></div>
+        <div id="trackrow">
+          <div id="track"><input id="size-range" type="range" min="0" max="1000" step="1" aria-label="Bet or raise to (slider)"><div id="ticks"></div></div>
+          <label id="amt"><input id="size-amount" type="number" step="0.5" inputmode="decimal" aria-label="Bet or raise to, in big blinds"><span>bb</span></label>
+        </div>
+      </div>
+      <div id="actions"></div>
+      <div id="next-wrap" hidden><button id="next">Next hand <kbd>N</kbd></button></div>
+    </div>
+    <div id="watch-bar" hidden>
+      <div id="watch-status"></div>
+      <div id="codebox" hidden><code id="handoff-text"></code><button id="copy" type="button"><span>Copy</span></button></div>
+      <div id="watch-foot"><span id="watch-wait" class="dim"></span><button id="take-over"><span></span><kbd>T</kbd></button></div>
+    </div>
     <div id="error" role="alert"></div>
   </div>
 </main>
 <aside id="side">
-  <header><h1>Heads-up no-limit hold&rsquo;em</h1><div id="blinds"></div></header>
-  <section id="league" hidden>
-    <div>Signed in: <b id="account-name"></b> <button id="sign-out">Sign out</button></div>
-    <div class="row"><button id="tag-in" hidden>Tag in my agent</button></div>
-    <div class="dim small" id="tag-note"></div>
-  </section>
+  <div class="dim small" id="blinds"></div>
   <section id="bot">
-    <div>Bot: <b id="bot-name"></b></div>
-    <div class="dim" id="bot-trained"></div>
-    <div class="ex">Exploitability: <span id="exploitability"></span></div>
-    <div class="dim" id="bot-note"></div>
-  </section>
-  <section id="stats">
-    <div><span class="k">Hands</span><b id="stat-hands">0</b></div>
-    <div><span class="k">Net bb</span><b id="stat-net">0</b></div>
-    <div><span class="k">bb/100</span><b id="stat-bb100">&ndash;</b><small id="stat-se"></small></div>
-    <div id="stat-by"></div>
+    <div class="row"><b id="bot-name"></b><span class="tag">Exploitability <span id="exploitability"></span></span></div>
+    <details><summary>About this bot</summary>
+      <p class="small dim" id="exploitability-full"></p>
+      <p class="small dim" id="bot-trained"></p>
+      <p class="small dim" id="bot-note"></p>
+      <p class="small dim" id="menu"></p>
+    </details>
   </section>
   <section id="history-wrap"><h2>Hand history</h2><div id="history"></div></section>
-  <section id="controls">
+  <details id="controls">
+    <summary>Table settings</summary>
     <div class="row play-only">Seat:
       <label><input type="radio" name="seat" value="alternate" checked> alternate</label>
       <label><input type="radio" name="seat" value="sb"> button</label>
       <label><input type="radio" name="seat" value="bb"> big blind</label>
     </div>
+    <div class="row play-only" id="opp-row" hidden>Opponent <select id="opponent"></select> <span class="dim small">from the next hand</span></div>
     <div class="row">
       <label>Speed <input id="speed" type="range" min="0.5" max="2" step="0.25" value="1"> <span id="speedv">1x</span></label>
-      <button id="skip" title="Finish the animation now (Esc)">Skip <kbd>Esc</kbd></button>
       <label><input id="rm" type="checkbox"> reduced motion</label>
     </div>
-    <div class="row play-only" id="opp-row" hidden>Opponent (from the next hand): <select id="opponent"></select></div>
     <div class="row play-only"><button id="new-session">New session</button></div>
-    <div class="dim small" id="menu"></div>
-    <div class="dim small play-only" id="keys">Keys: F fold, C check/call, 1&ndash;3 bet sizes, A all-in, R bet or raise the slider&rsquo;s amount (Enter in its box), N next hand.</div>
+  </details>
+  <section id="league" hidden>
+    <div class="small"><span class="dim">Signed in as</span> <b id="account-name"></b> <button id="sign-out" class="link">Sign out</button></div>
+    <div class="row"><button id="tag-in" hidden>Hand to my agent</button></div>
   </section>
+  <section id="keys" class="small dim play-only">Keys: <kbd>F</kbd> fold &middot; <kbd>C</kbd> check/call &middot; <kbd>1</kbd>&ndash;<kbd>6</kbd> pick a size &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> &plusmn;0.5 bb (<kbd>Shift</kbd> &plusmn;1) &middot; <kbd>R</kbd> or <kbd>Enter</kbd> bet or raise &middot; <kbd>N</kbd> next hand &middot; <kbd>Esc</kbd> skip the animation</section>
 </aside>
+<div id="scrim"></div>
+<div id="asleep" hidden role="alertdialog" aria-labelledby="asleep-title">
+  <div>
+    <h2 id="asleep-title">Paused</h2>
+    <p id="asleep-why"></p>
+    <p class="dim">The table has stopped asking the server for updates.</p>
+    <button id="resume">Resume</button>
+  </div>
+</div>
 </body>
 </html>

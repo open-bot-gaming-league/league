@@ -21,7 +21,7 @@ import pytest_asyncio
 import oauth_testing as ot
 import server as server_module
 from oauth import OAuthConfig
-from oauth.idp import idps_from_env
+from oauth.idp import UpstreamIdentity, github, idps_from_env
 from oauth.provider import PENDING_TTL, LeagueOAuthProvider, SignInError
 from oauth.store import FileStore, FirestoreStore, MemoryStore, store_from_env
 
@@ -38,20 +38,39 @@ class Clock:
 
 
 @pytest.fixture
-def config():
-    return OAuthConfig(public_url=BASE, mcp_path="/mcp", store=MemoryStore())
+def idp_base(serve_asgi):
+    """The fake GitHub (user 4242, "octo") on a real socket: our server
+    below is in-process (ASGI), but its token call to the IdP is real HTTP."""
+    with serve_asgi(ot.FakeIdP({"id": 4242, "login": "octo"}).app) as idp_base:
+        yield idp_base
+
+
+@pytest.fixture
+def config(idp_base):
+    idp = github(
+        ot.UPSTREAM_ID,
+        ot.UPSTREAM_SECRET,
+        f"{BASE}/login/github/callback",
+        authorize_endpoint=f"{idp_base}/authorize",
+        token_endpoint=f"{idp_base}/token",
+        userinfo_endpoint=f"{idp_base}/userinfo",
+    )
+    return OAuthConfig(public_url=BASE, mcp_path="/mcp", store=MemoryStore(), idps=[idp])
 
 
 @pytest_asyncio.fixture
-async def http(config):
+async def http(config, idp_base):
+    """A browser/client: our app over ASGI at BASE; the fake IdP over its socket."""
     app = server_module.build_server("http://127.0.0.1:1/", config).streamable_http_app()
-    async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app), base_url=BASE) as client:
+    async with httpx2.AsyncClient(
+        transport=httpx2.ASGITransport(app=app), base_url=BASE, mounts={idp_base: httpx2.AsyncHTTPTransport()}
+    ) as client:
         yield client
 
 
 async def _signed_in(http, auth_method="none"):
     client = await ot.register(http, BASE, auth_method=auth_method)
-    code, verifier = await ot.guest_code(http, BASE, client, resource=RESOURCE)
+    code, verifier = await ot.sign_in_code(http, BASE, client, "github", resource=RESOURCE)
     return client, code, verifier
 
 
@@ -85,13 +104,13 @@ async def test_register_authorize_token_refresh_revoke(http, config, auth_method
     access = await provider.load_access_token(tok["access_token"])
     assert access is not None
     assert access.client_id == client["client_id"]
-    assert access.subject.startswith("guest:")
+    assert access.subject == "github:4242"
     assert access.resource == RESOURCE
     assert access.claims == {"iss": BASE}
     assert await provider.account(access.subject) == {
-        "provider": "guest",
-        "provider_user_id": access.subject.removeprefix("guest:"),
-        "display_name": "Guest",
+        "provider": "github",
+        "provider_user_id": "4242",
+        "display_name": "octo",
     }
 
     # Refresh rotates both tokens; the old pair stops working.
@@ -183,18 +202,23 @@ async def test_sign_in_page(http):
     assert page.status_code == 200
     assert "&lt;script&gt;x&lt;/script&gt; Claude" in page.text and "<script>" not in page.text
     assert "127.0.0.1:9" in page.text  # where the user will be sent back
-    assert "Continue as guest" in page.text
-    assert "we create an anonymous guest account for this sign-in" in page.text  # a guest does have an account (Privacy 1, 4)
-    assert "it holds no name or sign-in identity" in page.text
+    # One button per configured IdP, in the page's own words, and Cancel; no guest.
+    assert 'action="/login/github"' in page.text and "Continue with GitHub" in page.text
+    assert 'action="/login/cancel"' in page.text
+    assert "guest" not in page.text.lower()
     # Consent line with links to the legal pages, opening in a new tab (the sign-in page stays put).
     assert (
         'By continuing you agree to the <a href="/docs/terms" target=_blank rel=noopener>Terms of Service</a>'
         ' and <a href="/docs/privacy" target=_blank rel=noopener>Privacy Policy</a>.'
     ) in page.text
-    # No IdP configured in this fixture: no GitHub / Google buttons.
-    assert "GitHub" not in page.text and "Google" not in page.text
+    # Only GitHub is configured in this fixture: no Google button.
+    assert "Google" not in page.text
     assert page.headers["x-frame-options"] == "DENY"
-    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+    # The page's look is inline style and inline SVG only: the CSP stays as strict as it was.
+    assert page.headers["content-security-policy"] == (
+        "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
+    )
+    assert "<script" not in page.text and "<img" not in page.text and "http" not in page.text  # no fetches: no URLs but relative links
     assert page.headers["cache-control"] == "no-store"
     assert page.headers["referrer-policy"] == "no-referrer"
 
@@ -209,26 +233,75 @@ async def test_cancel_returns_access_denied_to_the_client(http):
     q = parse_qs(urlparse(r.headers["location"]).query)
     assert q["error"] == ["access_denied"] and q["state"] == ["st"]
     # The request is spent.
-    assert (await http.post("/login/guest", data={"request": request_id})).status_code == 400
+    assert (await http.post("/login/github", data={"request": request_id})).status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_unknown_or_reused_sign_in_request(http):
     assert (await http.get("/login", params={"request": "nope"})).status_code == 400
-    assert (await http.post("/login/guest", data={"request": "nope"})).status_code == 400
+    assert (await http.post("/login/github", data={"request": "nope"})).status_code == 400
     client = await ot.register(http, BASE)
     _, challenge = ot.pkce_pair()
     request_id = await ot.start_authorize(http, BASE, client, challenge=challenge, state="s", resource=None)
-    assert (await http.post("/login/guest", data={"request": request_id})).status_code == 303
-    assert (await http.post("/login/guest", data={"request": request_id})).status_code == 400
+    await ot.click_sign_in(http, BASE, request_id, "github")
+    assert (await http.post("/login/github", data={"request": request_id})).status_code == 400
+    assert (await http.get("/login", params={"request": request_id})).status_code == 400
     # Unconfigured IdP: no route at all.
-    assert (await http.post("/login/github", data={"request": request_id})).status_code in (404, 405)
+    assert (await http.post("/login/google", data={"request": request_id})).status_code in (404, 405)
+
+
+@pytest.mark.asyncio
+async def test_guest_sign_in_is_gone(http):
+    client = await ot.register(http, BASE)
+    _, challenge = ot.pkce_pair()
+    request_id = await ot.start_authorize(http, BASE, client, challenge=challenge, state="s", resource=None)
+    # No route, whatever the request id: a live one is not spent by trying.
+    for rid in (request_id, "nope"):
+        assert (await http.post("/login/guest", data={"request": rid})).status_code == 404
+    assert (await http.get("/login/guest", params={"request": request_id})).status_code == 404
+    assert (await http.get("/login", params={"request": request_id})).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_tokens_from_the_retired_guest_sign_in_stop_working(http, config):
+    """Guest accounts ("guest:<random>") are no more; a token one of them
+    still holds from before is unknown to the loaders, refresh included."""
+    client = await ot.register(http, BASE)
+    provider = config.provider()
+    # No public path issues one any more: file the legacy record directly.
+    tok = await provider._issue_tokens(client["client_id"], [], "guest:abc", RESOURCE)
+    assert await provider.load_access_token(tok.access_token) is None
+    assert (await ot.refresh(http, BASE, client, tok.refresh_token)).json()["error"] == "invalid_grant"
+    # The same calls for a signed-in account's tokens work.
+    ok = await provider._issue_tokens(client["client_id"], [], "github:4242", RESOURCE)
+    assert (await provider.load_access_token(ok.access_token)).subject == "github:4242"
+    assert (await ot.refresh(http, BASE, client, ok.refresh_token)).status_code == 200
+
+
+def test_sign_in_page_with_no_idp_says_so_and_offers_cancel():
+    from oauth.web import sign_in_page
+
+    page = sign_in_page(LeagueOAuthProvider(MemoryStore(), issuer_url=BASE, resource_url=RESOURCE), "r1", "Claude", "claude.ai")
+    assert "Sign-in is not set up" in page and 'action="/login/cancel"' in page and "Continue with" not in page
+    assert 'href="/docs/terms"' in page and 'href="/docs/privacy"' in page
+
+
+class StubIdP:
+    """An upstream that always says the user is "stub:7": for the provider's own rules, with no HTTP."""
+
+    name, label = "stub", "Stub"
+
+    def authorization_url(self, *, state, code_challenge):
+        return "https://idp.example/authorize"
+
+    async def identify(self, *, code, code_verifier):
+        return UpstreamIdentity("7", "Stubby")
 
 
 @pytest.mark.asyncio
 async def test_expiry_of_pending_and_access_token():
     clock = Clock()
-    provider = LeagueOAuthProvider(MemoryStore(), issuer_url=BASE, resource_url=RESOURCE, clock=clock)
+    provider = LeagueOAuthProvider(MemoryStore(), issuer_url=BASE, resource_url=RESOURCE, clock=clock, idps=[StubIdP()])
     from mcp.server.auth.provider import AuthorizationParams
     from mcp.shared.auth import OAuthClientInformationFull
 
@@ -237,17 +310,22 @@ async def test_expiry_of_pending_and_access_token():
     params = AuthorizationParams(
         state="s", scopes=None, code_challenge="x", redirect_uri=ot.REDIRECT_URI, redirect_uri_provided_explicitly=True
     )
+
+    async def sign_in() -> str:
+        """authorize -> sign-in page -> upstream and back: where the browser goes next."""
+        request_id = parse_qs(urlparse(await provider.authorize(client, params)).query)["request"][0]
+        await provider.start_upstream(request_id, "stub")
+        return await provider.finish_upstream("stub", state=request_id, code="c")
+
     url = await provider.authorize(client, params)
     request_id = parse_qs(urlparse(url).query)["request"][0]
     clock.t += PENDING_TTL + 1
     with pytest.raises(SignInError):
-        await provider.finish_guest(request_id)
+        await provider.start_upstream(request_id, "stub")
 
-    url = await provider.authorize(client, params)
-    redirect = await provider.finish_guest(parse_qs(urlparse(url).query)["request"][0])
-    code = parse_qs(urlparse(redirect).query)["code"][0]
+    code = parse_qs(urlparse(await sign_in()).query)["code"][0]
     tok = await provider.exchange_authorization_code(client, await provider.load_authorization_code(client, code))
-    assert await provider.load_access_token(tok.access_token) is not None
+    assert (await provider.load_access_token(tok.access_token)).subject == "stub:7"
     clock.t += 3601
     assert await provider.load_access_token(tok.access_token) is None
 

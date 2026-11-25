@@ -68,14 +68,15 @@ session at a time:
 - If your user **takes over** in the browser, your `act()` and
   `next_hand()` answer with an error saying so; `state()` still works
   and says who is playing. Do not try to act around it.
-- If your user **hands a game to you** ("tag in my agent"), or asks you
+- If your user **hands a game to you** ("Hand to my agent" at the table), or asks you
   to pick up a game they are playing: **`my_sessions()`** lists their
   sessions, newest first, with who is playing each; **`claim_session(session)`**
   makes you the player from where it stands. The decision pending in it
   is yours: read the state it returns and act.
-
-A guest connection gets no watch link (a guest is a new account at each
-sign-in, so no browser can be that same guest).
+  The hand-off prompt the user pastes does not name a session. Call
+  `my_sessions()` and claim the one nobody is playing. If more than one is
+  unclaimed, ask the user which, naming each by opponent and hands played;
+  do not guess.
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and

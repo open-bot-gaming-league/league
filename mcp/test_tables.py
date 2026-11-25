@@ -20,24 +20,23 @@ def test_table_session_owner_survives_restart_and_is_owner_only(tmp_path):
 
     async def record():
         t = TableSessions(FileStore(path))
-        await t.create("t-guest-a", "guest:aaa", Party.agent("c1"))
-        await t.create("t-guest-b", "guest:bbb", Party.agent("c2"))
-        await t.create("t-github", A, Party.browser())
+        await t.create("t-a1", A, Party.agent("c1"))
+        await t.create("t-b", B, Party.agent("c2"))
+        await t.create("t-a2", A, Party.browser())
 
     asyncio.run(record())
 
     async def read():
         t = TableSessions(FileStore(path))  # a fresh process's view: the file reopened
-        assert (await t.table_session_for("t-guest-a", "guest:aaa"))["owner"] == "guest:aaa"
-        assert (await t.table_session_for("t-github", A))["owner"] == A
-        # Another account (another guest, or a signed-in user) reads nothing.
-        assert await t.table_session_for("t-guest-a", "guest:bbb") is None
-        assert await t.table_session_for("t-guest-a", A) is None
-        assert await t.table_session_for("t-github", "guest:aaa") is None
-        # A guest matches only its own exact id: no prefix or provider-only match.
-        assert await t.table_session_for("t-guest-a", "guest:") is None
-        assert await t.table_session_for("t-guest-a", "guest:aa") is None
-        assert await t.table_session_for("nope", "guest:aaa") is None
+        assert (await t.table_session_for("t-a1", A))["owner"] == A
+        assert (await t.table_session_for("t-b", B))["owner"] == B
+        # Another account reads nothing.
+        assert await t.table_session_for("t-a1", B) is None
+        assert await t.table_session_for("t-b", A) is None
+        # An account matches only its own exact id: no prefix or provider-only match.
+        assert await t.table_session_for("t-a1", "github:") is None
+        assert await t.table_session_for("t-a1", "github:424") is None
+        assert await t.table_session_for("nope", A) is None
 
     asyncio.run(read())
 
@@ -102,7 +101,7 @@ def test_list_is_per_account_newest_first_and_bounded():
         listed = [sid for sid, _ in await t.list_for(A)]
         assert listed == [f"a{i}" for i in range(24, 4, -1)]
         assert [sid for sid, _ in await t.list_for(B)] == ["b0"]
-        assert await t.list_for("guest:x") == []
+        assert await t.list_for("github:9999") == []
 
     asyncio.run(go())
 

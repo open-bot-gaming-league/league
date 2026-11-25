@@ -80,6 +80,33 @@ async def test_the_table_needs_sign_in_but_its_files_do_not(site):
 
 
 @pytest.mark.asyncio
+@needs_table
+async def test_a_watch_link_survives_sign_in_and_a_wrong_account_can_try_again(site):
+    """Signed out, the watch link goes to sign-in and sign-in returns to THAT
+    link; signed in as someone else, its dead end offers the same round trip."""
+    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
+        s = await _agent_to_a_live_decision(mcp)
+    watch = urlparse(s["watch_url"]).path
+    async with httpx2.AsyncClient(base_url=site.base, timeout=10) as http:
+        r = await http.get(watch)  # signed out
+        assert r.status_code == 303
+        assert parse_qs(urlparse(r.headers["location"]).query)["next"] == [watch]
+        site.fake.userinfo = USER_B  # the wrong account signs in, back to the link: nothing here
+        assert await ot.table_sign_in(http, site.base, "github", next_path=watch) == watch
+        r = await http.get(watch)
+        assert r.status_code == 404 and "No session here" in r.text
+        again = parse_qs(urlparse(site.base + r.text.split('<a href="', 1)[1].split('"', 1)[0].replace("&amp;", "&")).query)
+        assert again["next"] == [watch]  # the page's "Sign in as a different account" link
+        site.fake.userinfo = USER_A  # the owner signs in through it: the same link, now the session
+        assert await ot.table_sign_in(http, site.base, "github", next_path=again["next"][0]) == watch
+        assert (await http.get(watch)).status_code == 200
+        # `next` is only ever a path on the table, whatever is asked.
+        for bad in ("https://evil.example/", "//evil.example/table/", "/table/\\evil", "/tablet/x", "evil", ""):
+            r = await http.get("/table/signin", params={"next": bad})
+            assert json.loads(base64.urlsafe_b64decode(r.cookies["obgl_table_signin"]))["next"] == "/table/", bad
+
+
+@pytest.mark.asyncio
 async def test_a_hand_made_signin_cookie_is_refused_or_sent_to_the_table(site):
     """The sign-in cookie comes back from the browser: a malformed one is a
     clean 400, and one without `next` finishes the sign-in at /table/."""
@@ -107,16 +134,16 @@ async def test_a_hand_made_signin_cookie_is_refused_or_sent_to_the_table(site):
 
 @pytest.mark.asyncio
 @needs_table
-async def test_a_guest_browser_plays_a_hand(site):
-    async with site.browser(None) as browser:
+async def test_a_signed_in_browser_plays_a_hand(site):
+    async with site.browser(USER_A) as browser:
         page = await browser.get("/table/")
         assert page.status_code == 200 and '<base href="/table/">' in page.text
         assert page.headers["referrer-policy"] == "no-referrer"
         assert (await browser.get("/table/table.js")).status_code == 200
         info = (await browser.get("/table/api/info")).json()
-        assert info["league"]["account"] == {"name": "Guest", "guest": True}
+        assert info["league"]["account"] == {"name": "alice"}
         s = (await browser.post("/table/api/new", json={"seat": "alternate", "opponent": "turtle"})).json()
-        assert s["control"]["yours"] and not s["control"]["canTagIn"]
+        assert s["control"]["yours"] and "canTagIn" not in s["control"]
         for _ in range(50):
             if s["over"]:
                 break
@@ -126,9 +153,9 @@ async def test_a_guest_browser_plays_a_hand(site):
         assert s["over"]
         r = await browser.post("/table/api/next", json={"session": s["session"], "hand": s["hand"]})
         assert r.status_code == 200 and r.json()["hand"] == s["hand"] + 1
-        # A guest's agent is another guest: no tagging in.
+        # Tagging in is open to every account: the owner's agent is the same account.
         r = await browser.post("/table/api/tagin", json={"session": s["session"]})
-        assert r.status_code == 400 and "guest" in r.json()["error"]
+        assert r.status_code == 200 and r.json()["control"]["controller"] == "agent", r.text
         # A request from another origin is refused, signed in or not.
         r = await browser.post("/table/api/new", json={}, headers={"Origin": "https://evil.example"})
         assert r.status_code == 403
@@ -156,7 +183,7 @@ async def test_watch_is_for_the_owner_only(site):
         assert w["control"]["controller"] == "agent" and not w["control"]["yours"]
         assert w.get("history", []) == []  # the table leaves an empty history out
 
-    for who in (USER_B, None):  # another account, a guest
+    for who in (USER_B,):  # another account
         async with site.browser(who) as other:
             assert (await other.get(f"/table/watch/{watch_token}")).status_code == 404
             r = await other.get("/table/api/watch", params={"token": watch_token})
@@ -171,11 +198,6 @@ async def test_watch_is_for_the_owner_only(site):
             listed = _payload(await mcp.call_tool("my_sessions", {}))["sessions"]
             assert s["session"] not in [x["session"] for x in listed]
             assert "no such session" in _payload(await mcp.call_tool("claim_session", {"session": s["session"]}))["error"]
-
-    # A guest's agent gets no watch link (no browser can ever be that guest).
-    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(None)) as mcp:
-        g = _payload(await mcp.call_tool("new_session", {}))
-        assert g["watch_url"] is None and "guest" in g["watch_note"]
 
 
 @pytest.mark.asyncio

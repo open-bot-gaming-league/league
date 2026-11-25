@@ -78,7 +78,15 @@ async def test_play_watch_take_over_and_tag_in_in_a_browser(site):
         browser = Browser(site.base, s["watch_url"])
         try:
             await browser.do("PLAY")  # its own session, in Play
-            await browser.do("RAISE")  # a bet off the menu, through the slider, at phone width
+            await browser.do("SIZER")  # detents, snap, the bb box, the keys; the bet sent is the amount shown
+            await browser.do("KEYS")  # F, C, N, Enter; A no longer goes all-in
+            await browser.do("MEMORY")  # one remembered size per spot, across hands
+            await browser.do("RAISE")  # the dock at phone width; a bet off the menu, typed in bb
+            # The hand-off prompt must name the agent's real tools and the argument claim_session really takes.
+            tools = {t.name: t for t in (await mcp.list_tools()).tools}
+            claim = tools["claim_session"].input_schema
+            assert claim["required"] == ["session"], claim
+            await browser.do(f"PROMPT my_sessions() claim_session({', '.join(claim['required'])})")
             assert await browser.do("WATCH") == [str(s["hand"]), str(s["step"])]
             # Every move the agent makes shows up on the page, in order.
             for _ in range(6):
@@ -88,6 +96,34 @@ async def test_play_watch_take_over_and_tag_in_in_a_browser(site):
             while s["over"]:
                 s = _payload(await mcp.call_tool("next_hand", {}))
                 await browser.do(f"EXPECT {s['hand']} {s['step']}")
+            # The watcher's score is the session's: it moves as the agent's hands end.
+            finished = lambda st: st["hand"] - (0 if st["over"] else 1)  # noqa: E731
+            for _ in range(40):
+                if finished(s) > 0:
+                    break
+                s = _payload(await mcp.call_tool("next_hand" if s["over"] else "act", {} if s["over"] else {"action": _pick(s)}))
+                await browser.do(f"EXPECT {s['hand']} {s['step']}")
+            assert finished(s) > 0
+            assert (await browser.do("SCORE"))[0] == str(finished(s))
+            # Asleep: a watching page that has nothing to show for a while, or whose tab goes to the
+            # background, stops asking the server (counted by the browser) until Resume; a game the
+            # agent keeps playing keeps it awake.
+            async def agent_moves(s):
+                return _payload(await mcp.call_tool("next_hand" if s["over"] else "act", {} if s["over"] else {"action": _pick(s)}))
+
+            await browser.do("SLEEPER 4")
+            for _ in range(5):  # 10 s of play against a 4 s idle limit
+                await anyio.sleep(2)
+                s = await agent_moves(s)
+            await browser.do("AWAKE")
+            await browser.do("ASLEEP")  # the agent stopped: idle
+            s = await agent_moves(s)  # what happens while it sleeps shows on Resume
+            await browser.do(f"RESUME {s['hand']} {s['step']}")
+            await browser.do("HIDE")
+            s = await agent_moves(s)
+            await browser.do("SHOW")
+            await browser.do(f"RESUME {s['hand']} {s['step']}")
+            await browser.do(f"CATCHUP {s['hand']} {s['step']}")  # the first page is still playing out the moves it was not asked to wait for
             # Take over: the browser makes the agent's pending decision; the agent is out.
             hand, step = map(int, await browser.do("TAKEOVER"))
             assert (hand, step) != (s["hand"], s["step"])
@@ -98,6 +134,24 @@ async def test_play_watch_take_over_and_tag_in_in_a_browser(site):
             assert (c["hand"], c["step"]) == (hand, step)
             d = _payload(await mcp.call_tool("act", {"action": _pick(c)}))
             await browser.do(f"EXPECT {d['hand']} {d['step']}")
+            await browser.do("DONE")
+        finally:
+            browser.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not BROWSER_PYTHON, reason="OBGL_BROWSER_PYTHON (a python with playwright) not set")
+@pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777")
+async def test_a_watch_link_opened_signed_out_returns_to_that_session_after_sign_in(site):
+    """A browser with no sign-in opens the agent's watch link, signs in,
+    and is shown the watched session, not 'No session here' or a new session."""
+    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
+        s = _payload(await mcp.call_tool("new_session", {"opponent": "turtle"}))
+        while s["over"]:
+            s = _payload(await mcp.call_tool("next_hand", {}))
+        browser = Browser(site.base, s["watch_url"])
+        try:
+            assert await browser.do("UNSIGNED") == [str(s["hand"]), str(s["step"])]
             await browser.do("DONE")
         finally:
             browser.close()

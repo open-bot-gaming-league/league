@@ -45,49 +45,86 @@ main{display:grid;grid-template-rows:1fr auto;min-height:0;min-width:0;padding:.
 .seat.won{box-shadow:0 0 0 2px var(--glow),0 0 1.2rem #f0c75e66}
 .rm .seat .said.pop{animation:none}
 
-/* the action bar */
-#bar{min-height:7.8rem;padding:.6rem 0 0;display:flex;flex-direction:column;gap:.3rem}
-#actions,#next-wrap,#watch-bar{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:center}
-#next-wrap[hidden]{display:none}
-#watch-status{font-size:1.05rem;color:var(--glow)}
-#take-over{background:#2f5c86;border-color:#4a7aa6;font-size:1.1rem}
-body.watching .play-only{display:none!important}
-button{font:inherit;background:#454c54;color:#fff;border:1px solid #5b636c;border-radius:.45rem;padding:.45rem .9rem;cursor:pointer;white-space:nowrap}
-button:hover{filter:brightness(1.15)} button:disabled{opacity:.45;cursor:default}
-#actions button{font-size:1.1rem;padding:.6rem 1rem;display:flex;gap:.5rem;align-items:center}
-#actions button.fold{background:#5a3a3a;border-color:#7a5050}
-#actions button.check,#actions button.call{background:#2f5c86;border-color:#4a7aa6}
-#actions button.bet{background:#7a5a1e;border-color:#a07a30}
-#actions button.allin{background:#8a2a26;border-color:#b04a44}
-kbd{font:700 .75em "Liberation Mono",monospace;background:#0004;border:1px solid #fff4;border-radius:.25rem;padding:0 .3rem;color:#fffc}
+/* the dock: whenever you may bet, the sizer (detents, slider, bb box) sits above three buttons, Fold, Check/Call and
+   Raise to X; one click or R bets the shown amount. #bar keeps its height through a decision, so the felt does not jump. */
+#bar{min-height:10.6rem;padding:.6rem 0 0;display:grid;grid-template-columns:1fr minmax(0,34rem);gap:.3rem 1rem;align-items:end}
+#status{align-self:center;display:flex;flex-direction:column;gap:.3rem;min-width:0;align-items:flex-start}
+#turn{font-size:1rem;color:var(--dim)} #turn b{color:var(--glow)}
 #outcome{font-size:1.15rem;font-weight:700}
 #outcome.won{color:var(--pos)} #outcome.lost{color:var(--neg)}
-#next{background:#2f5c86;border-color:#4a7aa6;font-size:1.1rem}
-#error{color:var(--neg);text-align:center;min-height:0}
+#skip{display:none;border-color:var(--glow)}
+body.busy:not(.watching) #skip{display:inline-block}
+#cluster{display:flex;flex-direction:column;gap:.45rem;min-width:0}
+#actions{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:.45rem}
+#actions:empty{display:none}
+button{font:inherit;background:#454c54;color:#fff;border:1px solid #5b636c;border-radius:.45rem;padding:.45rem .9rem;cursor:pointer;white-space:nowrap}
+button:hover{filter:brightness(1.15)} button:disabled{opacity:.45;cursor:default}
+button:focus-visible,input:focus-visible{outline:2px solid var(--glow);outline-offset:2px}
+#actions button{font-size:1.1rem;font-weight:700;padding:.7rem .4rem;border-radius:.7rem;display:flex;gap:.2rem;align-items:center;justify-content:center}
+#actions button small{font-weight:400;opacity:.85;font-size:.82em}
+#actions button.fold{background:#6b3b3b;border-color:#8d5555;grid-column:1}
+#actions button.check,#actions button.call{background:#2f5c86;border-color:#4a7aa6;grid-column:2}
+#actions button.bet{background:#8a6420;border-color:#b78a3a;grid-column:3}
+#actions button.bet.allin{background:#962d28;border-color:#c0504a}
+kbd{font:700 .7em "Liberation Mono",monospace;background:#0005;border:1px solid #fff3;border-radius:.25rem;padding:0 .28rem;color:#fffc;margin-left:.45em;vertical-align:.08em}
+#next-wrap{display:grid} #next-wrap[hidden]{display:none}
+#next{background:#2f5c86;border-color:#4a7aa6;font-size:1.1rem;font-weight:700;padding:.7rem 1rem;border-radius:.7rem}
+#error{grid-column:1/-1;color:var(--neg);text-align:center;min-height:0}
 #error:empty{display:none}
-/* the bet slider, under the menu (#bar's min-height keeps room for both, so the felt does not jump at each decision) */
-#sizer{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;justify-content:center}
+
+/* the sizer: evenly spaced detents (Min, the sizes of the spot, All-in); the track is linear in chips between them */
+#sizer{display:flex;flex-direction:column;gap:.4rem}
 #sizer[hidden]{display:none}
-#presets{display:flex;gap:.3rem}
-#presets button{padding:.35rem .6rem}
-#presets button.on{border-color:var(--glow);color:var(--glow)}
-#size-range{flex:1 1 12rem;min-width:8rem;max-width:26rem;accent-color:#a07a30}
-#size-amount{width:6.5em;font:inherit;padding:.4rem;background:#1b1f22;color:var(--txt);border:1px solid var(--line);border-radius:.35rem}
-#size-go{font-size:1.1rem;padding:.5rem .9rem;display:flex;gap:.5rem;align-items:center;background:#7a5a1e;border-color:#a07a30}
-#size-note{color:var(--dim);font-size:.85rem;min-width:9em}
+#detents{display:flex;gap:.3rem}
+#detents button{flex:1;padding:.32rem .2rem;font-size:.86rem;background:#2b3237;border-color:#465058;border-radius:.45rem;min-width:0}
+#detents button.on{border-color:var(--glow);color:var(--glow);background:#3a3322}
+#detents kbd{font-size:.62rem}
+#trackrow{display:flex;gap:.6rem;align-items:center}
+#track{position:relative;flex:1;height:2.2rem;display:flex;align-items:center;min-width:0}
+#size-range{-webkit-appearance:none;appearance:none;width:100%;height:2.2rem;background:transparent;margin:0;position:relative;z-index:2;cursor:pointer}
+#size-range::-webkit-slider-runnable-track{height:.45rem;border-radius:.3rem;background:linear-gradient(90deg,#b98a26 0 var(--p,0%),#3a434a var(--p,0%))}
+#size-range::-moz-range-track{height:.45rem;border-radius:.3rem;background:#3a434a}
+#size-range::-moz-range-progress{height:.45rem;border-radius:.3rem;background:#b98a26}
+#size-range::-webkit-slider-thumb{-webkit-appearance:none;width:1.4rem;height:1.4rem;margin-top:-.48rem;border-radius:50%;background:#f4efe2;border:3px solid var(--glow);box-shadow:0 2px 5px #000a}
+#size-range::-moz-range-thumb{width:1.1rem;height:1.1rem;border-radius:50%;background:#f4efe2;border:3px solid var(--glow)}
+#ticks{position:absolute;left:.7rem;right:.7rem;top:50%;height:0;z-index:1;pointer-events:none}
+#ticks b{position:absolute;top:-.55rem;width:2px;height:1.1rem;margin-left:-1px;background:#c9d0d6;border-radius:1px;opacity:.75}
+#ticks .memo{position:absolute;top:-1rem;margin-left:-.22rem;width:.44rem;height:.44rem;border-radius:50%;background:var(--pos);box-shadow:0 0 0 2px #0008}
+#amt{display:flex;align-items:center;background:#0f1214;border:1px solid var(--line);border-radius:.45rem;padding-right:.5rem}
+#size-amount{width:4.8rem;font:700 1.05rem "Liberation Sans",Arial,sans-serif;color:var(--txt);background:none;border:0;padding:.4rem .5rem;text-align:right}
+#amt span{color:var(--dim);font-size:.9rem}
+
+/* handed to the agent: a prompt to paste into its chat */
+#watch-bar{grid-column:1/-1;justify-self:center;width:100%;max-width:44rem;display:flex;flex-direction:column;gap:.5rem;background:#17222b;border:1px solid #2f4a60;border-radius:.8rem;padding:.7rem .9rem}
+#watch-bar[hidden]{display:none}
+#watch-status{font-size:1.05rem} #watch-status b{color:#9fd0ff}
+#codebox{display:flex;align-items:stretch;background:#0b0e10;border:1px solid #2d3a44;border-radius:.5rem;overflow:hidden}
+#handoff-text{flex:1;font:.95rem/1.4 "Liberation Mono",Menlo,Consolas,monospace;color:#e8eef3;padding:.55rem .7rem;user-select:all;-webkit-user-select:all;white-space:pre-wrap;word-break:break-word;min-width:0}
+#copy{border:0;border-left:1px solid #2d3a44;border-radius:0;background:#2a3a48;font-weight:700;min-width:5.5rem}
+#copy.ok{background:#2e6a45}
+#watch-foot{display:flex;justify-content:space-between;align-items:center;gap:.6rem;font-size:.9rem}
+#take-over{background:#2f5c86;border-color:#4a7aa6;font-size:1.05rem}
+body.watching .play-only,body.watching #status,body.watching #cluster{display:none!important}
 
 /* the side panel */
-#side{background:var(--panel);border-left:1px solid var(--line);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.7rem;min-height:0;overflow:hidden;font-size:.95rem}
-#side h1{font-size:1.15rem;margin:0} #side h2{font-size:.95rem;margin:0 0 .3rem;color:var(--dim);font-weight:400;text-transform:uppercase;letter-spacing:.06em}
+#side{background:var(--panel);border-left:1px solid var(--line);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.7rem;min-height:0;overflow:auto;font-size:.95rem}
+#side h2{font-size:.95rem;margin:0 0 .3rem;color:var(--dim);font-weight:400;text-transform:uppercase;letter-spacing:.06em}
 .dim{color:var(--dim)} .small{font-size:.85em}
-#league{display:flex;flex-direction:column;gap:.3rem} #league button{padding:.2rem .6rem}
-#bot .ex{margin-top:.2rem} #exploitability{color:#fff;font-weight:700}
-#stats{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;text-align:center;background:#0002;border-radius:.5rem;padding:.4rem}
-#stats .k{display:block;color:var(--dim);font-size:.8em} #stats b{font-size:1.35rem} #stats small{display:block;color:var(--dim);font-size:.75em}
-#stat-by{grid-column:1/-1;text-align:left;font-size:.8em;color:var(--dim)} #stat-by:empty{display:none}
+#side .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+#side summary{cursor:pointer;color:var(--dim);font-size:.85rem}
+#side details p{margin:.35rem 0 0}
+#bot .tag{font-size:.78rem;color:var(--dim);border:1px solid var(--line);border-radius:1rem;padding:.05rem .5rem} #exploitability{color:#fff;font-weight:700}
+#league{display:flex;flex-direction:column;gap:.4rem} #league button{padding:.3rem .7rem}
+#tag-in{background:#2a3a48;border-color:#3f5a70}
+.link{background:none!important;border:0!important;color:#9fd0ff;padding:0 .2rem!important;text-decoration:underline}
+#keys kbd{margin:0 .1em}
+/* the session's score sits on the felt, under the hand number: always in view, whatever the layout of the side panel */
+#stats{position:absolute;left:1rem;top:2.2rem;z-index:20000;display:grid;grid-template-columns:repeat(3,auto);gap:.2rem .9rem;text-align:center;background:#0000003a;border-radius:.6rem;padding:.3rem .7rem;line-height:1.2}
+#stats .k{display:block;color:#ffffffaa;font-size:.75rem} #stats b{font-size:1.2rem;color:#fff} #stats b.pos{color:var(--pos)} #stats b.neg{color:var(--neg)} #stats small{display:block;color:#ffffffaa;font-size:.7rem}
+#stat-by{grid-column:1/-1;text-align:left;font-size:.75rem;color:#ffffffaa} #stat-by:empty{display:none}
 #controls select{font:inherit;max-width:100%;background:#454c54;color:#fff;border:1px solid #5b636c;border-radius:.3rem}
 .pos{color:var(--pos)} .neg{color:var(--neg)}
-#history-wrap{flex:1;min-height:4rem;display:flex;flex-direction:column}
+#history-wrap{flex:1;min-height:8rem;display:flex;flex-direction:column}
 #history{flex:1;overflow-y:auto;border:1px solid var(--line);border-radius:.4rem;font-size:.9em}
 .hand summary{display:flex;gap:.5rem;padding:.25rem .5rem;cursor:pointer;border-bottom:1px solid #ffffff10;align-items:baseline}
 .hand summary .n{color:var(--dim);min-width:2.5em} .hand summary .cs{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -95,27 +132,46 @@ kbd{font:700 .75em "Liberation Mono",monospace;background:#0004;border:1px solid
 .hand .c{display:inline-block;background:#f3f1ea;border-radius:.2rem;padding:0 .15rem;margin-right:.12rem;font-weight:700;font-size:.9em}
 .hand .c.red{color:var(--red)} .hand .c.black{color:var(--black)}
 .hand ul{margin:.2rem 0 .4rem;padding-left:1.6rem;color:var(--dim)} .hand li.street{color:var(--txt)}
-#controls{display:flex;flex-direction:column;gap:.4rem;font-size:.9em}
+#controls{font-size:.9em} #controls[open]{display:flex;flex-direction:column;gap:.4rem} #controls[open]>.row{margin-top:.2rem}
 [hidden]{display:none!important}
 #controls .row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
 #controls label{display:flex;gap:.25rem;align-items:center}
 #controls input[type=range]{width:5rem}
 #controls button{padding:.25rem .6rem}
-body.busy #skip{border-color:var(--glow)}
+
+/* the pause screen: over everything, nothing behind it is live */
+#asleep{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:#0c0e10e6;text-align:center}
+#asleep h2{margin:0 0 .6rem;font-size:1.6rem} #asleep p{margin:.3rem 0}
+#resume{margin-top:1rem;font-size:1.3rem;padding:.7rem 2rem;background:#2f5c86;border-color:#4a7aa6}
 
 /* layouts by screen: last, so they override the rules above */
-/* tall screens (desktop half width): the panel goes under the table */
-@media (max-aspect-ratio:5/4){
-  html{font-size:clamp(11px,1.45vw,24px)}
-  body{grid-template-columns:100%;grid-template-rows:62% 38%}
-  #side{border-left:0;border-top:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto auto auto 1fr;column-gap:1rem}
-  #side>header,#side>#league,#side>#bot,#side>#stats{grid-column:1}
-  #history-wrap{grid-column:2;grid-row:1/6}
-  #controls{grid-column:1}
+#drawer-btn,#scrim{display:none}
+/* phones (and a landscape phone's short screen): the side panel is a drawer (H, or the button on the felt), and
+   the table gets the whole window. The root font is fixed here: the dock needs targets for a thumb. */
+@media (max-width:760px),(max-height:500px){
+  body{grid-template-columns:100%}
+  main{padding:.35rem}
+  #felt{border-radius:1.2rem}
+  #bar{grid-template-columns:100%;min-height:10.3rem;padding-top:.35rem;gap:.35rem;align-items:end}
+  #status{align-items:stretch;flex-direction:row;flex-wrap:wrap;gap:.2rem .8rem;justify-content:space-between}
+  #status:empty{display:none}
+  #turn,#potline{font-size:.85rem}
+  #actions button{padding:.75rem .3rem;font-size:1rem}
+  #actions button.bet{flex-direction:column;gap:0;line-height:1.15}
+  #next{padding:.9rem 1rem}
+  #drawer-btn{display:block;position:absolute;left:.5rem;top:.45rem;z-index:20001;padding:.3rem .6rem;background:#0006;border-color:#ffffff30}
+  #hand-label{left:3.9rem;top:.85rem} #stats{left:.5rem;top:3rem;padding:.2rem .45rem;gap:.1rem .5rem} #stats b{font-size:.95rem} #stats .k{font-size:.65rem} #stats small,#stat-by{display:none}
+  .seat{white-space:normal;padding:.25rem .5rem;font-size:.85rem} .seat .pos{display:block}
+  #side{position:fixed;right:0;top:0;bottom:0;width:min(22rem,88vw);z-index:50000;transform:translateX(100%);visibility:hidden;box-shadow:-8px 0 30px #000a}
+  body.sliding #side{transition:transform .2s,visibility .2s}   /* only while it is opened or closed, not when the window is resized */
+  body.drawer #side{transform:none;visibility:visible}
+  body.drawer #scrim{display:block;position:fixed;inset:0;background:#0008;z-index:40000}
+  #keys{display:none}
+  kbd{display:none}
 }
-/* short screens (phone landscape): no keyboard, little height */
-@media (max-height:500px){ main{padding:.3rem} #felt{border-radius:1rem} #side{padding:.4rem .6rem;gap:.4rem} #side h1{font-size:1rem}
-  kbd,#keys,#menu{display:none} #controls{gap:.25rem} }
-/* narrow screens (phone portrait): the slider gets its own row, and bigger targets for a thumb */
-@media (max-width:600px){ #size-range{flex-basis:100%;max-width:none;height:2rem} #sizer button{padding:.6rem .8rem} }
-
+.burger{display:inline-block;width:1.05rem;height:.8rem;vertical-align:-.05rem;background:linear-gradient(currentColor 0 0) 0 0/100% 2px no-repeat,linear-gradient(currentColor 0 0) 0 50%/100% 2px no-repeat,linear-gradient(currentColor 0 0) 0 100%/100% 2px no-repeat}
+@media (max-width:760px) and (min-height:501px){ html{font-size:15px} }
+/* short screens: little height */
+@media (max-height:500px){ html{font-size:12px} main{padding:.3rem} #detents button{padding:.2rem .1rem} #trackrow{gap:.4rem} }
+/* a touch screen has no keyboard to show */
+@media (pointer:coarse) and (hover:none){ kbd{display:none} }

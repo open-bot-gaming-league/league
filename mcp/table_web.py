@@ -6,7 +6,7 @@ Watch. Registered by server.py when OAuth is on (an owner needs an account).
     GET  /table/watch/<watch token>  Watch: the same page, on a session the
                                      signed-in user owns (404 otherwise)
     GET  /table/<asset>              the page's files (table.js, table.css, cardmotion.js)
-    GET  /table/signin?next=<path>   sign in (GitHub, Google, guest), then back to <path>
+    GET  /table/signin?next=<path>   sign in (GitHub or Google), then back to <path>
     GET  /table/signin/callback      where /login sends the browser back
     POST /table/signout
 
@@ -23,8 +23,7 @@ Watch. Registered by server.py when OAuth is on (an owner needs an account).
 
 Every state the page gets carries `control` (tables.py): who is playing,
 the watch link, the switches so far, and whether this user can hand the
-session to an agent. Another account's session, a guest's from another
-guest, and a session that does not exist all answer 404 alike.
+session to an agent. Another account's session and a session that does not exist answer 404 alike.
 
 Sign-in. The table is an OAuth client of this same server ("Bot Poker
 table", registered here at start, public, PKCE): /table/signin sends the
@@ -33,9 +32,7 @@ user sees (oauth/web.py), and the callback redeems the code in-process.
 The tokens go in two HttpOnly, SameSite=Lax cookies scoped to /table:
 the access token (1 h) and the refresh token (30 days, rotated through the
 provider when the access token runs out). So a browser and an agent that
-sign in with the same GitHub or Google account are the same owner. A
-guest is a new account at every sign-in: a guest browser plays and watches
-its own sessions, never an agent's.
+sign in with the same GitHub or Google account are the same owner.
 
 Requests that change anything are POSTs with a JSON body, and refused if
 the browser says they come from another origin: with SameSite=Lax cookies
@@ -62,7 +59,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from oauth.provider import LeagueOAuthProvider, pkce_pair
 from pages import render
 from table_client import TableClient, TableError
-from tables import AGENT, BROWSER, NotInControl, Party, TableSessions, controller_name, is_guest
+from tables import AGENT, BROWSER, NotInControl, Party, TableSessions, controller_name
 
 TABLE_CLIENT_ID = "obgl-table"
 TABLE_CLIENT_NAME = "Bot Poker table"
@@ -291,8 +288,10 @@ class TableWeb:
                     render(
                         "No such session",
                         "<h1>No session here</h1><p>A watch link opens only for the account that started the "
-                        "session, signed in the same way (GitHub or Google). Guests' sessions can only be "
-                        "watched from the browser that played them.</p>"
+                        "session, signed in the same way (GitHub or Google).</p>"
+                        # The usual cause is being signed in as someone else: sign in again,
+                        # and come back to this very link (not to a new session).
+                        f'<p><a href="{html.escape(self.signin_url(request.url.path))}">Sign in as a different account</a></p>'
                         f'<p><a href="{COOKIE_PATH}/">Play at the table</a></p>',
                     ),
                     status_code=404,
@@ -336,7 +335,7 @@ class TableWeb:
         except TableError as e:
             raise ApiError(e.status if e.status in (400, 404, 409) else 502, e.message) from e
 
-    def control_view(self, account: str, record: dict) -> dict:
+    def control_view(self, record: dict) -> dict:
         c = record["controller"]
         return {
             "controller": c["kind"],
@@ -345,7 +344,6 @@ class TableWeb:
             "who": controller_name(c),
             "watch": f"watch/{record['watch']}",
             "switches": record["switches"],
-            "canTagIn": not is_guest(account),
         }
 
     def _view(self, state: dict, account: str, record: dict, *, watch: bool = False, history: bool = True) -> dict:
@@ -354,7 +352,7 @@ class TableWeb:
             out.pop("session", None)
         if not history:
             out.pop("history", None)
-        out["control"] = self.control_view(account, record)
+        out["control"] = self.control_view(record)
         return out
 
     def api(self, handler: Callable, *, auth: bool = True) -> Callable:
@@ -382,7 +380,7 @@ class TableWeb:
         who = None
         if account is not None:
             rec = await self.provider.account(account) or {}
-            who = {"name": rec.get("display_name") or "you", "guest": is_guest(account)}
+            who = {"name": rec.get("display_name") or "you"}
         info["league"] = {"account": who, "signIn": self.signin_url(COOKIE_PATH + "/"), "signOut": COOKIE_PATH + "/signout"}
         return info
 
@@ -410,7 +408,7 @@ class TableWeb:
             raise ApiError(404, "no such session") from None
         except NotInControl as e:
             raise ApiError(409, f"{controller_name(e.record['controller'])} is playing this session",
-                           control=self.control_view(account, e.record)) from None
+                           control=self.control_view(e.record)) from None
 
     async def _controlled(self, session_id: Any, account: str, step: Callable[[], dict]) -> dict:
         await self._owned(session_id, account)  # before the lock: no lock for a made-up id
@@ -477,9 +475,6 @@ class TableWeb:
 
     async def tagin(self, request: Request, account: str) -> dict:
         b = await self._body(request)
-        if is_guest(account):
-            raise ApiError(400, "a guest's agent signs in as a different guest, so it cannot see this session: "
-                           "sign in with GitHub or Google, at the table and in Claude, to hand sessions over")
         session_id = b.get("session")
         await self._owned(session_id, account)
         async with self.tables.lock(session_id):

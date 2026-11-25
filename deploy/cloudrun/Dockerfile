@@ -67,8 +67,8 @@ ENV OBGL_TRANSPORT=http
 # CLOUDRUN.md's "Session state" section for why.
 ENV OBGL_STATE_DIR=/state
 # OAuth: the public origin is the token issuer and turns OAuth on (/mcp
-# then needs a bearer token; the sign-in page offers GitHub, Google and
-# guest). Tokens, clients, accounts and table-session owners go in
+# then needs a bearer token; the sign-in page offers GitHub and
+# Google). Tokens, clients, accounts and table-session owners go in
 # Firestore (mcp/oauth/store.py): the project's (default) database, found
 # through the Cloud Run service account (ADC; set GOOGLE_CLOUD_PROJECT to
 # point elsewhere). Firestore is also the default whenever

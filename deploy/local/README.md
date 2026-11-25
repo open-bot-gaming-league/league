@@ -27,8 +27,8 @@ image tree once per sha under `$OBGL_LOCAL_ROOT/trees/<sha>/` by running
 anything else, so an image change cannot silently go missing locally.
 
 Files: `run.sh`, `common.sh` (env handling), `image.py` (Dockerfile emulator), `stage-data.sh` (bot data),
-`bot-data.sha256` (manifest), `smoke.py` (HTTP proof; signs in as a guest through the real
-OAuth flow when the server advertises OAuth).
+`bot-data.sha256` (manifest), `smoke.py` (HTTP proof; with OAuth it checks the sign-in page and,
+only against a server wired to a test IdP, signs in and plays).
 
 ## Bot data and the manifest
 
@@ -63,7 +63,7 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
   `OBGL_TABLE_URL` follows, since the entrypoint exports it from `TABLE_ADDR`.
 - `OBGL_PUBLIC_URL=http://127.0.0.1:<port>`, not the image's `https://obgl.truemirrorgames.com`:
   it is the OAuth issuer and token audience, so it must be the URL clients actually use.
-  No GitHub/Google credentials are set, so the sign-in page offers guest only.
+  No GitHub/Google credentials are set, so the sign-in page offers no way to sign in: smoke checks the page and skips the signed-in steps.
 - The OAuth store is the file store `<state dir>/oauth.json`, fresh per run (tokens do not
   outlive a run), not the image's Firestore. `OBGL_LOCAL_AUTH_STORE=firestore` keeps the
   image's Firestore store against a local emulator: it needs `FIRESTORE_EMULATOR_HOST` and

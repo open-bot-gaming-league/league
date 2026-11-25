@@ -1,5 +1,6 @@
-"""The one HTML page shell every server-rendered page uses (landing,
-docs index, sign-in). Callers escape their own content."""
+"""The one HTML page shell the server-rendered reading pages use (landing,
+docs index, legal pages). The sign-in page has its own look (oauth/web.py).
+Callers escape their own content."""
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">

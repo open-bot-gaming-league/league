@@ -7,7 +7,7 @@ stranger's run of hands against a bot. The Go table knows nothing about
 accounts; this module is where a session gets an owner and a controller.
 
     owner       the signed-in account that opened it ("github:<id>",
-                "google:<sub>", "guest:<random>"), through the connector
+                "google:<sub>"), through the connector
                 (new_session) or the browser table (api/new). Fixed.
     controller  who may act in it right now, exactly one of:
                   browser          the owner, in the browser table (any tab)
@@ -59,16 +59,11 @@ from oauth.store import AuthStore, Record
 
 BROWSER = "browser"
 AGENT = "agent"
-GUEST_PREFIX = "guest:"
 LIST_LIMIT = 20  # sessions remembered per account (newest first); older ones drop off the list
 
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-def is_guest(account: str) -> bool:
-    return account.startswith(GUEST_PREFIX)
 
 
 @dataclass(frozen=True)

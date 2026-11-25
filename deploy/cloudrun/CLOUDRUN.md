@@ -132,7 +132,7 @@ upload of the repo root (`gcloud builds submit`).
 - `--allow-unauthenticated`: no Cloud Run IAM check; the service signs
   users in itself ("Access", "OAuth").
 - `--set-secrets`: the GitHub and Google OAuth apps' credentials
-  ("OAuth" below). Without them the sign-in page offers guest only.
+  ("OAuth" below). Without them the sign-in page offers no way to sign in.
 
 To check a revision before it takes traffic, add `--no-traffic --tag
 cand` to the deploy, run the post-deploy check against the tagged URL
@@ -153,8 +153,8 @@ gcloud run services update-traffic obgl-bot-poker --project PROJECT --region REG
 `--allow-unauthenticated` turns off Cloud Run's IAM check: claude.ai and
 browsers reach the service without a Google identity. With
 `OBGL_PUBLIC_URL` set (the image sets it), `/mcp` answers 401 without a
-bearer token from the service's own OAuth server ("OAuth" below). Guest
-sign-in is one click, and client registration (`/register`) is open, as
+bearer token from the service's own OAuth server ("OAuth" below). Sign-in
+is GitHub or Google, and client registration (`/register`) is open, as
 claude.ai needs it. What bounds use: the game is play money;
 `--max-instances 1` caps compute at one instance; the table keeps at
 most 200 sessions and drops the oldest when a new one would exceed that
@@ -168,9 +168,9 @@ The MCP server is the OAuth authorization server for the connector
 (code: `mcp/oauth/`, start at `__init__.py`). Routes:
 `/.well-known/oauth-authorization-server`,
 `/.well-known/oauth-protected-resource/mcp`, `/register`, `/authorize`,
-`/token`, `/revoke`, and the sign-in page `/login` with **Sign in with
-GitHub**, **Sign in with Google** (each shown when configured),
-**Continue as guest** and **Cancel**. GitHub and Google only identify
+`/token`, `/revoke`, and the sign-in page `/login` with **Continue with
+GitHub**, **Continue with Google** (each shown when configured)
+and **Cancel**. (Guest sign-in was dropped; tokens it issued no longer work.) GitHub and Google only identify
 the person; the service issues its own tokens (access 1 h, refresh 30
 days, rotated on refresh). An account is provider + provider user id +
 display name (GitHub login; Google `name`). No email is requested
@@ -262,10 +262,10 @@ again; the connector still works without signing in again.
 
 A person asks by email (the address in docs/PRIVACY.md); the operator, with
 the project's credentials, deletes. The account id is `<provider>:<id>`:
-`github:<numeric user id>`, `google:<sub>`, or `guest:<random>`. We hold
+`github:<numeric user id>`, `google:<sub>`, or, from before guest sign-in was dropped, `guest:<random>`. We hold
 no email, so find it in the Firestore console's data view: open
 `oauth_accounts`; each document's id is the account id and its `record`
-field holds the provider and display name. A guest account cannot be
+field holds the provider and display name. A leftover guest account cannot be
 matched to a person (its display name is "Guest"): delete one only by id,
 if the person can supply it.
 
@@ -312,8 +312,10 @@ B=https://obgl.truemirrorgames.com
 curl -fsS $B/.well-known/oauth-authorization-server   # issuer $B, endpoints under $B
 curl -fsS $B/.well-known/oauth-protected-resource/mcp # resource $B/mcp
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp  # 401
-# A guest sign-in through the OAuth flow, then initialize + new_session + act
-# with its token (registers one client with a loopback redirect URI):
+# The sign-in page through the OAuth flow (no guest option, CSP, consent links,
+# Cancel; registers one client with a loopback redirect URI). The signed-in
+# steps (initialize + new_session + act, the table) need a person's account,
+# so smoke skips them against a real deployment:
 python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs,table
 ```
 
@@ -324,8 +326,7 @@ metadata lines show it); the flag keeps the table check's sign-in
 redirects on `$B`, so every request reaches the revision under test.
 
 Then a person, in claude.ai with a fresh account: add the connector, take
-the OAuth option, sign in with GitHub, then with Google, then as a
-guest; each plays a hand. Deploy the same image again; the connector
+the OAuth option, sign in with GitHub, then with Google; each plays a hand. Deploy the same image again; the connector
 still works without signing in again.
 
 ## Browser table
@@ -340,9 +341,11 @@ https. Nothing to create or set beyond "OAuth". Each session's control
 lock and the last finished hand shown to watchers are in the instance's
 memory: keep `--max-instances 1`.
 
-Check: the `table` check of `deploy/local/smoke.py` ("OAuth", "Check")
-signs in as a guest at `/table/`, plays a step, and opens the session's
-watch link.
+Check: the `table` check of `deploy/local/smoke.py` signs in at `/table/`,
+plays a step, and opens the session's watch link. It needs a server wired
+to a test IdP (`--sign-in github`, as in `mcp/test_smoke.py`), so against a
+real deployment a person does it: sign in at `/table/`, play a step, open
+the watch link Claude gives.
 
 ## Docs: what the service serves
 
@@ -390,8 +393,8 @@ server.)
    ```
 
 3. The connector answers: run `deploy/local/smoke.py` as in "OAuth",
-   "Check". With the guest token it gets, a `Client` on `$B/mcp` can
-   call `docs` with each of the six names, then with `nope` (expect an
+   "Check" for the sign-in page; then a person, signed in at claude.ai, has
+   Claude call `docs` with each of the six names, then with `nope` (expect an
    error result that lists the valid names).
 
 4. A person, in claude.ai: in a brand-new chat with web search and

@@ -128,7 +128,7 @@ def run_server():
 
 class Site:
     """Our server with a fake GitHub; `browser(user)` and `agent(user)`
-    sign in as that GitHub user (None: as a guest)."""
+    sign in as that GitHub user."""
 
     def __init__(self, base, fake):
         self.base, self.fake = base, fake
@@ -136,16 +136,29 @@ class Site:
     @asynccontextmanager
     async def browser(self, user):
         async with httpx2.AsyncClient(base_url=self.base, timeout=30) as http:
-            if user is not None:
-                self.fake.userinfo = user
-            landed = await ot.table_sign_in(http, self.base, "github" if user else "guest")
+            self.fake.userinfo = user
+            landed = await ot.table_sign_in(http, self.base, "github")
             assert landed == "/table/", landed
             yield http
 
     async def agent_token(self, user):
-        if user is not None:
-            self.fake.userinfo = user
-        return (await ot.agent_tokens(self.base, "github" if user else "guest"))["access_token"]
+        self.fake.userinfo = user
+        return (await ot.agent_tokens(self.base, "github"))["access_token"]
+
+
+def league_app(base, idp_base, store):
+    """Our server's ASGI app at `base` with OAuth on and a GitHub sign-in
+    wired to the fake IdP served at `idp_base`."""
+    idp = github(
+        ot.UPSTREAM_ID,
+        ot.UPSTREAM_SECRET,
+        f"{base}/login/github/callback",
+        authorize_endpoint=f"{idp_base}/authorize",
+        token_endpoint=f"{idp_base}/token",
+        userinfo_endpoint=f"{idp_base}/userinfo",
+    )
+    config = OAuthConfig(public_url=base, mcp_path="/mcp", store=store, idps=[idp])
+    return server_module.build_server(None, config).streamable_http_app()
 
 
 def _site_store(kind):
@@ -164,15 +177,5 @@ def site(request, serve_asgi, free_port):
     fake = ot.FakeIdP(USER_A)
     with serve_asgi(fake.app) as idp_base:
         base = f"http://127.0.0.1:{free_port}"
-        idp = github(
-            ot.UPSTREAM_ID,
-            ot.UPSTREAM_SECRET,
-            f"{base}/login/github/callback",
-            authorize_endpoint=f"{idp_base}/authorize",
-            token_endpoint=f"{idp_base}/token",
-            userinfo_endpoint=f"{idp_base}/userinfo",
-        )
-        config = OAuthConfig(public_url=base, mcp_path="/mcp", store=store, idps=[idp])
-        app = server_module.build_server(None, config).streamable_http_app()
-        with serve_asgi(app, free_port):
+        with serve_asgi(league_app(base, idp_base, store), free_port):
             yield Site(base, fake)

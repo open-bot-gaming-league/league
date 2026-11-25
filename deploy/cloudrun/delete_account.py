@@ -4,7 +4,8 @@ database (CLOUDRUN.md, "Deleting an account"). A dry run unless --delete.
 
   delete_account.py ACCOUNT_ID --project PROJECT [--delete]
 
-ACCOUNT_ID is "github:<id>", "google:<sub>" or "guest:<random>". Run it with
+ACCOUNT_ID is "github:<id>" or "google:<sub>" (or "guest:<random>", for an
+account left from before guest sign-in was dropped). Run it with
 Application Default Credentials for PROJECT, or with FIRESTORE_EMULATOR_HOST
 set. It lists the documents that hold the account's data, one per line, then
 deletes them only with --delete. Exit 1 if it finds no account record.

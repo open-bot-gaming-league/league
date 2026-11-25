@@ -9,12 +9,12 @@ expiry), /revoke. What is ours:
 
 - `authorize()` does not decide anything. It files the validated request
   as a *pending sign-in* and sends the browser to our sign-in page
-  (`/login?request=<id>`, oauth/web.py), which offers GitHub, Google
-  (each only if configured) and "Continue as guest".
-- The sign-in page's choice lands in `finish_guest()` or, via the
-  upstream IdP's redirect, `finish_upstream()`. Either one picks the
-  account, mints our authorization code bound to it, and returns the
-  URL that sends the browser back to the MCP client's redirect_uri.
+  (`/login?request=<id>`, oauth/web.py), which offers GitHub and Google
+  (each only if configured).
+- The sign-in page's choice lands, via the upstream IdP's redirect, in
+  `finish_upstream()`: it picks the account, mints our authorization code
+  bound to it, and returns the URL that sends the browser back to the MCP
+  client's redirect_uri.
 - Codes, access and refresh tokens are opaque random strings we mint and
   file in the store by their sha256. Access tokens carry the account id
   as `subject`, so the SDK binds each MCP session to the account that
@@ -54,11 +54,21 @@ CODE_TTL = 5 * 60
 ACCESS_TTL = 60 * 60
 REFRESH_TTL = 30 * 24 * 60 * 60
 
-GUEST = "guest"
+# Guest sign-in was dropped. Tokens it issued stop working: the loaders
+# below treat an account with this prefix as unknown. Only token records
+# have a TTL, so they age out of the store; accounts, table sessions and
+# watch tokens never expire, and a leftover guest account stays until
+# deploy/cloudrun/delete_account.py removes it.
+RETIRED_GUEST_PREFIX = "guest:"
 
 
 def _hash(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def _retired(record: dict) -> bool:
+    """A token record of a retired guest account."""
+    return str(record.get("subject") or "").startswith(RETIRED_GUEST_PREFIX)
 
 
 def _same_resource(a: str, b: str) -> bool:
@@ -193,11 +203,6 @@ class LeagueOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
         account_id = await self._upsert_account(idp_name, identity.provider_user_id, identity.display_name)
         return await self._issue_code(record, account_id)
 
-    async def finish_guest(self, request_id: str) -> str:
-        record = await self._pending(request_id, take=True)
-        account_id = await self._upsert_account(GUEST, secrets.token_urlsafe(16), "Guest")
-        return await self._issue_code(record, account_id)
-
     async def cancel(self, request_id: str) -> str:
         record = await self._pending(request_id, take=True)
         return self._error_redirect(record, "access_denied", "the user cancelled sign-in")
@@ -283,7 +288,7 @@ class LeagueOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
 
     async def load_refresh_token(self, client: OAuthClientInformationFull, refresh_token: str) -> RefreshToken | None:
         record = await self.store.get("refresh", _hash(refresh_token))
-        if record is None or record["client_id"] != client.client_id:
+        if record is None or record["client_id"] != client.client_id or _retired(record):
             return None
         return RefreshToken(
             token=refresh_token,
@@ -306,7 +311,7 @@ class LeagueOAuthProvider(OAuthAuthorizationServerProvider[AuthorizationCode, Re
     async def load_access_token(self, token: str) -> AccessToken | None:
         key = _hash(token)
         record = await self.store.get("access", key)
-        if record is None:
+        if record is None or _retired(record):
             return None
         if record["expires_at"] < self.clock():
             await self.store.delete("access", key)

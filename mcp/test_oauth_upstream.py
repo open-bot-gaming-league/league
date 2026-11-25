@@ -56,7 +56,7 @@ def upstream(request, serve_asgi, free_port):
 
 
 async def _through_upstream(http, base, name):
-    """Register, /authorize, click "Sign in with <IdP>", let the fake IdP
+    """Register, /authorize, click "Continue with <IdP>", let the fake IdP
     answer, follow its redirect to our callback. Returns (client,
     verifier, state, our callback's redirect Location)."""
     client = await ot.register(http, base, name="Claude")
