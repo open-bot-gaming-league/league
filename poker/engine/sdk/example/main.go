@@ -23,8 +23,9 @@ import (
 // myBot is yours to change. It plays pairs, aces and two big cards
 // before the flop, and any pair after it. It beats the starter bots by a
 // lot, as nearly anything sensible does: they are teaching bots, each
-// with one obvious leak. Measure against a house bot, or your last
-// version, to learn whether a change helps.
+// with one obvious leak. Measure against your last version (the sdk
+// README's first example), or a house bot if you have its files, to learn
+// whether a change helps.
 type myBot struct{}
 
 func (myBot) Act(s sdk.State) sdk.Action {

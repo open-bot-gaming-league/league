@@ -36,7 +36,8 @@ table on the league.
 
 Then make the bot yours: edit `myBot.Act` in `poker/engine/sdk/example/main.go`,
 measure it locally (`go run ./sdk/example -vs rock -hands 20000`), and play
-it at the table again.
+it at the table again. The SDK README's first example is the loop to repeat:
+fork a starter bot, add one rule, and measure it against the bot it came from.
 
 ## Not Go yet?
 

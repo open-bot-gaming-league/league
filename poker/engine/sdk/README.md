@@ -25,7 +25,56 @@ it, or write your own type with an `Act` method.
 The starter bots are teaching bots, each with one obvious leak, so even
 the example bot beats them by a lot (well over +100 bb/100 against
 Station and Maniac). That says little about a bot: measure yours against
-a house bot, or against your previous version.
+your previous version (below), or a house bot if you have its files.
+
+## First: fork a starter bot, add one rule, measure it
+
+The loop you will repeat: take a bot, change one thing, and `Match` the new
+version against the old on the same seed. The same seed deals the same
+cards, and every deal is played twice with the seats swapped, so what is
+left in the result is mostly your change.
+
+Station with one rule added: on the river, when the other seat checks to
+it, bet three quarters of the pot.
+
+```go
+type riverBettor struct{ bots.Station }
+
+func (b riverBettor) Act(s sdk.State) sdk.Action {
+	if s.Round == sdk.River && s.Legal.Check && len(s.History) > 0 {
+		last := s.History[len(s.History)-1]
+		if last.Seat != s.Seat && last.Round == sdk.River && last.Kind == sdk.Check {
+			return s.RaisePot(0.75)
+		}
+	}
+	return b.Station.Act(s) // everything else: Station as it was
+}
+
+res, _ := sdk.Match(riverBettor{}, bots.Station{}, 20000, 1)
+fmt.Println(res) // -2.7 ± 1.0 bb/100 over 20000 hands
+```
+
+The rule lost, by more than twice its SE: it bets every hand, and Station
+calls nearly every bet, so the bluffs pay. Refine it: bet only with a pair
+or better.
+
+```go
+type valueBettor struct{ bots.Station }
+
+func (b valueBettor) Act(s sdk.State) sdk.Action {
+	if s.Made() >= sdk.Pair {
+		return riverBettor{b.Station}.Act(s)
+	}
+	return b.Station.Act(s)
+}
+
+res, _ = sdk.Match(valueBettor{}, bots.Station{}, 20000, 1)
+fmt.Println(res) // +7.5 ± 0.9 bb/100 over 20000 hands
+```
+
+Now it wins: value bets against a bot that calls. Both are in
+`sdk/bots/example_test.go` and run with `go test ./sdk/bots/`, which checks
+those exact numbers.
 
 ## A bot
 
@@ -130,19 +179,12 @@ your bot into every kind of spot (a match fails on an illegal move).
 
 ## Opponents
 
-- `bots.Station`, `bots.Maniac`, `bots.Rock` (`sdk/bots/`): three starter
-  bots, one short file each. Station calls almost everything, Maniac
-  raises and shoves with anything, Rock plays only premium hands and folds
-  to aggression. `bots.ByName["rock"]()` builds one by name.
-- House bots: the league's trained bots, if their files are on your disk
-  (a bucket file and a blueprint, hundreds of MB each; not in the
-  repository, and nothing here downloads them):
-
-      go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
-
-  In code, `sdk.LoadHouse(buckets, blueprint)` returns a Bot; `Close` it
-  when done. It plays as at the table: its menu's bet sizes, reading other
-  sizes as the menu sizes around them.
+`bots.Station`, `bots.Maniac`, `bots.Rock` (`sdk/bots/`): three starter
+bots, one short file each. Station calls almost everything, Maniac raises
+and shoves with anything, Rock plays only premium hands and folds to
+aggression. `bots.ByName["rock"]()` builds one by name. Your own earlier
+versions are the other opponent worth having: keep them, and `Match` each
+change against the last.
 
 ## Play your table
 
@@ -174,6 +216,18 @@ second per token (the client waits when told to), so a few hands a
 second at most: for thousands of hands use `Match`. `Table` also plays a
 table server you run yourself (`go run ./cmd/table`, which needs a house
 bot's files; see its package comment), where it starts a session.
+
+## If you have house-bot files
+
+The league's trained bots run here too, if their files are on your disk (a
+bucket file and a blueprint, hundreds of MB each; not in the repository,
+and nothing here downloads them):
+
+    go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
+
+In code, `sdk.LoadHouse(buckets, blueprint)` returns a Bot; `Close` it when
+done. It plays as at the table: its menu's bet sizes, reading other sizes as
+the menu sizes around them.
 
 ## Files
 
