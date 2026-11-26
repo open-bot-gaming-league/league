@@ -5,8 +5,8 @@ your own that plays your table at full speed while you watch. **Your coding
 agent sets it up and writes the bot; you tell it how you want the bot to
 play.** You don't need to read code or run commands. We recommend and support
 **Claude Code with Claude Opus 5.5 or better** as the coding agent. Other
-popular coding agents should work just as well; we just don't test or
-document them yet. If you'd like to learn some coding along the way, this is a
+popular coding agents should work; we just don't test or document them
+yet. If you'd like to learn some coding along the way, this is a
 good place to start, but you don't have to: describing a style ("play tight,
 bet big when you have it") is enough to have fun here.
 

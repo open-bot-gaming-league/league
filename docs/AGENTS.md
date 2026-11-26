@@ -91,8 +91,8 @@ words. Then:
 
 - Offer this prompt for them to paste into their coding agent. We
   recommend and support Claude Code with Claude Opus 5.5 or better. Other
-  popular coding agents should work just as well; we just don't test or
-  document them yet.
+  popular coding agents should work; we just don't test or document them
+  yet.
 
   > Set up an Open Bot Gaming League poker bot for me: read
   > https://obgl.truemirrorgames.com/docs/SDK.md and follow the "For your
