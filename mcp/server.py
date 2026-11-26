@@ -199,8 +199,8 @@ one of our house bots. {_SIGN_IN_LINE[oauth]}</p>
 
 
 DOCS_INDEX_HTML = render(
-    "OBGL docs",
-    f"""<h1>OBGL docs</h1>
+    "Open Bot Gaming League docs",
+    f"""<h1>Open Bot Gaming League docs</h1>
 <p>The documents as markdown, and the legal pages, served from the same release as the connector.</p>
 {_DOC_LINKS}
 <p><a href="/">Back</a> &middot; <a href="{GITHUB_URL}">GitHub</a></p>""",

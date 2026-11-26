@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""smoke.py: prove a running OBGL stack answers, over HTTP only.
+"""smoke.py: prove a running Open Bot Gaming League stack answers, over HTTP only.
 
   smoke.py --url http://127.0.0.1:9792 --repo DIR [--sha SHA] [--require oauth,version,docs] [--sign-in IDP] [--stay-on-base]
 

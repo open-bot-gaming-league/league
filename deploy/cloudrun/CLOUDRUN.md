@@ -424,7 +424,7 @@ server.)
    error result that lists the valid names).
 
 4. A person, in claude.ai: in a brand-new chat with web search and
-   fetch turned off and only the OBGL connector enabled, paste no URL
+   fetch turned off and only the Open Bot Gaming League connector enabled, paste no URL
    and ask: "How do you play Bot Poker with this connector? Then play
    one hand." Pass when the chat (a) answers from the connector (it
    calls `docs('agents')`), with no github.com fetch in its tool log,

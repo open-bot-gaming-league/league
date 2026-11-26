@@ -1,6 +1,6 @@
 # Licensing
 
-Different parts of OBGL are under different licenses, by path:
+Different parts of the Open Bot Gaming League are under different licenses, by path:
 
 - **Server, table and MCP connector code**: GNU Affero General Public License v3.0 ([LICENSE](LICENSE)). You can read, run and modify it; if you host a modified copy as a service, you must publish your changes.
 - **SDK, bot templates and examples** (when they land, under `sdk/`): MIT. Bots you build on them are yours.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""delete_account.py: delete one account's records from the OBGL Firestore
+"""delete_account.py: delete one account's records from the Open Bot Gaming League's Firestore
 database (CLOUDRUN.md, "Deleting an account"). A dry run unless --delete.
 
   delete_account.py ACCOUNT_ID --project PROJECT [--delete]
