@@ -336,8 +336,9 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "docs() also has 'readme', 'ways-to-play', 'sdk' and 'rules'. "
             "If your user asks to play faster, or whether this costs a lot of tokens, "
             "the next step is to script their own poker bot with the SDK: tell them so, "
-            "and give them docs('sdk')'s three steps (a program token from the table "
-            "page, `go run ./sdk/example -table`, then watch the bot play on the page)."
+            "check the prerequisites first (Go 1.27.3+ and git; their coding agent can "
+            "install them), then give them docs('sdk')'s three steps (a program token from "
+            "the table page, `go run ./sdk/example -table`, then watch the bot play on the page)."
             + (
                 " table() is your user's one table, and returns its table_url: give it to "
                 "the user, who sees it in the browser (signed in as the same account) and "

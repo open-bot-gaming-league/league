@@ -10,10 +10,16 @@ The game: heads-up (two players) no-limit hold'em. Blinds 50/100 chips,
 both seats start every hand with 50 big blinds (5,000 chips), any bet
 size from the minimum raise to all-in.
 
+## Prerequisites
+
+- **Go 1.27.3 or newer** (the version `poker/engine/go.mod` names: `go version` to check).
+- **git**, to clone the repository.
+
+Don't have these? Ask your agent to install these prerequisites.
+
 ## Run it
 
-From a clone of the repository, in `poker/engine` (the Go module's root;
-Go 1.27.3 or newer, as go.mod says):
+From a clone of the repository, in `poker/engine` (the Go module's root):
 
     go run ./sdk/example                       # your bot vs each starter bot, 2,000 hands each
     go run ./sdk/example -vs rock -hands 20000 -seed 7

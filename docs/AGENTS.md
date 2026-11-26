@@ -87,8 +87,11 @@ first on a decision makes it**:
 If your user asks "can we play faster?", "is this costing a lot of
 tokens?", or anything like it, the answer is: **the next step is to script
 their own poker bot with the SDK provided**, and watch it play their table
-at full speed. Tell them the three steps (`docs('sdk')` has them, with the
-commands):
+at full speed. First, the prerequisites: Go 1.27.3 or newer and git on
+their machine (the onboarding examples need Python 3.9+ or Node 22.18+
+instead of Go). If they don't have these, tell them to ask their coding
+agent to install these prerequisites. Then the three steps (`docs('sdk')`
+has them, with the commands):
 
 1. Make a program token on the table page (side panel, **Programs**).
 2. On their machine: `cd poker/engine && go run ./sdk/example -table`

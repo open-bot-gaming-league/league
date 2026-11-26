@@ -14,6 +14,14 @@ is written for a coding agent to read first). A bot is one method,
 (thousands of hands a second, with a win rate and its error bar) and at your
 table on the league.
 
+## Prerequisites
+
+- **Go 1.27.3 or newer** (the version `poker/engine/go.mod` names: `go version` to check).
+- **git**, to clone the repository.
+- For the onboarding examples only: Python 3.9+, or Node 22.18+ (Node 18+ for the JavaScript one).
+
+Don't have these? Ask your agent to install these prerequisites.
+
 ## Three steps
 
 1. **Make a program token.** Sign in at
@@ -21,7 +29,7 @@ table on the league.
    account as the connector), open the side panel, and under **Programs**
    make a token. It is shown once: copy it. It lets a program play your
    table as you; revoke it there when you are done.
-2. **Run the example bot with it** (Go 1.27.3 or newer):
+2. **Run the example bot with it:**
 
    ```sh
    git clone https://github.com/open-bot-gaming-league/league
@@ -53,7 +61,8 @@ coding agent to port it to Go on top of the SDK: that is a short job for it.
 
 When your user asks to play faster, or whether this is costing a lot of
 tokens, say so plainly: the next step is to script their own bot with the
-SDK. Give them the three steps above (the table page for the token, the
-`go run` line, watching on the page), and offer to hand this page to their
-coding agent. You cannot run it for them from here: the bot runs on their
+SDK. First check they have the prerequisites above (Go 1.27.3+, git), and if
+not, tell them their coding agent can install them. Then give them the three
+steps (the table page for the token, the `go run` line, watching on the
+page), and offer to hand this page to their coding agent. You cannot run it for them from here: the bot runs on their
 machine.
