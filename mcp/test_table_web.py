@@ -294,6 +294,7 @@ async def test_a_page_behind_a_finished_hand_is_shown_its_end(site):
         while not s["over"]:
             s = _payload(await mcp.call_tool("act", {"action": _move(s)["kind"]}))
         final = s
+        final_events = (await p.state())["finished"]["events"]
         s = _payload(await mcp.call_tool("next_hand", {}))
         # The page last saw `hand` unfinished: it gets that hand's end first ...
         w = await p.state(brief="1", hand=hand, over="0")
@@ -304,6 +305,10 @@ async def test_a_page_behind_a_finished_hand_is_shown_its_end(site):
         assert w["presence"]["hands"][str(hand)] == ["your agent"]
         # Nothing new: no history resent.
         assert "history" not in await p.state(brief="1", hand=s["hand"])
+        # A page replaying: the hands after the one it has, each with its moves.
+        r = await p.state(since=str(hand - 1))
+        assert r["history"][0]["number"] == hand and r["history"][0]["events"] == final_events
+        assert (await p.get("state", since="x")).status_code == 400
 
 
 @pytest.mark.asyncio

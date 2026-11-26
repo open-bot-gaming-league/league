@@ -52,6 +52,14 @@
       <div id="next-wrap" hidden><button id="next">Next hand <kbd>N</kbd></button></div>
     </div>
     <div id="presence" hidden></div>
+    <div id="replay" hidden role="group" aria-label="Replay">
+      <span class="dim">Replay</span>
+      <label><input type="radio" name="rspeed" value="1x"> 1x</label>
+      <label><input type="radio" name="rspeed" value="fast"> fast</label>
+      <label><input type="radio" name="rspeed" value="fastest"> fastest</label>
+      <span id="behind" class="dim"></span>
+      <button id="jump" type="button">Jump to latest <kbd>J</kbd></button>
+    </div>
     <div id="error" role="alert"></div>
   </div>
 </main>

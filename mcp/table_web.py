@@ -16,7 +16,8 @@ their agent over MCP, or their program with a program token (programs.py).
     otherwise, with `signIn` for a browser). `session` is optional: the
     account's table is meant either way, and any other id is 404.
     GET  /table/api/info             the table's api/info + `league` (who is signed in)
-    GET  /table/api/state            [?session=ID][&brief=1][&hand=H&over=0|1]: your table's state
+    GET  /table/api/state            [?session=ID][&brief=1][&hand=H&over=0|1 | &since=H]: your table's state;
+                                     since: with the finished hands after H, events and all (the latest 200)
     POST /table/api/act              {hand, step, kind[, amount]} or {hand, step, action}
     POST /table/api/next             {hand[, seat, opponent]}: seat and opponent from the page only (403 otherwise)
     POST /table/api/new              {seat, opponent}: reset: a new table, the score from zero (page only)
@@ -405,6 +406,15 @@ class TableWeb:
     async def state(self, request: Request, account: str, party: Party) -> dict:
         q = request.query_params
         session_id, state = await self._table(account, party, q.get("session"))
+        if "since" in q:
+            # A page replaying hands: the finished hands after `since`, with
+            # their events, as many as the table keeps (the latest 200).
+            try:
+                since = int(q["since"])
+            except ValueError:
+                raise ApiError(400, "since must be a hand number") from None
+            state = await self._call(lambda: self.client.state(session_id, since=max(since, 0)))
+            return self._view(state, session_id)
         try:
             shown = int(q["hand"])
         except (KeyError, ValueError):

@@ -32,6 +32,11 @@ on stdout ("OK ..." or "FAIL ..."):
                      it on the clipboard (or selects it with no clipboard), and the list has <label>;
                      answer "OK <token>"
     REVOKE <label>   revoke the token named <label> (confirming); the list no longer has it
+    SHOWN <h:n,...>  within 300 s the page has shown each hand h to its end with exactly n moves animated (the
+                     moves its record has: no hand and no event skipped), some of them replayed (replay mode
+                     came on by itself); no console errors so far; "OK <replayed> <hands>"
+    JUMP             once the page is replaying with hands waiting: J (Jump to latest) empties the queue within
+                     3 s, the table settles on the live state; "OK <hands skipped>"
     OLDLINK          in a fresh browser (no cookies) open an old watch link (/table/watch/<anything>): sign
                      in (GitHub); it lands on /table/, the account's table; "OK <hand> <step>"
     SLEEPER <s>      a second page on the table, told to sleep after <s> idle seconds (#idle=<s>);
@@ -638,6 +643,29 @@ def main():
                     page.wait_for_function("n => document.querySelectorAll('#token-list li').length === n - 1", arg=n, timeout=5000)
                     assert label not in token_labels(page)
                     say("OK revoked")
+                elif cmd[0] == "SHOWN":
+                    want = {int(h): int(n) for h, n in (x.split(":") for x in cmd[1].split(","))}
+                    page.wait_for_function(
+                        "hs => hs.every(h => window.table.handsShown.some(x => x.number === h))", arg=list(want), timeout=300000)
+                    settle(page, 40000)
+                    shown = {x["number"]: x for x in page.evaluate("() => window.table.handsShown")}
+                    wrong = {h: (shown[h]["events"], n) for h, n in want.items() if shown[h]["events"] != n}
+                    assert not wrong, f"hands shown with the wrong number of moves (shown, record): {wrong}"
+                    replays = sum(shown[h]["replay"] for h in want)
+                    assert replays, "no hand was replayed: replay mode never came on"
+                    assert not problems, " | ".join(problems)
+                    shot(page, "replayed")
+                    say(f"OK {replays} {len(want)}")
+                elif cmd[0] == "JUMP":
+                    page.wait_for_function("() => window.table.replaying && window.table.behind > 2", timeout=60000)
+                    assert page.locator("#replay").is_visible() and page.locator("#jump").is_visible(), "no replay controls"
+                    shot(page, "replaying")
+                    waiting = page.evaluate("() => window.table.behind")
+                    blur(page)
+                    page.keyboard.press("j")
+                    page.wait_for_function("() => window.table.behind === 0", timeout=3000)
+                    settle(page)
+                    say(f"OK {waiting}")
                 elif cmd[0] == "OLDLINK":
                     fresh = browser.new_context(viewport={"width": 1600, "height": 900}).new_page()
                     fresh.on("pageerror", lambda e: problems.append(f"page error: {e}"))

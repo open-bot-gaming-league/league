@@ -11,6 +11,7 @@ Skips itself unless OBGL_BROWSER_PYTHON names a python with Playwright
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -164,3 +165,47 @@ async def test_the_table_page_with_the_agent_and_a_program_at_it(site):
             await browser.do("DONE")
         finally:
             browser.close()
+
+
+ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "poker", "engine")
+
+
+@pytest.mark.asyncio
+@needs_browser[0]
+@needs_browser[1]
+@pytest.mark.skipif(shutil.which("go") is None, reason="no go on PATH")
+async def test_watch_your_bot_play_fifty_hands(site, tmp_path):
+    """Watch your bot: the SDK's example bot plays 50 hands at full speed with a program token; the page
+    replays every one of them, with every move, then catches up; a second run is skipped with Jump to latest."""
+    example = str(tmp_path / "example")
+    built = await anyio.to_thread.run_sync(lambda: subprocess.run(
+        ["go", "build", "-o", example, "./sdk/example"], cwd=ENGINE, capture_output=True, text=True, timeout=300))
+    assert built.returncode == 0, built.stderr
+    browser = Browser(site.base)
+    try:
+        await browser.do("PLAY")
+        token = (await browser.do("TOKEN my bot"))[0]
+        env = {**os.environ, "OBGL_TABLE": f"{site.base}/table/", "OBGL_TOKEN": token}
+
+        async def bot_plays(hands):
+            return await anyio.to_thread.run_sync(lambda: subprocess.run(
+                [example, "-table", "-hands", str(hands)], env=env, capture_output=True, text=True, timeout=300))
+
+        async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
+            prog = Program(http, token)
+            before = (await prog.state())["hand"]
+            run = await bot_plays(50)
+            assert run.returncode == 0, run.stdout + run.stderr
+            r = await http.get("/table/api/state", params={"since": str(before - 1)}, headers=prog.headers)
+            records = [h for h in r.json()["history"] if h["number"] >= before]
+            assert len(records) >= 50, len(records)
+            spec = ",".join(f"{h['number']}:{len(h['events'])}" for h in records)
+            replayed, hands = map(int, await browser.do(f"SHOWN {spec}"))
+            assert hands == len(records) and replayed >= len(records) - 2, (replayed, hands)
+            # Again, and this time skip to the end.
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(bot_plays, 40)
+                await browser.do("JUMP")
+        await browser.do("DONE")
+    finally:
+        browser.close()

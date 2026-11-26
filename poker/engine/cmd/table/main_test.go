@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -579,5 +581,94 @@ func TestSessionsSurviveARestart(t *testing.T) {
 	}
 	if code := do(t, ts2, "GET", "/api/state?session=someone-else", nil, nil); code != 404 {
 		t.Errorf("an unknown session after the restart: status %d", code)
+	}
+}
+
+// A page replaying hands it did not see: api/state?since=H answers with
+// the finished hands after H, each with its events (the moves a state's
+// events has for it), at most replayHands of them. The events never go in
+// the hands file: its lines stay what they were.
+func TestHistorySinceCarriesEventsButNotTheFile(t *testing.T) {
+	ts, s := testTable(t)
+	path := t.TempDir() + "/hands.jsonl"
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	s.hands = f
+	rnd := rand.New(rand.NewPCG(7, 8))
+	var st state
+	do(t, ts, "POST", "/api/new", map[string]string{"seat": "alternate"}, &st)
+	session := st.Session
+	finals := map[int][]event{} // each hand's events as its final state showed them
+	for st.Totals.Hands < replayHands+15 {
+		if st.Over {
+			finals[st.Hand] = st.Events
+			if st.Finished == nil || st.Finished.Number != st.Hand || !reflect.DeepEqual(st.Finished.Events, st.Events) {
+				t.Fatalf("hand %d: the finished record's events are not the hand's", st.Hand)
+			}
+			next := actBody{Session: session, Hand: st.Hand}
+			st = state{} // (decoding into the old one would write into the slices kept above)
+			do(t, ts, "POST", "/api/next", next, &st)
+			continue
+		}
+		body := actBody{session, st.Hand, st.Step, rnd.IntN(len(st.Actions))}
+		st = state{}
+		do(t, ts, "POST", "/api/act", body, &st)
+	}
+	finals[st.Hand] = st.Events // the loop ends on a hand just over
+	finished := st.Totals.Hands
+	var since state
+	if code := do(t, ts, "GET", fmt.Sprintf("/api/state?session=%s&since=%d", session, finished-5), nil, &since); code != 200 {
+		t.Fatalf("since: status %d", code)
+	}
+	if len(since.History) != 5 || since.History[0].Number != finished-4 {
+		t.Fatalf("since %d: %d hands from %d", finished-5, len(since.History), since.History[0].Number)
+	}
+	for _, rec := range since.History {
+		if len(rec.Events) == 0 || !reflect.DeepEqual(rec.Events, finals[rec.Number]) {
+			t.Fatalf("hand %d: events %+v, the hand had %+v", rec.Number, rec.Events, finals[rec.Number])
+		}
+	}
+	do(t, ts, "GET", "/api/state?session="+session+"&since=0", nil, &since)
+	if len(since.History) != replayHands || since.History[0].Number != finished-replayHands+1 {
+		t.Fatalf("since 0: %d hands from %d, want the latest %d", len(since.History), since.History[0].Number, replayHands)
+	}
+	if len(s.sessions[session].events) != replayHands {
+		t.Fatalf("%d hands' events kept, want %d", len(s.sessions[session].events), replayHands)
+	}
+	var whole state
+	do(t, ts, "GET", "/api/state?session="+session, nil, &whole)
+	if len(whole.History) != finished || len(whole.History[finished-1].Events) != 0 {
+		t.Fatalf("the whole history: %d hands, events %d (want none)", len(whole.History), len(whole.History[finished-1].Events))
+	}
+	if code := do(t, ts, "GET", "/api/state?session="+session+"&since=x", nil, nil); code != 400 {
+		t.Fatalf("since=x: status %d", code)
+	}
+	// The file: one line per hand, the record and nothing more. Its size is
+	// what a line was before replay existed (the same fields), within 10%.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != finished {
+		t.Fatalf("%d lines for %d hands", len(lines), finished)
+	}
+	for i, line := range lines {
+		var l handLine
+		if err := json.Unmarshal([]byte(line), &l); err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		json.Unmarshal([]byte(line), &fields)
+		if _, ok := fields["events"]; ok {
+			t.Fatalf("line %d has events", i+1)
+		}
+		before, _ := json.Marshal(handLine{l.Time, l.Session, l.SeatMode, s.sessions[session].history[i], l.BotCards, l.FullBoard})
+		if float64(len(line)) > 1.1*float64(len(before)) {
+			t.Fatalf("line %d: %d bytes, a record alone is %d", i+1, len(line), len(before))
+		}
 	}
 }

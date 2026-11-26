@@ -15,7 +15,7 @@ flop and last after it. Cards are two characters, rank then suit:
 |---|---|---|
 | `GET api/info` | | `{bots: [{id, name, trained, exploitability, note}], stackBB, smallBlind, bigBlind, menu, sizing}`. `bots` are the opponents on offer, the default first; there may be one. Show the current opponent's `exploitability` as written: it is the honest statement of how exploitable the bot is and how that was measured. `menu` is the bet sizes the buttons offer; `sizing` says, in a sentence or three, that a person may bet any size and the bots play the menu (see "Bet sizes" below). |
 | `POST api/new` | `{seat, opponent}`: seat `"sb"`, `"bb"` or `"alternate"` (the default); opponent a bot `id` (default: the first) | a state, with `history` (empty). Starts a session and deals hand 1. |
-| `GET api/state?session=ID` | | a state, with the whole `history`. For a page load. 404: the server does not know the session (it restarted); start a new one. |
+| `GET api/state?session=ID[&since=H]` | | a state, with the whole `history`. For a page load. 404: the server does not know the session (it restarted); start a new one. With `since`, `history` is only the hands finished after hand H, at most the latest 200, each with its `events` (as a state's): for a page replaying hands it did not see played. |
 | `POST api/act` | `{session, hand, step, kind, amount}`, or the old form `{session, hand, step, action}` | a state, after your action and every bot action that followed it. `hand` and `step` are the state's own, sent back, so a second click meant for an earlier decision is refused (409). `kind` is `fold`, `check`, `call`, `bet`, `raise` or `allin`; `amount`, for `bet` and `raise`, is any whole number of chips from the state's `legal.minTo` to `legal.maxTo` (see "Bet sizes"). The old form, `action`, a button's `index`, also works; sending both forms is a 400. |
 | `POST api/next` | `{session, hand, seat?, opponent?}` | a state: the next hand, dealt. Only when the current hand is over (409 otherwise). `seat` changes the seat mode and `opponent` the bot, from this hand on. |
 
@@ -62,7 +62,9 @@ A state:
 ```
 
 A history record: `{number, opponent, seat, you: [cards], bot: [cards] (showdown
-only), board: [cards seen], lines: [...], net, outcome, showdown}`.
+only), board: [cards seen], lines: [...], net, outcome, showdown}`, plus `events`
+in `finished` and in a `since` answer (the server keeps them for a session's
+latest 200 hands, in memory only: the hands file never has them).
 
 Bet sizes. A person may bet or raise any whole number of chips the rules
 allow; the buttons are the bet menu's sizes (api/info `menu`) as a
@@ -146,7 +148,15 @@ Notes for a page:
   `#presence` (who is at the table), `#league` (`#account-name`,
   `#sign-out`, and the Programs box `#programs`: `#token-label`,
   `#token-make`, `#token-list` with a `button.revoke` per token, `#token-new`
-  with `#token-value`, `#token-copy` and `#token-use`, `#token-error`).
+  with `#token-value`, `#token-copy` and `#token-use`, `#token-error`), and
+  `#replay` (shown while replaying: `input[name=rspeed]` 1x, fast, fastest;
+  `#behind`; `#jump`, key J). Replaying: the page polls `api/state?since=H`
+  and plays each finished hand it has not shown through the same event
+  queue as a live hand, from the record's events, then the live state; it
+  replays whenever a program moved in the last 30 s or more than one hand
+  is waiting. `window.table` adds `handsShown` (`[{number, events,
+  replay}]`: each hand shown to its end, with the moves animated),
+  `behind` (hands waiting) and `replaying`.
 
 - The page always sends the `{kind, amount}` form of `api/act`. The dock
   has three buttons: Fold, Check or Call, and the wager, `#size-go`

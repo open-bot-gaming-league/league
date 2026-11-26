@@ -106,6 +106,7 @@ class ProgramTokens:
             if e["id"] == token_id:
                 await self.store.delete("program-tokens", e["key"])
                 await self.store.delete("program-usage", e["id"])
+                self._used.pop(e["key"], None)
         index["tokens"] = keep
         await self.store.put("account-programs", account, index)
         self._buckets.pop(token_id, None)

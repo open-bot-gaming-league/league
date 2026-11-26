@@ -95,6 +95,17 @@ at `/state` does not hide it.
 Either way keep `--max-instances 1`: sessions live in one table
 process, and the hands file has one writer.
 
+**A known limit: the file only grows.** Every hand ever played adds a line
+(about 1 KB), from a person, an agent or a program, and the table reads it
+all back at start. On the container's own disk `/state` is in memory and
+counts against the 2 GiB limit; a program at its 20 requests a second plays
+a few hands a second, hundreds of thousands a day. Nothing rotates or caps
+the file yet: persisting hands properly belongs with that work (G-178), not
+here. The moves of each hand, which the page replays, are kept only in the
+table's memory for a session's latest 200 hands and never written to the
+file (`cmd/table` `TestHistorySinceCarriesEventsButNotTheFile` holds a
+line to what it was).
+
 ## Build and deploy
 
 Fill in `PROJECT`, `REGION` and `SERVICE_ACCOUNT` (a dedicated service

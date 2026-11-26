@@ -14,6 +14,12 @@
    as they land, and says who moved last (`presence`); the dock is open whenever a decision is pending. On
    the bare table (no `league`) the page is the only player, as before.
 
+   Replay. A program plays faster than any page could show, so the page asks for the hands finished since the
+   last one it has (`api/state?since=H`: each with its events) and plays every one through the same event
+   queue as a live hand, at a replay speed of its own (1x, fast, fastest: the clock 1, 2, 3 times, and at
+   fastest the beats between steps halved; a card flip keeps its length), then the live state. It replays
+   whenever a program moved lately or more than one hand is waiting; Jump to latest (J) skips what waits.
+
    Asleep. Nobody should spend bandwidth on a table nobody is looking at: the page stops polling and puts up a
    pause screen (Resume) when its tab is hidden (Page Visibility), or when there has been no user input and no
    new state for 5 minutes (#idle=<seconds> in the URL changes that, for tests). Resume fetches the state once
@@ -30,13 +36,24 @@ const HASH = new URLSearchParams(location.hash.slice(1));
 const KEY = 'poker50.session', SPEED = 'poker50.speed';
 const CW = 100, CH = 140, CHIP_W = 96, CHIP_H = 40, DB = 34;     // unscaled sprite sizes, px
 const BEAT = { bot: 520, you: 260, street: 420, flip: 380, deal: 130, collect: 380, award: 650 };
+// Replaying hands others played (a program at the table): three speeds. `clock` scales the motion clock;
+// `short` scales the beats between steps (deals, moves, chips), never the card flip.
+const REPLAY = { '1x': { clock: 1, short: 1 }, fast: { clock: 2, short: 1 }, fastest: { clock: 3, short: 0.5 } };
+const RSPEED = 'poker50.replay', MAX_BEHIND = 200;
+let replaySpeed = REPLAY[localStorage.getItem(RSPEED)] ? localStorage.getItem(RSPEED) : 'fastest';
+let liveSpeed = 1;                                // the Table settings slider's speed, for everything else
+const queued = new Set();                         // finished hands queued to replay, not yet shown to the end
+let lastQueued = 0;                               // the latest finished hand queued or shown
+const shownHands = [];                            // [{number, events, replay}] each hand the table showed to its end (for tests)
+const acted = {};                                 // hand -> moves animated so far
+const beat = name => BEAT[name] * (replayOn() ? REPLAY[replaySpeed].short : 1);
 const SUIT = { s: '\u2660', h: '\u2665', d: '\u2666', c: '\u2663' };
 const ROUND = { 'before the flop': 0, flop: 1, turn: 2, river: 3, showdown: 4 };
 const BOARD_SIZE = [0, 3, 4, 5];
 
 let info = null, st = null, net = false;          // st: the server's last state; net: a request is out
 let league = null;                                // info.league behind the league's server, else null
-const POLL = { busy: 1000, quiet: 3000 };         // ms between polls: someone else at the table lately, or not
+const POLL = { replay: 300, busy: 1000, quiet: 3000 };   // ms between polls: replaying, someone else at the table lately, or not
 const LATELY = 30;                                // s: what "lately" means, for POLL and the presence line
 const IDLE_MS = 1000 * (+HASH.get('idle') || 300);  // asleep after this long with no input and no new state
 const felt = $('felt');
@@ -45,7 +62,7 @@ const V = { hand: 0, step: 0, round: 0, board: 0, over: true, button: null, stac
 const H = [];                                     // the finished hands shown, oldest first
 const cards = { you: [], bot: [], board: [] };
 let dealer = null;
-window.table = { get st() { return st; }, get asleep() { return asleep; }, get busy() { return net || M.busy; }, settled: () => !net && M.settled(), motion: M, shown: V,
+window.table = { get st() { return st; }, get asleep() { return asleep; }, handsShown: shownHands, get behind() { return queued.size; }, get replaying() { return replayOn(); }, get busy() { return net || M.busy; }, settled: () => !net && M.settled(), motion: M, shown: V,
   chipsOnTable: () => [...M.sprites].reduce((a, sp) => a + (sp.amount || 0), 0) };
 Object.defineProperty(window, 'st', { get: () => st });
 Object.defineProperty(window, 'busy', { get: () => net || M.busy });
@@ -186,33 +203,34 @@ function evDeal(s) {
   order.forEach((who, k) => {
     const i = k >> 1, sp = newCard(who, i, who === 'you' ? s.you.cards[i] : null);
     cards[who][i] = sp; sp.zone = 'hole'; sp.el.classList.add('down');
-    M.go(sp, { delay: k * BEAT.deal });
+    M.go(sp, { delay: k * beat('deal') });
   });
-  return 4 * BEAT.deal + 260;
+  return 4 * beat('deal') + 260;
 }
 function evFlipMine() { cards.you.forEach((sp, i) => faceUp(sp, true, { delay: i * 90 })); return BEAT.flip; }
-function evAct(e) {
+function evAct(e, hand) {
+  acted[hand] = (acted[hand] || 0) + 1;
   say(e.seat, inBB(e.text));
   if (e.cost > 0) bet(e.seat, e.cost);
   if (e.kind === 'fold') {                        // the folder's cards go back to the deck, face down
     cards[e.seat].forEach((sp, k) => { sp.zone = 'deck'; faceUp(sp, false, { delay: 120 + k * 60, arrive: s => M.remove(s) }); });
     cards[e.seat] = [];
   }
-  return e.seat === 'bot' ? BEAT.bot : BEAT.you;
+  return e.seat === 'bot' ? beat('bot') : beat('you');
 }
 function evCollect() {
   const bets = zoneChips('bet');
   bets.forEach((sp, k) => chipsTo(sp, 'pot', null, k * 60));
-  return bets.length ? BEAT.collect : 0;
+  return bets.length ? beat('collect') : 0;
 }
 function evBoard(s, n) {                          // board cards to n, face down from the deck, then flipped in
   const fresh = [];
   for (let i = V.board; i < n; i++) {
     const sp = newCard('board', i, s.board[i]); sp.zone = 'board'; sp.el.classList.add('down');
-    M.go(sp, { delay: (i - V.board) * BEAT.deal }); cards.board[i] = sp; fresh.push(sp);
+    M.go(sp, { delay: (i - V.board) * beat('deal') }); cards.board[i] = sp; fresh.push(sp);
   }
   V.board = n;
-  return fresh.length * BEAT.deal + 240;
+  return fresh.length * beat('deal') + 240;
 }
 function evFlipBoard(from) { cards.board.slice(from).forEach((sp, k) => faceUp(sp, true, { delay: k * 110 })); return BEAT.flip + 60 * (cards.board.length - from); }
 function dealStreet(q, s, r) {                    // a street: its cards fly out face down, then turn over
@@ -237,20 +255,23 @@ function evAward(s) {
     chipsTo(base, 'stack', 'you'); chipsTo(twin, 'stack', 'bot', 80);
   } else pot.forEach((sp, k) => chipsTo(sp, 'stack', won[0], k * 60));
   for (const who of won) $('seat-' + who).classList.add('won');
-  return total ? BEAT.award : 0;
+  return total ? beat('award') : 0;
 }
 function evFinish(s) {
   const out = $('outcome');
   out.textContent = inBB(s.outcome);  // the server's words carry the amount once (a split pot has none)
   out.className = s.net > 0 ? 'won' : s.net < 0 ? 'lost' : 'split';
   if (s.finished && !H.some(r => r.number === s.finished.number)) { H.push(s.finished); addHistory(s.finished); }
-  showTotals();
+  shownHands.push({ number: s.hand, events: acted[s.hand] || 0, replay: queued.delete(s.hand) });
+  delete acted[s.hand];
+  showTotals(); showReplay();
   return 0;
 }
 
 /* ---------- derive: a new state -> the events between what is shown and it ---------- */
 function receive(s) {
   st = s;
+  if (s.over) lastQueued = Math.max(lastQueued, s.hand);
   lastActive = Date.now();                               // a new state is activity: a live game stays awake
   if (s.session) localStorage.setItem(KEY, s.session);   // the bare table's session, for a reload
   const q = [];
@@ -266,7 +287,7 @@ function receive(s) {
   };
   for (const e of s.events.slice(V.step)) {
     if (e.round > V.round) street(e.round);
-    q.push(() => evAct(e));
+    q.push(() => evAct(e, s.hand));
   }
   V.step = s.events.length;
   const round = ROUND[s.round];
@@ -276,7 +297,7 @@ function receive(s) {
     q.push(evCollect);
     if (s.round === 'showdown') {
       for (let r = V.round + 1; r <= 3; r++) {     // an all-in runs the board out, a street at a time
-        dealStreet(q, s, r); q.push(() => BEAT.street);
+        dealStreet(q, s, r); q.push(() => beat('street'));
       }
       V.round = 3;
       q.push(() => evShowdown(s));
@@ -291,7 +312,7 @@ function ui() {
   const bar = $('actions'); bar.replaceChildren();
   const ready = st && !net && !M.busy;
   document.body.classList.toggle('busy', !ready);
-  showPresence();
+  showPresence(); showReplay();
   $('next-wrap').hidden = !(ready && st.over);
   const deciding = ready && !st.over;
   showStatus(deciding);
@@ -483,12 +504,14 @@ function clearTable() {
   dealer = null; cards.you = []; cards.bot = []; cards.board = [];
   Object.assign(V, { hand: 0, step: 0, round: 0, board: 0, over: true });
   H.length = 0; $('history').replaceChildren(); hush();
+  queued.clear(); pending.length = 0; feeding = false;
 }
 // A whole session from the server (a page load, a new session): the finished hands go straight to the
 // history, except the one in play, which the table is about to show.
 function load(s) {
   clearTable();
   for (const r of s.history || []) if (r.number !== s.hand) { H.push(r); addHistory(r); }
+  lastQueued = Math.max(0, ...H.map(r => r.number));
   showTotals();
   receive(s);
 }
@@ -539,6 +562,73 @@ function showPresence() {
   }
   line.textContent = text; line.hidden = !text;
 }
+/* ---------- replay: the hands someone else played, shown at the table's own pace ---------- */
+// A program plays several hands a second; the page shows each of them (from the history's events) as fast as
+// the chosen replay speed lets the cards move, then the live state. On when a program moved lately or more
+// than one hand is waiting; Jump to latest skips what is waiting.
+function replayOn() {
+  const last = st && st.presence && st.presence.last;
+  return queued.size > 1 || !!(last && last.kind === 'program' && lately(last));
+}
+function applySpeed() { M.speed = replayOn() ? REPLAY[replaySpeed].clock : liveSpeed; }
+function showReplay() {
+  if (!league) return;
+  const on = replayOn();
+  $('replay').hidden = !on;
+  $('behind').textContent = queued.size > 1 ? `${queued.size - 1} more hand${queued.size > 2 ? 's' : ''} to show` : '';
+  for (const r of document.querySelectorAll('input[name=rspeed]')) r.checked = r.value === replaySpeed;
+  applySpeed();
+}
+// A finished hand from the history, as the final state of its hand: what receive() animates.
+function recState(rec) {
+  const last = rec.events[rec.events.length - 1];
+  return {
+    hand: rec.number, step: rec.events.length, seat: rec.seat, opponent: rec.opponent, over: true,
+    round: rec.showdown ? 'showdown' : Object.keys(ROUND)[last ? last.round : 0],
+    you: { cards: rec.you }, bot: { cards: rec.bot || [] }, board: rec.board, events: rec.events,
+    outcome: rec.outcome, net: rec.net, finished: rec, presence: st && st.presence, session: st && st.session,
+  };
+}
+// States wait in `pending` until the table has shown the one before (V is the table as shown, so a hand is
+// queued only when the last has been dealt out); feedNext, run as the last event of each, starts the next.
+const pending = [];
+let feeding = false;
+function feedNext() {
+  const s = pending.shift();
+  if (!s) { feeding = false; return 0; }
+  receive(s);
+  M.enqueue(feedNext);
+  return 0;
+}
+function queueState(s) {
+  pending.push(s);
+  if (!feeding) { feeding = true; M.enqueue(feedNext); }
+}
+const latest = () => pending.length ? pending[pending.length - 1] : st;   // the last state queued or shown
+// A polled state (with `history` since the last hand queued): queue the hands it lists that the page has not
+// shown, then the state itself.
+function take(s) {
+  for (const r of (s.history || []).filter(r => r.number > lastQueued)) {
+    lastQueued = r.number;
+    const at = latest();
+    if (r.number < at.hand || r.number === at.hand && at.over) continue;   // its end was already shown live
+    if (!r.events) { fillHistory({ history: [r] }); continue; }          // older than the table keeps moves for
+    queued.add(r.number);
+    queueState(recState(r));
+  }
+  if (queued.size > MAX_BEHIND) {
+    M.skip();
+    $('error').textContent = `Skipped ahead: the program was more than ${MAX_BEHIND} hands ahead of the table.`;
+  }
+  const at = latest();
+  if (s.hand !== at.hand || s.step !== at.step || s.over !== at.over) queueState(s);
+  else if (pending.length) pending[pending.length - 1] = s;   // the same point, as the table states it (totals and all)
+  else st = s;
+}
+function jumpToLatest() { if (queued.size) { M.skip(); schedulePoll(); } }
+$('jump').onclick = jumpToLatest;
+for (const r of document.querySelectorAll('input[name=rspeed]')) r.onchange = () => { replaySpeed = r.value; localStorage.setItem(RSPEED, replaySpeed); showReplay(); };
+
 // Who moved in a finished hand, when that was not only you.
 function playedBy(number) {
   const who = st && st.presence && st.presence.hands[number];
@@ -606,7 +696,7 @@ function schedulePoll() {
   if (!league || !st || asleep) return;
   if (document.hidden) { sleep('This tab was in the background.'); return; }
   idleTimer = idleTimer || setInterval(idleCheck, 1000);
-  pollTimer = setTimeout(poll, someoneElse() ? POLL.busy : POLL.quiet);
+  pollTimer = setTimeout(poll, replayOn() ? POLL.replay : someoneElse() ? POLL.busy : POLL.quiet);
 }
 // Asleep: no polling at all, a pause screen over the table, until Resume.
 let asleep = false, lastActive = Date.now(), idleTimer = null;
@@ -631,15 +721,15 @@ $('resume').onclick = resume;
 for (const ev of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) addEventListener(ev, () => { lastActive = Date.now(); }, { capture: true, passive: true });
 document.addEventListener('visibilitychange', () => { if (document.hidden) sleep('This tab was in the background.'); });
 async function poll() {
-  if (net || M.busy) { schedulePoll(); return; }
+  // Replaying, the page asks while the table still moves (what it gets is queued behind), once what is
+  // waiting runs low; otherwise only once the table has shown the last answer.
+  if (net || (M.busy && !replayOn()) || queued.size >= 3) { schedulePoll(); return; }
   net = true;
   try {
-    const s = await call('GET', `api/state?brief=1&hand=${st.hand}&over=${st.over ? 1 : 0}`);
+    const s = await call('GET', `api/state?since=${lastQueued}`);
     net = false;
-    if (s.session !== st.session) { load(await call('GET', 'api/state')); ui(); schedulePoll(); return; }   // reset elsewhere
-    fillHistory(s);
-    if (s.hand !== st.hand || s.step !== st.step || s.over !== st.over) receive(s);
-    else st.presence = s.presence;
+    if (s.session !== st.session) { queued.clear(); load(await call('GET', 'api/state')); ui(); schedulePoll(); return; }   // reset elsewhere
+    take(s);
   } catch (err) { net = false; $('error').textContent = err.message; }
   ui(); schedulePoll();
 }
@@ -650,8 +740,8 @@ let skipAnswer = false;                           // Skip pressed while the answ
 function skip() { if (net) skipAnswer = true; M.skip(); }
 $('skip').onclick = skip;
 $('new-session').onclick = () => { if (confirm('Reset the score? A new table: the score and the history start again.')) send(() => call('POST', 'api/new', choice()), true); };
-function setSpeed(v) { M.speed = v; $('speed').value = v; $('speedv').textContent = v + 'x'; }
-$('speed').oninput = e => { setSpeed(+e.target.value); localStorage.setItem(SPEED, M.speed); };
+function setSpeed(v) { liveSpeed = v; applySpeed(); $('speed').value = v; $('speedv').textContent = v + 'x'; }
+$('speed').oninput = e => { setSpeed(+e.target.value); localStorage.setItem(SPEED, liveSpeed); };
 function setRM(on) { M.rm = on; $('rm').checked = on; document.body.classList.toggle('rm', on); }
 $('rm').onchange = e => setRM(e.target.checked);
 $('sign-out').onclick = async () => { await call('POST', 'signout', {}).catch(() => {}); localStorage.removeItem(KEY); location.assign('./'); };
@@ -675,6 +765,7 @@ document.addEventListener('keydown', e => {
   }
   if (el.closest('#side, #asleep') && /^(BUTTON|SUMMARY|INPUT|A)$/.test(el.tagName)) return;   // their own keys: Enter, Space, arrows
   if (k === 'H') { setDrawer(!document.body.classList.contains('drawer')); return; }
+  if (k === 'J' && queued.size) { e.preventDefault(); jumpToLatest(); return; }
   if (st && st.over && (k === 'ENTER' || k === 'N' || k === ' ')) { e.preventDefault(); nextHand(); return; }
   if (!document.querySelector('#actions button')) return;      // not your turn to decide
   const go = () => e.preventDefault();

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -198,9 +199,17 @@ type session struct {
 	net      int                // chips the person has won over the finished hands
 	against  map[string]*[2]int // by opponent id: hands finished, chips won
 	history  []handRecord
+	// events of the latest finished hands (at most replayHands), by hand
+	// number: for a page replaying hands it did not see played. In memory
+	// only, never in the hands file (it would grow it by a kilobyte a hand).
+	events   map[int][]event
 	recorded bool // the current hand is in history
 	used     time.Time
 }
+
+// replayHands is how many of a session's latest finished hands keep their
+// events, and the most api/state's `since` answers with.
+const replayHands = 200
 
 // handRecord is a finished hand as the page's history shows it.
 type handRecord struct {
@@ -214,6 +223,13 @@ type handRecord struct {
 	Net      int      `json:"net"`
 	Outcome  string   `json:"outcome"`
 	Showdown bool     `json:"showdown"`
+}
+
+// historyRecord is a handRecord as an answer carries it: with its events
+// (as a state's), for a page to replay, when the session still has them.
+type historyRecord struct {
+	handRecord
+	Events []event `json:"events,omitempty"`
 }
 
 func (s *server) handler() http.Handler {
@@ -235,7 +251,7 @@ func (s *server) handler() http.Handler {
 		if err != nil {
 			return nil, err
 		}
-		return s.state(se, true), nil
+		return s.state(se, true, q.Since), nil
 	}))
 	mux.HandleFunc("POST /api/act", s.api(s.act))
 	mux.HandleFunc("POST /api/next", s.api(s.next))
@@ -256,6 +272,9 @@ type request struct {
 	// will have in this betting round ("raise to").
 	Kind   string `json:"kind"`
 	Amount *int   `json:"amount"`
+	// state (a query parameter): only the finished hands after this one,
+	// with their events.
+	Since *int `json:"-"`
 }
 
 // apiError is a refusal with its HTTP status.
@@ -277,6 +296,14 @@ func (s *server) api(fn func(*request) (any, error)) http.HandlerFunc {
 		var q request
 		if r.Method == http.MethodGet {
 			q.Session = r.URL.Query().Get("session")
+			if v := r.URL.Query().Get("since"); v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 {
+					http.Error(w, "since must be a hand number", http.StatusBadRequest)
+					return
+				}
+				q.Since = &n
+			}
 		} else if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&q); err != nil {
 			http.Error(w, "bad request body: "+err.Error(), http.StatusBadRequest)
 			return
@@ -430,7 +457,7 @@ func (s *server) newSession(q *request) (any, error) {
 	if err := s.deal(se); err != nil {
 		return nil, err
 	}
-	return s.state(se, true), nil
+	return s.state(se, true, nil), nil
 }
 
 // deal starts the session's next hand and lets the bot act if it is first.
@@ -478,6 +505,15 @@ func (s *server) botActs(se *session) error {
 		tally[1] += h.Net(se.seat)
 		rec := s.record(se)
 		se.history = append(se.history, rec)
+		if se.events == nil {
+			se.events = map[int][]event{}
+		}
+		se.events[rec.Number] = s.events(se)
+		for n := range se.events {
+			if n <= rec.Number-replayHands {
+				delete(se.events, n)
+			}
+		}
 		s.logHand(se, rec)
 	}
 	return nil
@@ -518,7 +554,7 @@ func (s *server) act(q *request) (any, error) {
 	if err := s.botActs(se); err != nil {
 		return nil, err
 	}
-	return s.state(se, false), nil
+	return s.state(se, false, nil), nil
 }
 
 // move reads an act request's kind and amount as a move: the kind for
@@ -588,7 +624,7 @@ func (s *server) next(q *request) (any, error) {
 	if err := s.deal(se); err != nil {
 		return nil, err
 	}
-	return s.state(se, false), nil
+	return s.state(se, false, nil), nil
 }
 
 // state is everything the page shows. The bot's cards are in it only
@@ -615,9 +651,12 @@ type state struct {
 	Totals   totals   `json:"totals"`
 	// Against is Totals split by opponent (bot id), for a session that
 	// has played more than one.
-	Against  map[string]totals `json:"against"`
-	History  []handRecord      `json:"history,omitempty"` // every finished hand; only where the page asks for all of it
-	Finished *handRecord       `json:"finished,omitempty"`
+	Against map[string]totals `json:"against"`
+	// History is every finished hand, only where the page asks for all of
+	// it; with `since`, the hands after that one (at most replayHands),
+	// each with its events.
+	History  []historyRecord `json:"history,omitempty"`
+	Finished *historyRecord  `json:"finished,omitempty"` // with its events
 }
 
 type player struct {
@@ -695,7 +734,10 @@ func names(cs []engine.Card) []string {
 	return out
 }
 
-func (s *server) state(se *session, all bool) state {
+// state is the session's state for the page; with all, its history: the
+// whole of it, or with since, the latest hands after that one, events and
+// all.
+func (s *server) state(se *session, all bool, since *int) state {
 	h := se.hand
 	bot := 1 - se.seat
 	st := state{Session: se.id, Hand: se.number, Step: len(h.Log), SeatMode: se.seatMode, Opponent: se.opponent.ID, Seat: seatName(se.seat),
@@ -710,7 +752,8 @@ func (s *server) state(se *session, all bool) state {
 	}
 	if h.Over() {
 		st.Net, st.Outcome = h.Net(se.seat), outcome(h, se.seat)
-		st.Finished = &se.history[len(se.history)-1]
+		last := se.history[len(se.history)-1]
+		st.Finished = &historyRecord{last, se.events[last.Number]}
 	} else if h.ToAct() == se.seat {
 		for i, o := range h.Options() {
 			b := button{Index: i, Label: label(o, onButton), Kind: kind(o)}
@@ -726,8 +769,19 @@ func (s *server) state(se *session, all bool) state {
 	for id, tally := range se.against {
 		st.Against[id] = s.totals(tally[0], tally[1])
 	}
-	if all {
-		st.History = se.history
+	switch {
+	case all && since != nil:
+		recent := se.history[max(0, len(se.history)-replayHands):]
+		for _, rec := range recent {
+			if rec.Number > *since {
+				st.History = append(st.History, historyRecord{rec, se.events[rec.Number]})
+			}
+		}
+	case all:
+		st.History = make([]historyRecord, len(se.history))
+		for i, rec := range se.history {
+			st.History[i] = historyRecord{handRecord: rec}
+		}
 	}
 	return st
 }

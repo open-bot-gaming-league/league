@@ -94,8 +94,10 @@ class TableClient:
     def new(self, seat: str = "alternate", opponent: str | None = None) -> dict:
         return self._post("api/new", {"seat": seat, "opponent": opponent})
 
-    def state(self, session: str) -> dict:
-        return self._get("api/state", session=session)
+    def state(self, session: str, since: int | None = None) -> dict:
+        """since: only the finished hands after that one, with their events
+        (at most the table's last 200), for a page replaying them."""
+        return self._get("api/state", session=session, since=since)
 
     def act(
         self,
