@@ -100,8 +100,7 @@ process, and the hands file has one writer.
 all back at start. On the container's own disk `/state` is in memory and
 counts against the 2 GiB limit; a program at its 20 requests a second plays
 a few hands a second, hundreds of thousands a day. Nothing rotates or caps
-the file yet: persisting hands properly belongs with that work (G-178), not
-here. The moves of each hand, which the page replays, are kept only in the
+the file. The moves of each hand, which the page replays, are kept only in the
 table's memory for a session's latest 200 hands and never written to the
 file (`cmd/table` `TestHistorySinceCarriesEventsButNotTheFile` holds a
 line to what it was).
