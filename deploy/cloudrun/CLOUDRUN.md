@@ -333,7 +333,7 @@ curl -fsS $B/.well-known/oauth-protected-resource/mcp # resource $B/mcp
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp  # 401
 # The sign-in page through the OAuth flow (no guest option, CSP, consent links,
 # Cancel; registers one client with a loopback redirect URI). The signed-in
-# steps (initialize + new_session + act, the table) need a person's account,
+# steps (initialize + table + act, the table) need a person's account,
 # so smoke skips them against a real deployment:
 python deploy/local/smoke.py --url $B --repo . --sha <deployed sha> --require oauth,version,docs,table
 ```

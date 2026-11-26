@@ -130,8 +130,9 @@ async def test_one_table_for_the_browser_and_every_agent_connection(site):
             t1, t2 = _payload(await one.call_tool("table", {})), _payload(await two.call_tool("table", {}))
             assert t1["session"] == t2["session"] == first["session"]
             assert t1["table_url"] == f"{site.base}/table/" and t1["seatMode"] == first["seatMode"]
-            # The old name, for one release: the same table, nothing new started.
-            assert _payload(await one.call_tool("new_session", {}))["session"] == first["session"]
+            # table() is the one way: the old name is gone.
+            tools = {t.name for t in (await one.list_tools()).tools}
+            assert "table" in tools and "new_session" not in tools
             assert _payload(await one.call_tool("score", {}))["table_url"] == t1["table_url"]
         # A request from another origin is refused, signed in or not.
         r = await browser.post("/table/api/act", json={}, headers={"Origin": "https://evil.example"})
@@ -178,9 +179,9 @@ async def test_settings_are_the_pages_and_reset_is_the_pages(site):
     async with site.browser(USER_A) as browser, ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
         p = Page(browser)
         s = await p.state()
-        refused = _payload(await mcp.call_tool("new_session", {"opponent": "ox" if s["opponent"] != "ox" else "turtle"}))
+        refused = _payload(await mcp.call_tool("table", {"opponent": "ox" if s["opponent"] != "ox" else "turtle"}))
         assert "settings are changed on the table page" in refused["error"], refused
-        same = _payload(await mcp.call_tool("new_session", {"opponent": s["opponent"], "seat": s["seatMode"]}))
+        same = _payload(await mcp.call_tool("table", {"opponent": s["opponent"], "seat": s["seatMode"]}))
         assert same["session"] == s["session"]  # asking for what it already is: fine
         # The page resets: a new table, the score from zero; the agent is told when it next looks.
         r = await p.post("new", {"seat": "bb", "opponent": s["opponent"]})

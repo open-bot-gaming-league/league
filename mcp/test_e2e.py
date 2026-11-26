@@ -84,7 +84,7 @@ async def test_three_hands_end_to_end_and_score_matches_table_history():
 
             state = _payload(
                 await client_session.call_tool(
-                    "new_session", {"opponent": opponent_id, "seat": "alternate"}
+                    "table", {"opponent": opponent_id, "seat": "alternate"}
                 )
             )
             assert "error" not in state

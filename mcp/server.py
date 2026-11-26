@@ -1,7 +1,6 @@
-"""MCP server for Bot Poker: eight tools (docs, rules, table, state, act,
-next_hand, score, and new_session, table()'s old name, kept for one
-release): all but docs() wrap the live table's HTTP API, docs() returns
-the documents. With sign-in (OAuth on, below) also the browser table at
+"""MCP server for Bot Poker: seven tools (docs, rules, table, state, act,
+next_hand, score): all but docs() wrap the live table's HTTP API, docs()
+returns the documents. With sign-in (OAuth on, below) also the browser table at
 /table. See
 docs/AGENTS.md for what this is and how to read it; for the stdio
 mode, add it to your MCP client config as a stdio server (command
@@ -332,7 +331,8 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         auth_server_provider=provider,
         instructions=(
             "Play Bot Poker (50 bb heads-up) at the live table. Call "
-            "docs('agents') first, then rules(), then table(). "
+            "docs('agents') first, then rules(), then table(): the one tool for your "
+            "table (it replaces new_session, which is gone). "
             "docs() also has 'readme', 'ways-to-play', 'sdk' and 'rules'. "
             "If your user asks to play faster, or whether this costs a lot of tokens, "
             "the next step is to script their own poker bot with the SDK: tell them so, "
@@ -481,53 +481,46 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         tables.observe(session_id, state)
         return summarize_state(state)
 
-    async def _table_tool(ctx: Context, opponent: str | None, seat: str | None, *, fresh: bool = False) -> dict:
+    @server.tool()
+    async def table(ctx: Context, opponent: str | None = None, seat: str | None = None) -> dict:
+        """Your table, as it stands: the hand in play and, on your turn,
+        `legal`. Call this first, then act() and next_hand(); it is the one
+        way to your table. With sign-in it is
+        your user's one table, which they also see at `table_url`: whoever
+        moves first on a decision makes it (your user in the browser, you,
+        or a program of theirs), and they pick the bot and the seat there;
+        an opponent or seat other than the table's is refused. Without
+        sign-in it starts this connection's session the first time, with
+        opponent (a bot id from rules()) and seat ("sb", "bb" or
+        "alternate", the default) if given."""
         poker = _poker_for(ctx)
         if tables is None:
             # No sign-in, no account and no page: each connection has its own
-            # session, started the first time (or every time: `fresh`).
+            # session, started the first time, with the settings asked for.
             try:
-                if poker.session_id is None or fresh:
+                if poker.session_id is None:
                     state = await anyio.to_thread.run_sync(lambda: poker.new(opponent=opponent, seat=seat))
                 else:
                     state = await anyio.to_thread.run_sync(poker.state)
             except TableError as e:
                 return {"error": e.message}
-            return summarize_state(state)
-        try:
-            await _on_table(ctx, poker)
-            state = await anyio.to_thread.run_sync(poker.state)
-        except TableError as e:
-            return {"error": e.message}
+            where = "set when this connection's session started"
+        else:
+            try:
+                await _on_table(ctx, poker)
+                state = await anyio.to_thread.run_sync(poker.state)
+            except TableError as e:
+                return {"error": e.message}
+            where = f"changed on the table page, by your user (at {_table_fields()['table_url']})"
         changes = [f"{k} {v!r}" for k, v, now in (("opponent", opponent, state["opponent"]), ("seat", seat, state["seatMode"]))
                    if v not in (None, "") and v != now]
         if changes:
-            return {"error": f"settings are changed on the table page, by your user: this table plays "
-                             f"opponent {state['opponent']!r}, seat {state['seatMode']!r} (you asked for "
-                             f"{', '.join(changes)}). Ask your user to change them at {_table_fields()['table_url']}, "
-                             "or call table() to play it as it is."}
-        return {**summarize_state(state), "seatMode": state["seatMode"], **_table_fields()}
+            return {"error": f"settings are {where}: this table plays opponent {state['opponent']!r}, "
+                             f"seat {state['seatMode']!r} (you asked for {', '.join(changes)}). "
+                             "Call table() with no settings to play it as it is."}
+        out = {**summarize_state(state), "seatMode": state["seatMode"]}
+        return {**out, **_table_fields()} if tables is not None else out
 
-    @server.tool()
-    async def table(ctx: Context) -> dict:
-        """Your table, as it stands: the hand in play and, on your turn,
-        `legal`. Call this first; then act() and next_hand(). With sign-in
-        it is your user's one table, which they also see at `table_url`:
-        whoever moves first on a decision makes it (your user in the
-        browser, you, or a program of theirs), and they pick the bot and
-        the seat there. Without sign-in it starts a session for this
-        connection the first time."""
-        return await _table_tool(ctx, None, None)
-
-    @server.tool()
-    async def new_session(ctx: Context, opponent: str | None = None, seat: str | None = None) -> dict:
-        """Old name for table(), kept for one release: use table(). With
-        sign-in it does not start anything new: it returns your user's
-        table, and refuses an opponent or seat other than the table's
-        (your user picks those on the page). Without sign-in it starts a
-        new session for this connection, as it always has (opponent: a bot
-        id from rules(); seat: "sb", "bb" or "alternate")."""
-        return await _table_tool(ctx, opponent, seat, fresh=True)
 
     @server.tool()
     async def state(ctx: Context) -> dict:

@@ -27,18 +27,16 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
 - **`rules()`** — the bet menu, blind sizes, and the opponents on
   offer, read live from the table (so this stays correct even if the
   table's menu changes). Call this once at the start.
-- **`table()`** — your table, as it stands: the hand in play and, on
-  your turn, `legal`. Call it before you act. On the hosted connector
-  it is your user's one table (see "Your user at the table"), and the
-  answer has its `table_url`: give it to your user. Without sign-in it
-  starts a session for this connection the first time.
-- **`new_session(opponent?, seat?)`** — the old name of `table()`, kept
-  for one release. On the hosted connector it starts nothing new: it
-  returns your user's table, and refuses an `opponent` or `seat` other
-  than the table's. Without sign-in it starts a new session for this
-  connection, as it always has: `opponent` a bot `id` from `rules()`,
-  `seat` `"sb"`, `"bb"` or `"alternate"` (the default, alternating every
-  hand).
+- **`table(opponent?, seat?)`** — your table, as it stands: the hand in
+  play and, on your turn, `legal`. **Call it first: it is the one way to
+  your table** (it replaced `new_session`, which no longer exists; a
+  client that still calls that gets "unknown tool": call `table()`). On
+  the hosted connector it is your user's one table (see "Your user at the
+  table"), and the answer has its `table_url`: give it to your user; the
+  bot and the seat are theirs to pick, and other settings are refused.
+  Without sign-in it starts this connection's session the first time,
+  with `opponent` (a bot `id` from `rules()`) and `seat` (`"sb"`, `"bb"`
+  or `"alternate"`, the default) if you give them.
 - **`state()`** — the current hand: your cards, the bot's visible
   state, the board, the pot, and on your turn `legal` (every legal
   move, any size) and `actions` (the bet menu as shortcuts). Call this if a
@@ -77,7 +75,7 @@ first on a decision makes it**:
   browser). Read it, and act again only if `legal` says it is your turn.
   Do not race your user: when they are playing, ask before you move.
 - **Your user picks the bot and the seat** on the table page. You cannot
-  change them: `new_session()` with other settings is refused. Ask your
+  change them: `table()` with other settings is refused. Ask your
   user to change them there.
 - If your user resets the table (a new score) on the page, your next
   call says so in a `note` and shows the new table.

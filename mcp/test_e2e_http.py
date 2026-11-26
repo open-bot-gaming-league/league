@@ -81,7 +81,7 @@ async def test_three_hands_end_to_end_and_score_matches_table_history(http_serve
         opponent_id = rules["bots"][0]["id"]
 
         state = _payload(
-            await client.call_tool("new_session", {"opponent": opponent_id, "seat": "alternate"})
+            await client.call_tool("table", {"opponent": opponent_id, "seat": "alternate"})
         )
         assert "error" not in state
         assert state["hand"] == 1
@@ -127,10 +127,10 @@ async def test_two_concurrent_connections_do_not_share_poker_state(http_server):
         opponent_id = rules["bots"][0]["id"]
 
         state_a = _payload(
-            await client_a.call_tool("new_session", {"opponent": opponent_id, "seat": "alternate"})
+            await client_a.call_tool("table", {"opponent": opponent_id, "seat": "alternate"})
         )
         state_b = _payload(
-            await client_b.call_tool("new_session", {"opponent": opponent_id, "seat": "alternate"})
+            await client_b.call_tool("table", {"opponent": opponent_id, "seat": "alternate"})
         )
         assert state_a["session"] != state_b["session"]
 

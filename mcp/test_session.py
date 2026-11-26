@@ -111,13 +111,13 @@ def test_summarize_state_includes_outcome_and_net_once_over():
 
 # -- PokerSession: no session yet --------------------------------------
 
-def test_act_before_new_session_raises_no_session():
+def test_act_before_a_session_raises_no_session():
     poker = PokerSession(FakeClient(INFO, []))
     with pytest.raises(NoSessionError):
         poker.act(0)
 
 
-def test_score_before_new_session_raises_no_session():
+def test_score_before_a_session_raises_no_session():
     poker = PokerSession(FakeClient(INFO, []))
     with pytest.raises(NoSessionError):
         poker.score()
@@ -125,7 +125,7 @@ def test_score_before_new_session_raises_no_session():
 
 # -- PokerSession: hand/step fill-in -------------------------------------
 
-def test_new_session_captures_session_id_and_big_blind():
+def test_new_captures_session_id_and_big_blind():
     s1 = _state(1, 0, actions=[{"index": 0, "label": "Fold", "kind": "fold"}])
     poker = PokerSession(FakeClient(INFO, [("new", s1)]))
     poker.new()
