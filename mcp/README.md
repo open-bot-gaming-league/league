@@ -31,6 +31,7 @@ Two transports, one codebase: **stdio** (default, for Claude Desktop and local u
 - `test_markdown_lite.py` — the legal-page renderer, no server.
 - `test_e2e.py` — runs `server.py` over stdio with the MCP Python client, plays 3 hands, checks `score()` against the table's own history. Skips itself if no table is reachable.
 - `test_e2e_http.py` — the same shape, over real Streamable HTTP (`OBGL_TRANSPORT=http`), plus a second test that two concurrent connections don't share poker state — the actual point of per-connection session scoping. Skips itself if no table is reachable.
+- `test_examples.py` — the onboarding examples in `examples/` (Python, JavaScript, TypeScript) each playing three hands of the account's table with a program token. JavaScript and TypeScript skip without node (TypeScript: 22.18+).
 - `test_sdk_table.py` — the Go SDK's table client (`go run ./sdk/example -table`) playing the account's table with a program token made by the page. Skips without `go` or a table.
 - `test_smoke.py` — `deploy/local/smoke.py --stay-on-base` against a server whose OAuth issuer is another origin: the table check's sign-in stays on the given URL. Skips without a table.
 
