@@ -90,7 +90,7 @@ func main() {
 type botInfo struct {
 	ID      string `json:"id"`             // short, for requests: "cfrbr"
 	Name    string `json:"name"`           // "Turtle"
-	Trained string `json:"trained"`        // when and how, one line
+	Trained string `json:"trained"`        // how it learned, in a line or two of plain words
 	Note    string `json:"note,omitempty"` // its style, and how it does head to head
 }
 
