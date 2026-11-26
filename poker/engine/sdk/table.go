@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,14 +29,16 @@ type Table struct {
 	// (URL + "api/act"). A table you run yourself, `go run ./cmd/table`,
 	// is "http://127.0.0.1:9790/".
 	URL string
-	// Token, when set, is sent as "Authorization: Bearer <Token>": your
-	// account at the league's table.
+	// Token, when set, is sent as "Authorization: Bearer <Token>": a
+	// program token, made on the league's table page (Programs). It plays
+	// your account's table as you.
 	Token string
-	// Session is the table session to play; empty starts a new one, and
-	// Play sets it.
+	// Session is the table session to play. Empty: at the league, your
+	// account's one table; at a table you run, a new session. Play sets it.
 	Session string
-	// Opponent is the table bot's id for a new session (see api/info);
-	// empty is the table's default.
+	// Opponent is the table bot's id for a new session at a table you run
+	// (see api/info); empty is the table's default. At the league you pick
+	// the bot on the table page.
 	Opponent string
 	// HTTP is the client requests go through; nil is one with a 30 s
 	// timeout.
@@ -66,7 +69,8 @@ type HandResult struct {
 // does not deal each deal twice, so it is far wider than a Match's.
 func (t *Table) Play(ctx context.Context, bot Bot, hands int, seed uint64, onHand func(HandResult)) (Result, error) {
 	var info struct {
-		BigBlind int `json:"bigBlind"`
+		BigBlind int             `json:"bigBlind"`
+		League   json.RawMessage `json:"league"` // only at the league's table
 	}
 	if err := t.call(ctx, "GET", "api/info", nil, &info); err != nil {
 		return Result{}, err
@@ -76,9 +80,17 @@ func (t *Table) Play(ctx context.Context, bot Bot, hands int, seed uint64, onHan
 	}
 	var st tableState
 	var err error
-	if t.Session == "" {
+	switch {
+	case t.Session == "" && info.League != nil:
+		// The league: your account's one table, as it stands (its bot and
+		// seat are picked on the table page).
+		st, err = t.step(ctx, "GET", "api/state?brief=1", nil)
+		if err == nil && st.Over {
+			st, err = t.step(ctx, "POST", "api/next", map[string]any{"hand": st.Hand})
+		}
+	case t.Session == "":
 		st, err = t.step(ctx, "POST", "api/new", map[string]any{"seat": "alternate", "opponent": t.Opponent})
-	} else {
+	default:
 		// A session picked up between hands: its last hand was someone
 		// else's to count.
 		st, err = t.step(ctx, "GET", "api/state?brief=1&session="+url.QueryEscape(t.Session), nil)
@@ -157,7 +169,8 @@ type TableError struct {
 
 func (e *TableError) Error() string {
 	if e.Status == http.StatusUnauthorized {
-		return fmt.Sprintf("%d %s (the table needs your account: set OBGL_TOKEN)", e.Status, e.Message)
+		return fmt.Sprintf("%d %s (the table needs your account: make a program token on the table page, "+
+			"under Programs, and set OBGL_TOKEN to it)", e.Status, e.Message)
 	}
 	return fmt.Sprintf("%d %s", e.Status, e.Message)
 }
@@ -206,12 +219,20 @@ func (t *Table) call(ctx context.Context, method, path string, body, out any) er
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
+	res, data, err := send(client, req)
+	if err == nil && res.StatusCode == http.StatusTooManyRequests {
+		// Over the table's rate for a program: wait as long as it says, once.
+		wait, _ := strconv.Atoi(res.Header.Get("Retry-After"))
+		select {
+		case <-time.After(time.Duration(max(wait, 1)) * time.Second):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if req.GetBody != nil {
+			req.Body, _ = req.GetBody()
+		}
+		res, data, err = send(client, req)
 	}
-	defer res.Body.Close()
-	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
 	}
@@ -228,6 +249,16 @@ func (t *Table) call(ctx context.Context, method, path string, body, out any) er
 		return fmt.Errorf("sdk: %s %s: %w", method, path, err)
 	}
 	return nil
+}
+
+func send(client *http.Client, req *http.Request) (*http.Response, []byte, error) {
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer res.Body.Close()
+	data, err := io.ReadAll(res.Body)
+	return res, data, err
 }
 
 // tableState is the part of the table's state (API.md) a bot needs.

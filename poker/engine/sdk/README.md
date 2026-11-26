@@ -146,25 +146,34 @@ your bot into every kind of spot (a match fails on an illegal move).
 
 ## Play your table
 
-`sdk.Table` plays your bot at a table over the HTTP API the table page
-uses (`poker/engine/cmd/table/API.md`), so you can watch the hands in the
-browser.
+`sdk.Table` plays your bot at your table on the league's server, over
+the HTTP API the table page uses (`poker/engine/cmd/table/API.md`), so you
+can watch it play in the browser.
 
-    go run ./sdk/example -table -hands 50
+1. Sign in at https://obgl.truemirrorgames.com/table/ (GitHub or Google).
+2. In the side panel, under **Programs**, make a token. It is shown once:
+   copy it. Anyone with it can play your table; revoke it there when done.
+3. Run your bot with it, and watch the page:
 
-reads `OBGL_TABLE` (the table page's address; default
-`https://obgl.truemirrorgames.com/table/`) and `OBGL_TOKEN` (sent as
-`Authorization: Bearer`). In code:
+       export OBGL_TOKEN=obgl_pt_...
+       go run ./sdk/example -table -hands 50
+
+`OBGL_TABLE` is the table page's address (default
+`https://obgl.truemirrorgames.com/table/`); the token is sent as
+`Authorization: Bearer`. In code:
 
 ```go
 t := sdk.TableFromEnv()
 res, err := t.Play(ctx, myBot{}, 50, 1, func(h sdk.HandResult) { fmt.Println(h.Hand, h.Net, h.Outcome) })
 ```
 
-Not yet: the league's table does not take tokens from programs, only the
-page's own sign-in, so `-table` there answers 401 for now. The client
-works against a table server you run (`go run ./cmd/table`, which needs
-a house bot's files; see its package comment).
+It is your one table, the one you and your agent play too: whoever moves
+first on a decision makes it, so leave it to the bot while it runs. The
+bot and the seat are picked on the page. The table takes 20 requests a
+second per token (the client waits when told to), so a few hands a
+second at most: for thousands of hands use `Match`. `Table` also plays a
+table server you run yourself (`go run ./cmd/table`, which needs a house
+bot's files; see its package comment), where it starts a session.
 
 ## Files
 
