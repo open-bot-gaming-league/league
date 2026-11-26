@@ -27,7 +27,9 @@ venv with mcp==2.3.0). Checks, printing one line each:
 --sign-in IDP: click that IdP's button ("github") on the sign-in page. Only a server
 wired to a test IdP (mcp/oauth_testing.FakeIdP, as in mcp/test_smoke.py) lets a script
 through it; a real deployment or the local stack (run.sh) has no such IdP, so there the
-signed-in steps (mcp, table) are skipped, and printed as skipped.
+signed-in steps (mcp, table) are skipped, and printed as skipped. The table step
+calls api/token/regenerate, which revokes that account's existing program token:
+use --sign-in against a test IdP's account only, never a real person's.
 A check whose route is missing (404) prints "absent" and passes unless it is
 named in --require. Exit 1 on any failure.
 
