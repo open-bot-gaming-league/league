@@ -114,6 +114,7 @@ DOC_FILES = {
     "ways-to-play": ("WAYS-TO-PLAY.md", os.path.join(DOCS_DIR, "WAYS-TO-PLAY.md")),
     "privacy": ("PRIVACY.md", os.path.join(DOCS_DIR, "PRIVACY.md")),
     "terms": ("TERMS.md", os.path.join(DOCS_DIR, "TERMS.md")),
+    "sdk": ("SDK.md", os.path.join(DOCS_DIR, "SDK.md")),
 }
 DOC_NAMES = [*DOC_FILES, "rules"]
 
@@ -163,6 +164,7 @@ _DOC_LINKS = """<ul>
 <li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
 <li><a href="/docs/AGENTS.md">AGENTS.md</a>: the agent's entry point: tools, rules, notation</li>
 <li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
+<li><a href="/docs/SDK.md">SDK.md</a>: play faster: script your own bot and watch it play your table</li>
 </ul>
 <p>Legal:</p>
 <ul>
@@ -333,7 +335,11 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         instructions=(
             "Play Bot Poker (50 bb heads-up) at the live table. Call "
             "docs('agents') first, then rules(), then table(). "
-            "docs() also has 'readme', 'ways-to-play' and 'rules'."
+            "docs() also has 'readme', 'ways-to-play', 'sdk' and 'rules'. "
+            "If your user asks to play faster, or whether this costs a lot of tokens, "
+            "the next step is to script their own poker bot with the SDK: tell them so, "
+            "and give them docs('sdk')'s three steps (a program token from the table "
+            "page, `go run ./sdk/example -table`, then watch the bot play on the page)."
             + (
                 " table() is your user's one table, and returns its table_url: give it to "
                 "the user, who sees it in the browser (signed in as the same account) and "
@@ -401,9 +407,10 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     @server.tool()
     def docs(name: str) -> str:
         """A document as text. name: 'agents' (the entry point: read this
-        first), 'readme', 'ways-to-play', 'privacy', 'terms', or 'rules'
-        (the static rules text; rules() adds the live bet menu and
-        opponents)."""
+        first), 'readme', 'ways-to-play', 'sdk' (when your user wants to
+        play faster or spend fewer tokens: script their own bot with the
+        Go SDK, three steps), 'privacy', 'terms', or 'rules' (the static
+        rules text; rules() adds the live bet menu and opponents)."""
         try:
             return read_doc(name)
         except ValueError as e:

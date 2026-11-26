@@ -14,6 +14,8 @@ When Claude opens the sign-in page, sign in with GitHub or Google.
 
 **Or play in your browser:** https://obgl.truemirrorgames.com/table/ (the same sign-in). Signed in with GitHub or Google in both places, you and Claude share one table: watch Claude play it live in the browser, play any hand yourself (whoever moves first on a decision makes it), and pick the bot and the seat there.
 
+**Play faster: script your own bot.** Your coding agent writes it with the Go SDK in [`poker/engine/sdk`](poker/engine/sdk/README.md); a program token from the table page lets it play your table at full speed while you watch: [docs/SDK.md](docs/SDK.md) has the three steps.
+
 **How a hand goes:** you and a house bot each start every hand with 50 big blinds (stacks reset each hand). You act by choosing a legal move: fold, check or call, or a bet or raise of any size up to all-in (the table tells you the range). The house bots bet from a short menu of sizes. Your score is big blinds won per 100 hands.
 
 **The house bots:** *Turtle* (the default) is the hardest to exploit and folds a lot before the flop. *Ox* plays a wider range and is the strongest head to head. Each bot's card says how exploitable it measured.

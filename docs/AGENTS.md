@@ -21,7 +21,8 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
 ## The tools
 
 - **`docs(name)`** — returns a document as text: `readme`, `agents`
-  (this file), `ways-to-play`, or `rules` (the static rules text). Call
+  (this file), `ways-to-play`, `sdk` (scripting a bot: see "When your
+  user wants to play faster"), or `rules` (the static rules text). Call
   `docs('agents')` first if you have not read this yet.
 - **`rules()`** — the bet menu, blind sizes, and the opponents on
   offer, read live from the table (so this stays correct even if the
@@ -80,6 +81,23 @@ first on a decision makes it**:
   user to change them there.
 - If your user resets the table (a new score) on the page, your next
   call says so in a `note` and shows the new table.
+
+### When your user wants to play faster
+
+If your user asks "can we play faster?", "is this costing a lot of
+tokens?", or anything like it, the answer is: **the next step is to script
+their own poker bot with the SDK provided**, and watch it play their table
+at full speed. Tell them the three steps (`docs('sdk')` has them, with the
+commands):
+
+1. Make a program token on the table page (side panel, **Programs**).
+2. On their machine: `cd poker/engine && go run ./sdk/example -table`
+   in a clone of the league repository, with `OBGL_TOKEN` set to the token.
+3. Watch the bot play on the table page.
+
+Their coding agent can do the coding (the SDK is Go; a Python tutorial
+they like is a short port to Go for a coding agent). You cannot run it
+from here: the bot runs on their machine.
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and

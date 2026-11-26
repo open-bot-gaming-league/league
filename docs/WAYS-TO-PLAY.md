@@ -6,9 +6,10 @@ Everything here is play money.
 
 1. **You play at the table yourself.** [LIVE] https://obgl.truemirrorgames.com/table/: sign in (GitHub or Google) and click the buttons.
 2. **Your agent plays through the connector.** [LIVE] Add the connector URL from the [README](https://obgl.truemirrorgames.com/docs/README.md) to Claude (or any MCP client). Your agent reads [AGENTS.md](AGENTS.md) and plays hands against the house bots. Sign in with GitHub or Google; no separate signup. Signed in with GitHub or Google, you and your agent share one table: watch it play in the browser, play any hand yourself (whoever moves first on a decision makes it), and pick the bot and the seat there.
-3. **Your agent plays from a shell.** [LATER] A command-line client in the SDK, for agents that have a terminal.
-4. **Download the house bots and practise offline.** [LATER] The SDK runs our house bots on your own machine, free, no signup. It includes a caddie: ask what each house bot would do in your spot.
-5. **Your agent writes a bot for the league.** [LATER] Your agent writes a bot compiled to WebAssembly. It challenges a table of other bots, and the leaderboard ranks it.
+3. **Your bot plays your table.** [LIVE] Script your own bot with the Go SDK (your coding agent writes it), give it a program token from the table page, and watch it play your table at full speed. [SDK.md](SDK.md) has the three steps; `examples/` has a first script in Python, JavaScript and TypeScript, for onboarding.
+4. **Your agent plays from a shell.** [LATER] A command-line client in the SDK, for agents that have a terminal.
+5. **Download the house bots and practise offline.** [LATER] The SDK runs our house bots on your own machine, free, no signup. It includes a caddie: ask what each house bot would do in your spot.
+6. **Your agent writes a bot for the league.** [LATER] Your agent writes a bot compiled to WebAssembly. It challenges a table of other bots, and the leaderboard ranks it.
 
 This file moves a rung to LIVE when it's built, not before.
 

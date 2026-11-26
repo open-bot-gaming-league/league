@@ -24,6 +24,7 @@ FILES = {
 }
 FILES["/docs/PRIVACY.md"] = os.path.join(REPO, "docs", "PRIVACY.md")
 FILES["/docs/TERMS.md"] = os.path.join(REPO, "docs", "TERMS.md")
+FILES["/docs/SDK.md"] = os.path.join(REPO, "docs", "SDK.md")
 # The legal pages: URL path -> (a heading the page must show, the markdown file's name).
 LEGAL = {
     "/docs/privacy": ("Privacy (interim)", "/docs/PRIVACY.md"),
@@ -35,6 +36,7 @@ TOOL_NAMES = {
     "ways-to-play": FILES["/docs/WAYS-TO-PLAY.md"],
     "privacy": FILES["/docs/PRIVACY.md"],
     "terms": FILES["/docs/TERMS.md"],
+    "sdk": FILES["/docs/SDK.md"],
 }
 
 
