@@ -10,6 +10,7 @@ localhost:9777/poker/ is not reachable.
     python -m pytest mcp/test_table_web.py -q
 """
 
+import asyncio
 import base64
 import json
 import os
@@ -264,10 +265,12 @@ async def test_a_program_token_is_rate_limited(site):
         token = (await Page(browser).post("tokens", {"label": "fast"})).json()["token"]
     async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
         prog = Page(http, {"Authorization": f"Bearer {token}"})
-        codes = [(await prog.get("info")).status_code for _ in range(60)]
-        assert codes[:40] == [200] * 40 and 429 in codes
-        r = await prog.get("info")
-        assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1
+        # All at once, so a slow store (Firestore) cannot refill the bucket between them.
+        answers = await asyncio.gather(*(prog.get("info") for _ in range(100)))
+        codes = [r.status_code for r in answers]
+        assert codes.count(200) >= 40 and 429 in codes and set(codes) <= {200, 429}, codes
+        over = next(r for r in answers if r.status_code == 429)
+        assert int(over.headers["retry-after"]) >= 1 and "requests a second" in over.json()["error"]
 
 
 @pytest.mark.asyncio
