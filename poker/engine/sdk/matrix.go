@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -88,15 +89,30 @@ func closeBot(b Bot) {
 	}
 }
 
+// Close reports whether contender i's result against j is within two
+// standard errors of even: too close to call at this many hands. (A
+// contender against itself counts as close.)
+func (t HeadToHead) Close(i, j int) bool {
+	r := t.Cells[i][j]
+	return i == j || math.Abs(r.BBPer100) < 2*r.SE
+}
+
 // String is the table to print: one row per contender, its bb/100 ± SE
-// against each column.
+// against each column, a close result (Close) marked "~", and, when any
+// is, a line saying what the mark means.
 func (t HeadToHead) String() string {
+	anyClose := false
 	cell := func(i, j int) string {
 		if i == j {
-			return "-"
+			return "  -"
 		}
 		r := t.Cells[i][j]
-		return fmt.Sprintf("%+.1f ± %.1f", r.BBPer100, r.SE)
+		s := fmt.Sprintf("%+.1f ± %.1f", r.BBPer100, r.SE)
+		if t.Close(i, j) {
+			anyClose = true
+			return "~ " + s
+		}
+		return "  " + s
 	}
 	width := make([]int, len(t.Names)+1) // the names' column, then one per contender
 	for j, name := range t.Names {
@@ -119,6 +135,9 @@ func (t HeadToHead) String() string {
 	line("", func(j int) string { return t.Names[j] })
 	for i, name := range t.Names {
 		line(name, func(j int) string { return cell(i, j) })
+	}
+	if anyClose {
+		b.WriteString("\n~ = within 2 SE: too close to call at this many hands; rerun with more -hands to separate them.\n")
 	}
 	return b.String()
 }

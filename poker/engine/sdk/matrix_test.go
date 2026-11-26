@@ -50,17 +50,54 @@ func TestMatrix(t *testing.T) {
 	}
 	text := got.String()
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	if len(lines) != 4 || !strings.Contains(lines[0], "caller") || !strings.Contains(lines[0], "random") {
+	if len(lines) < 4 || !strings.Contains(lines[0], "caller") || !strings.Contains(lines[0], "random") {
 		t.Fatalf("table:\n%s", text)
 	}
-	for i, line := range lines[1:] {
-		fields := strings.Fields(line)
-		if fields[0] != cs[i].Name || fields[1+3*i] != "-" {
+	for i, line := range lines[1:4] {
+		if !strings.HasPrefix(line, cs[i].Name) || !strings.Contains(line, "±") {
 			t.Errorf("row %d: %q", i, line)
 		}
-		if !strings.Contains(line, "±") {
-			t.Errorf("row %d has no results: %q", i, line)
+	}
+}
+
+// Close is the table's rule for "too close to call": within 2 SE of even.
+// The printed table marks those cells "~" and says what that means.
+func TestCloseCells(t *testing.T) {
+	h := HeadToHead{
+		Names: []string{"a", "b", "c"},
+		Cells: [][]Result{
+			{{}, {BBPer100: 10, SE: 2}, {BBPer100: -3, SE: 2}},
+			{{BBPer100: -10, SE: 2}, {}, {BBPer100: 4, SE: 2}},
+			{{BBPer100: 3, SE: 2}, {BBPer100: -4, SE: 2}, {}},
+		},
+	}
+	if h.Close(0, 1) || h.Close(1, 0) {
+		t.Error("+10 ± 2 (5 SE) called close")
+	}
+	if !h.Close(0, 2) || !h.Close(2, 0) {
+		t.Error("-3 ± 2 (1.5 SE) not called close")
+	}
+	if h.Close(1, 2) { // exactly 2 SE: not within
+		t.Error("+4 ± 2 (2 SE) called close")
+	}
+	text := h.String()
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if !strings.Contains(lines[1], "  +10.0 ± 2.0") || !strings.Contains(lines[1], "~ -3.0 ± 2.0") {
+		t.Errorf("row a: %q", lines[1])
+	}
+	// The columns line up: column b's cells start where its name does.
+	col := strings.Index(lines[0], "b") // the header is plain ASCII; the rows have "±": count in runes
+	for row, want := range map[int]string{1: "  +10.0", 2: "  -", 3: "  -4.0"} {
+		if got := string([]rune(lines[row])[col:]); !strings.HasPrefix(got, want) {
+			t.Errorf("row %d, column b: %q, want %q first:\n%s", row, got, want, text)
 		}
+	}
+	if !strings.HasSuffix(text, "~ = within 2 SE: too close to call at this many hands; rerun with more -hands to separate them.\n") {
+		t.Errorf("no note for the ~ cells:\n%s", text)
+	}
+	clear := HeadToHead{Names: []string{"a", "b"}, Cells: [][]Result{{{}, {BBPer100: 10, SE: 1}}, {{BBPer100: -10, SE: 1}, {}}}}
+	if strings.Contains(clear.String(), "~") {
+		t.Errorf("a table with no close cells has the note:\n%s", clear.String())
 	}
 }
 

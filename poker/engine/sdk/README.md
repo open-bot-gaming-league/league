@@ -207,7 +207,9 @@ and `Match` each change against the last.
 
 Every pair plays a duplicate `Match` on the same seed (default 1, so
 everyone gets the same table), and the table shows bb/100 ± SE for the row
-bot against the column bot. House bots join with `-house` when their files
+bot against the column bot. A cell marked `~` is within 2 SE of even: too
+close to call at that many hands (`HeadToHead.Close` is the same rule, for
+your code); rerun with more `-hands` to separate the two. House bots join with `-house` when their files
 are on your disk. For a bot of your own, add one line to `roster` in
 `sdk/cmd/matrix/main.go`, or call `sdk.Matrix` from your program with a
 `sdk.Contender` for it.
