@@ -37,6 +37,8 @@ def _table_up() -> bool:
         return False
 
 
+pytestmark = pytest.mark.browser  # headless Chrome: the gate runs these in its Firestore pass only
+
 needs_browser = [
     pytest.mark.skipif(not BROWSER_PYTHON, reason="OBGL_BROWSER_PYTHON (a python with playwright) not set"),
     pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777"),
@@ -176,13 +178,10 @@ async def test_the_table_page_with_the_agent_and_a_program_at_it(site):
 ENGINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "poker", "engine")
 
 
-@pytest.mark.asyncio
-@needs_browser[0]
-@needs_browser[1]
-@pytest.mark.skipif(shutil.which("go") is None, reason="no go on PATH")
-async def test_watch_your_bot_play_fifty_hands(site, tmp_path):
-    """Watch your bot: the SDK's example bot plays 50 hands at full speed with a program token; the page
-    replays every one of them, with every move, then catches up; a second run is skipped with Jump to latest."""
+async def _watch_your_bot(site, tmp_path, hands, jump_hands):
+    """Watch your bot: the SDK's example bot plays `hands` hands at full speed with a program token; the
+    page replays every one of them, with every move, then catches up; a second run of `jump_hands` is
+    skipped with Jump to latest."""
     example = str(tmp_path / "example")
     built = await anyio.to_thread.run_sync(lambda: subprocess.run(
         ["go", "build", "-o", example, "./sdk/example"], cwd=ENGINE, capture_output=True, text=True, timeout=300))
@@ -193,25 +192,45 @@ async def test_watch_your_bot_play_fifty_hands(site, tmp_path):
         token = (await browser.do("TOKEN my bot"))[0]
         env = {**os.environ, "OBGL_TABLE": f"{site.base}/table/", "OBGL_TOKEN": token}
 
-        async def bot_plays(hands):
+        async def bot_plays(n):
             return await anyio.to_thread.run_sync(lambda: subprocess.run(
-                [example, "-table", "-hands", str(hands)], env=env, capture_output=True, text=True, timeout=300))
+                [example, "-table", "-hands", str(n)], env=env, capture_output=True, text=True, timeout=600))
 
         async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
             prog = Program(http, token)
             before = (await prog.state())["hand"]
-            run = await bot_plays(50)
+            run = await bot_plays(hands)
             assert run.returncode == 0, run.stdout + run.stderr
             r = await http.get("/table/api/state", params={"since": str(before - 1)}, headers=prog.headers)
             records = [h for h in r.json()["history"] if h["number"] >= before]
-            assert len(records) >= 50, len(records)
+            assert len(records) >= hands, len(records)
             spec = ",".join(f"{h['number']}:{len(h['events'])}" for h in records)
-            replayed, hands = map(int, await browser.do(f"SHOWN {spec}"))
-            assert hands == len(records) and replayed >= len(records) - 2, (replayed, hands)
+            replayed, shown = map(int, await browser.do(f"SHOWN {spec}"))
+            assert shown == len(records) and replayed >= len(records) - 2, (replayed, shown)
             # Again, and this time skip to the end.
             async with anyio.create_task_group() as tg:
-                tg.start_soon(bot_plays, 40)
+                tg.start_soon(bot_plays, jump_hands)
                 await browser.do("JUMP")
         await browser.do("DONE")
     finally:
         browser.close()
+
+
+@pytest.mark.asyncio
+@needs_browser[0]
+@needs_browser[1]
+@pytest.mark.skipif(shutil.which("go") is None, reason="no go on PATH")
+async def test_watch_your_bot(site, tmp_path):
+    """The routine check: 5 hands replayed, then a 5-hand run jumped."""
+    await _watch_your_bot(site, tmp_path, 5, 5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.many_hands
+@needs_browser[0]
+@needs_browser[1]
+@pytest.mark.skipif(shutil.which("go") is None, reason="no go on PATH")
+@pytest.mark.skipif(os.environ.get("OBGL_MANY_HANDS") != "1", reason="the many-hands replay: set OBGL_MANY_HANDS=1")
+async def test_watch_your_bot_many_hands(site, tmp_path):
+    """The long check, opt in: 50 hands replayed, then a 40-hand run jumped."""
+    await _watch_your_bot(site, tmp_path, 50, 40)

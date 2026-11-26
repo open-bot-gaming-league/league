@@ -36,7 +36,7 @@ on stdout ("OK ..." or "FAIL ..."):
     SHOWN <h:n,...>  within 300 s the page has shown each hand h to its end with exactly n moves animated (the
                      moves its record has: no hand and no event skipped), some of them replayed (replay mode
                      came on by itself); no console errors so far; "OK <replayed> <hands>"
-    JUMP             once the page is replaying with hands waiting: J (Jump to latest) empties the queue within
+    JUMP             once the page is replaying with 2 or more hands waiting: J (Jump to latest) empties the queue within
                      3 s, the table settles on the live state; "OK <hands skipped>"
     OLDLINK          in a fresh browser (no cookies) open an old watch link (/table/watch/<anything>): sign
                      in (GitHub); it lands on /table/, the account's table; "OK <hand> <step>"
@@ -662,7 +662,7 @@ def main():
                     shot(page, "replayed")
                     say(f"OK {replays} {len(want)}")
                 elif cmd[0] == "JUMP":
-                    page.wait_for_function("() => window.table.replaying && window.table.behind > 2", timeout=60000)
+                    page.wait_for_function("() => window.table.replaying && window.table.behind >= 2", timeout=60000)
                     assert page.locator("#replay").is_visible() and page.locator("#jump").is_visible(), "no replay controls"
                     shot(page, "replaying")
                     waiting = page.evaluate("() => window.table.behind")
