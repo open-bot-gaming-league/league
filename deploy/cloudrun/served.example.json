@@ -2,7 +2,7 @@
  {
   "id": "turtle",
   "name": "Turtle",
-  "trained": "Taught itself by playing against a perfect opponent who could see its cards, overnight on mainstream hardware. Learned to give away as little as possible.",
+  "trained": "Taught itself by playing against a perfect opponent who knew exactly how it plays, overnight on mainstream hardware. Learned to give away as little as possible.",
   "note": "The default: a tight, patient player. It folds a lot before the flop and picks its spots.",
   "abs": "abs-200-200-200.bin",
   "blueprint": "turtle-k200-1500.bp"
