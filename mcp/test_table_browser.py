@@ -117,10 +117,12 @@ async def test_the_table_page_with_the_agent_and_a_program_at_it(site):
             hand, step = map(int, await browser.do("STATE"))
             s = _payload(await mcp.call_tool("state", {}))
             assert (s["hand"], s["step"]) == (hand, step)
-            for _ in range(6):
+            for n in range(6):
                 s = await agent_moves(s)
                 assert "error" not in s and "note" not in s, s
-                await browser.do(f"EXPECT {s['hand']} {s['step']}")
+                # The first move lands on a quiet page, which polls every 3 s; once someone else is
+                # playing it polls every second, and each move shows within EXPECT's 2.5 s.
+                await browser.do(f"{'CATCHUP' if n == 0 else 'EXPECT'} {s['hand']} {s['step']}")
             await browser.do("PRESENCE Your agent is playing")
             # The page's score is the table's: it moves as the agent's hands end.
             assert (await browser.do("SCORE"))[0] == str(s["hand"] - (0 if s["over"] else 1))
