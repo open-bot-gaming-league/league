@@ -199,8 +199,10 @@ the HTTP API the table page uses (`poker/engine/cmd/table/API.md`), so you
 can watch it play in the browser.
 
 1. Sign in at https://obgl.truemirrorgames.com/table/ (GitHub or Google).
-2. In the side panel, under **Programs**, make a token. It is shown once:
-   copy it. Anyone with it can play your table; revoke it there when done.
+2. In the side panel, under **Programs**, make your token (one per
+   account; Regenerate there gives you a new one and stops the old). It is
+   shown once: copy it. Anyone with it can play your table; revoke it
+   there when done.
 3. Run your bot with it, and watch the page:
 
        export OBGL_TOKEN=obgl_pt_...
@@ -218,7 +220,7 @@ res, err := t.Play(ctx, myBot{}, 50, 1, func(h sdk.HandResult) { fmt.Println(h.H
 It is your one table, the one you and your agent play too: whoever moves
 first on a decision makes it, so leave it to the bot while it runs. The
 bot and the seat are picked on the page. The table takes 20 requests a
-second per token (the client waits when told to), so a few hands a
+second on the token (the client waits when told to), so a few hands a
 second at most: for thousands of hands use `Match`. `Table` also plays a
 table server you run yourself (`go run ./cmd/table`, which needs a house
 bot's files; see its package comment), where it starts a session.

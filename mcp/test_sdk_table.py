@@ -38,7 +38,7 @@ async def test_the_sdk_plays_the_accounts_table_with_a_program_token(site, tmp_p
     assert built.returncode == 0, built.stderr
     async with site.browser(USER_A) as browser:
         before = (await browser.get("/table/api/state")).json()
-        token = (await browser.post("/table/api/tokens", json={"label": "sdk test"})).json()["token"]
+        token = (await browser.post("/table/api/token", json={"label": "sdk test"})).json()["token"]
 
         def run(token):
             env = {**os.environ, "OBGL_TABLE": f"{site.base}/table/", "OBGL_TOKEN": token}

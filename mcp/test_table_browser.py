@@ -140,7 +140,13 @@ async def test_the_table_page_with_the_agent_and_a_program_at_it(site):
                 # The agent, a move behind, is told the program moved first.
                 late = _payload(await mcp.call_tool("act", {"action": "call"}))
                 assert "already" in late.get("note", "") or "error" in late, late
-                await browser.do("REVOKE my bot")
+                # Regenerate: the old token is refused at once, the new one plays; then revoke it.
+                new = (await browser.do("REGENERATE"))[0]
+                assert new != token
+                assert (await http.get("/table/api/state", headers=prog.headers)).status_code == 401
+                prog = Program(http, new)
+                await prog.state()
+                await browser.do("REVOKE")
                 r = await http.get("/table/api/state", headers=prog.headers)
                 assert r.status_code == 401
             s = _payload(await mcp.call_tool("state", {}))

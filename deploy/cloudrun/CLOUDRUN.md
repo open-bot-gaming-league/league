@@ -313,7 +313,8 @@ there is no account record. Delete, then check that the dry run now
 exits 1 with "no account record". The person's still-valid tokens stop
 working at once (their records are gone), except a program token, which
 the running server remembers for up to a minute (`mcp/programs.py`,
-`CACHE_TTL`); signing in again with GitHub or Google makes a new, empty
+`CACHE_TTL`). A running server also keeps the account's table session id
+until it restarts, so restart it after a deletion; signing in again with GitHub or Google makes a new, empty
 account under the same id.
 
 Not covered: the hands. They are in the game server's `hands.jsonl` on
@@ -351,23 +352,24 @@ still works without signing in again.
 
 `/table/` (`mcp/table_web.py`) serves the table's page, proxied from the
 table binary, and the API calls it allows: each account's one table, to
-the signed-in owner (cookies) and to the owner's programs (program
-tokens, `Authorization: Bearer obgl_pt_...`, made and revoked on the page;
-20 requests a second each). Old watch links (`/table/watch/<token>`) go
+the signed-in owner (cookies) and to the owner's programs (the account's
+one program token, `Authorization: Bearer obgl_pt_...`, made, regenerated
+and revoked on the page; 20 requests a second). Old watch links (`/table/watch/<token>`) go
 to `/table/`. It signs in
 through the same OAuth server, as its own client (`obgl-table`,
 redirect `<OBGL_PUBLIC_URL>/table/signin/callback`, registered by the
 server at start). Its cookies are `Secure` when `OBGL_PUBLIC_URL` is
 https. Nothing to create or set beyond "OAuth". Each table's move lock,
-who is at it (the last move, who was seen), each program token's rate
-bucket and the last finished hand shown to a page are in the instance's
-memory: keep `--max-instances 1`.
+who is at it (the last move, who was seen), which table session each
+account's table is (read from the store once, then kept), each program
+token's rate bucket and lookup, and the last finished hand shown to a page
+are in the instance's memory: keep `--max-instances 1`.
 
 Check: the `table` check of `deploy/local/smoke.py` signs in at `/table/`,
-reads and resets the table, plays a step, and makes, uses and revokes a
-program token. It needs a server wired to a test IdP (`--sign-in github`,
+reads and resets the table, plays a step, and makes (by regenerating),
+uses and revokes the account's program token. It needs a server wired to a test IdP (`--sign-in github`,
 as in `mcp/test_smoke.py`), so against a real deployment a person does it:
-sign in at `/table/`, play a step, make a token under Programs and run
+sign in at `/table/`, play a step, make (or regenerate) the token under Programs and run
 `OBGL_TOKEN=<it> go run ./sdk/example -table -hands 3` in `poker/engine`
 (the page shows the program's moves), then revoke it.
 

@@ -8,7 +8,8 @@ Run one to see your token work and your table move; then ask your coding
 agent to port it, or the tutorial you like, to Go.
 
 1. Sign in at https://obgl.truemirrorgames.com/table/ and, under **Programs**
-   in the side panel, make a token.
+   in the side panel, make your token (one per account; Regenerate there
+   replaces it).
 2. `export OBGL_TOKEN=obgl_pt_...`
 3. Run one, and watch the table page:
 

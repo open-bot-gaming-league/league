@@ -127,15 +127,16 @@ Notes for a page:
   options: `#speed=2` (0.5-2), `#rm=1` (reduced motion).
 - Behind the league's MCP server (`mcp/table_web.py`, at `/table/`) the
   same page gets `league` in `api/info` and the server's extra routes
-  (sign-in, `api/tokens`; every state then carries `presence`). The table
+  (sign-in, `api/token`; every state then carries `presence`). The table
   is then the account's one table: `session` is optional in every request
   (the account's table either way; any other id is 404), `api/new` resets
   it (a new session, the score from zero), and the user's agent (over MCP)
-  and programs (with a program token, `Authorization: Bearer obgl_pt_...`)
+  and programs (with the account's program token, `Authorization: Bearer
+  obgl_pt_...`; one per account, which the page makes, regenerates or revokes)
   play it too: whoever sends the move for a decision first makes it, and
   the others get 409 (the page reloads the state). Only the page may change
   the bot or the seat (`api/next` with `seat` or `opponent` from anyone else
-  is 403), reset, or make and revoke tokens. `presence` is `{last: {kind,
+  is 403), reset, or make, regenerate and revoke the token. `presence` is `{last: {kind,
   name, ago, hand} | null, others: [{kind, name, ago}], hands: {"<hand>":
   [names]}}`: the last move (kind `browser`, `agent` or `program`; name in
   words: "you", "your agent", "your program “my bot”"; ago in seconds), who
@@ -143,9 +144,11 @@ Notes for a page:
   20 requests a second gets 429 with `Retry-After`. Without `league` (this
   server alone) it is the page described here. The extra ids it uses:
   `#presence` (who is at the table), `#league` (`#account-name`,
-  `#sign-out`, and the Programs box `#programs`: `#token-label`,
-  `#token-make`, `#token-list` with a `button.revoke` per token, `#token-new`
-  with `#token-value`, `#token-copy` and `#token-use`, `#token-error`), and
+  `#sign-out`, and the Programs box `#programs`: with no token
+  `#token-make-row` (`#token-label`, `#token-make`), with one `#token-have`
+  (`#token-name`, `#token-when`, `#token-regenerate`, `#token-revoke`); a
+  token just made or regenerated in `#token-new` (`#token-value`,
+  `#token-copy`, `#token-use`), `#token-error`), and
   `#replay` (shown while replaying: `input[name=rspeed]` 1x, fast, fastest;
   `#behind`; `#jump`, key J). Replaying: the page polls `api/state?since=H`
   and plays each finished hand it has not shown through the same event

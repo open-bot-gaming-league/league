@@ -1,6 +1,6 @@
 """Each account's one table, and who is at it: the record behind the
 browser table (table_web.py), the MCP tools (server.py) and programs with
-a token (programs.py).
+the account's program token (programs.py).
 
 A *table session* is the Go table's session (cmd/table/API.md): a run of
 hands against a bot with its running score. The Go table knows nothing
@@ -17,8 +17,8 @@ longer anyone's table. An account from before one-table-per-login gets
 its newest session as its table, as it stands.
 
 Who may play it: the owner, in any of three ways -- the browser, the
-owner's agent (on any MCP connection), a program with one of the owner's
-tokens -- and whoever acts first on the pending decision makes it. There
+owner's agent (on any MCP connection), a program with the owner's program
+token -- and whoever acts first on the pending decision makes it. There
 is no controller to hand over: the Go table refuses a move meant for a
 decision that has already been made (409, a stale hand or step), and
 `lock(session)` serialises the moves made through this server with the
@@ -98,6 +98,7 @@ class Tables:
         self._last: dict[str, dict] = {}  # session -> the last move: {kind, name, at, hand, step}
         self._seen: dict[str, dict[tuple[str, str | None], tuple[Party, float]]] = {}  # session -> party -> (party, when)
         self._hands: dict[str, dict[int, list[str]]] = {}  # session -> hand -> who moved in it, in order
+        self._current: dict[str, str] = {}  # account -> its table session id, once read or made
 
     # ---- the table -----------------------------------------------------------
 
@@ -110,9 +111,16 @@ class Tables:
         return lock
 
     async def current(self, account: str) -> str | None:
-        """The account's table session id, or None before it has one."""
+        """The account's table session id, or None before it has one. Read
+        from the store once per account and process; this server is the
+        only writer (_new), so it keeps it from there on."""
+        if account in self._current:
+            return self._current[account]
         index = await self.store.get("account-tables", account) or {"sessions": []}
-        return index["sessions"][0] if index["sessions"] else None
+        current = index["sessions"][0] if index["sessions"] else None
+        if current is not None:
+            self._current[account] = current
+        return current
 
     async def ensure(self, account: str) -> tuple[str, dict]:
         """(table session id, its state): the account's table, made if it
@@ -141,6 +149,7 @@ class Tables:
         index = await self.store.get("account-tables", account) or {"sessions": []}
         index["sessions"] = [session_id, *[s for s in index["sessions"] if s != session_id]][:LIST_LIMIT]
         await self.store.put("account-tables", account, index)
+        self._current[account] = session_id
         self.observe(session_id, state)
         return session_id, state
 

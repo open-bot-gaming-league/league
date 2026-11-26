@@ -32,7 +32,7 @@ async def _populate(store, account, sessions, old_sessions=0):
     """What a signed-in account leaves behind: the account, its table
     sessions (the newest is its table; `old_sessions` more from before one
     table per login, each with a watch token), an access and a refresh
-    token, and two program tokens, one of them used."""
+    token, and its program token, used."""
     await store.put("accounts", account, {"provider": "github", "provider_user_id": account[7:], "display_name": "n"})
     ids = [f"{account}-s{n}" for n in range(sessions + old_sessions)]
     for n, session_id in enumerate(ids):
@@ -46,7 +46,6 @@ async def _populate(store, account, sessions, old_sessions=0):
         await store.put(kind, hashlib.sha256(f"{kind}-{account}".encode()).hexdigest(), {"subject": account, "expires_at": FAR})
     programs = ProgramTokens(store)
     used = await programs.create(account, "one")
-    await programs.create(account, "two")
     assert await programs.check(used["token"]) is not None  # writes its program-usage record
     return used["token"]
 
@@ -65,8 +64,8 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert dry.returncode == 0, dry.stderr
     listed = dry.stdout.splitlines()
     # account + its list + its program list, each session (+ an old one's watch token),
-    # access + refresh, two program tokens + one usage record
-    assert len(listed) == 3 + (new + old) + old + 2 + 2 + 1, listed
+    # access + refresh, the program token + its usage record
+    assert len(listed) == 3 + (new + old) + old + 2 + 1 + 1, listed
     assert all(line.startswith("would delete oauth_") for line in listed) and not any("github:2" in line for line in listed)
     assert await store.get("accounts", ME) is not None  # a dry run deletes nothing
 
@@ -86,7 +85,7 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert len((await store.get("account-tables", OTHER))["sessions"]) == 2
     assert await store.get("access", hashlib.sha256(f"access-{OTHER}".encode()).hexdigest()) is not None
     assert await ProgramTokens(store).check(other_token) is not None
-    assert len(await ProgramTokens(store).list(OTHER)) == 2
+    assert (await ProgramTokens(store).get(OTHER))["label"] == "one"
 
     again = _run(project, ME)
     assert again.returncode == 1 and "no account record" in again.stderr

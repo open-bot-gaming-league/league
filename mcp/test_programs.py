@@ -27,10 +27,9 @@ def test_a_token_is_shown_once_kept_hashed_and_names_its_account():
         dump = repr(store._data)
         assert token not in dump and token[len(PREFIX):] not in dump
         assert hashlib.sha256(token.encode()).hexdigest() in store._data["program-tokens"]
-        # The list never has the token.
-        listed = await p.list(A)
-        assert listed == [{"id": made["id"], "label": made["label"], "created_at": 5000, "last_used_at": None}]
-        assert await p.list(B) == []
+        # Reading it back never gives the token.
+        assert await p.get(A) == {"id": made["id"], "label": made["label"], "created_at": 5000, "last_used_at": None}
+        assert await p.get(B) is None
         prog = await p.check(token)
         assert (prog.account, prog.id, prog.label) == (A, made["id"], made["label"])
         for bad in ("", "obgl_at_" + token[len(PREFIX):], token + "x", token[:-1], PREFIX):
@@ -57,7 +56,7 @@ def test_last_used_is_written_once_a_minute_at_most():
             assert await p.check(made["token"])
             clock[0] += 0.06
         assert writes == ["program-usage"]
-        assert (await p.list(A))[0]["last_used_at"] == 1000
+        assert (await p.get(A))["last_used_at"] == 1000
         clock[0] += LAST_USED_EVERY
         await p.check(made["token"])
         assert writes == ["program-usage"] * 2
@@ -70,28 +69,32 @@ def test_revoke_is_immediate_and_only_for_the_owner():
         p = ProgramTokens(MemoryStore())
         mine, theirs = await p.create(A, "a"), await p.create(B, "b")
         assert await p.check(mine["token"])  # (writes a usage record)
-        assert not await p.revoke(B, mine["id"])  # not B's to revoke
-        assert await p.check(mine["token"])
-        assert await p.revoke(A, mine["id"])
-        assert await p.check(mine["token"]) is None and await p.list(A) == []
-        assert not await p.revoke(A, mine["id"])
-        assert await p.check(theirs["token"])
+        assert await p.revoke(A)
+        assert await p.check(mine["token"]) is None and await p.get(A) is None
+        assert not await p.revoke(A)
+        assert await p.check(theirs["token"])  # B's is B's
         assert await p.store.get("program-usage", mine["id"]) is None
 
     asyncio.run(go())
 
 
-def test_at_most_five_tokens_an_account():
+def test_one_token_an_account_regenerated_or_revoked():
     async def go():
         p = ProgramTokens(MemoryStore())
-        made = [await p.create(A, f"bot {n}") for n in range(MAX_TOKENS)]
+        first = await p.create(A, "bot")
         with pytest.raises(TooMany):
-            await p.create(A, "one more")
-        await p.create(B, "another account's")  # each account its own five
-        await p.revoke(A, made[0]["id"])
-        await p.create(A, "now there is room")
-        assert len(await p.list(A)) == MAX_TOKENS
-        assert (await p.create(B, ""))["label"] == "my bot"  # an empty label gets one
+            await p.create(A, "another")
+        assert MAX_TOKENS == 1 and (await p.get(A))["id"] == first["id"]
+        await p.create(B, "another account's")  # each account its own
+        new = await p.regenerate(A)
+        assert new["token"] != first["token"] and new["label"] == "bot"
+        assert await p.check(first["token"]) is None and (await p.check(new["token"])).id == new["id"]
+        assert (await p.get(A))["id"] == new["id"]
+        assert len(p.store._data["program-tokens"]) == 2  # A's new one and B's: the old is gone
+        assert await p.revoke(A)
+        again = await p.create(A, "")
+        assert again["label"] == "my bot"  # an empty label gets one
+        assert (await p.regenerate(A, "renamed"))["label"] == "renamed"
 
     asyncio.run(go())
 
@@ -100,7 +103,7 @@ def test_the_rate_limit_lets_a_burst_through_then_the_rate():
     async def go():
         clock = [0.0]
         p = ProgramTokens(MemoryStore(), clock=lambda: clock[0])
-        fast, slow = (await p.create(A, "fast"))["token"], (await p.create(A, "slow"))["token"]
+        fast, slow = (await p.create(A, "fast"))["token"], (await p.create(B, "slow"))["token"]
 
         async def gets_through(token):
             try:
@@ -157,7 +160,7 @@ def test_lookups_are_cached_and_unknown_tokens_are_limited_before_any_read():
             assert (await p.check(made["token"])).id == made["id"]
             clock[0] += 0.1
         assert store.reads.get("program-tokens") == 1, store.reads
-        assert await p.revoke(A, made["id"])
+        assert await p.revoke(A)
         assert await p.check(made["token"]) is None
 
     asyncio.run(go())

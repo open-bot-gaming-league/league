@@ -260,13 +260,13 @@ def table(base, idp, issuer=None):
     assert status == 200 and s2["presence"]["last"]["name"] == "you", (status, s2)
     print(f"table    api/state + api/new (reset) + api/act({a['kind']}): session {s['session'][:8]}... hand {s2['hand']} step {s['step']} -> {s2['step']}")
     # A program token: made by the signed-in page, it plays the same table, then is revoked.
-    status, made = call("POST", "/table/api/tokens", {"label": "smoke"})
+    status, made = call("POST", "/table/api/token/regenerate", {"label": "smoke"})
     assert status == 200 and made["token"].startswith("obgl_pt_"), (status, made)
     prog = urllib.request.Request(base + "/table/api/state", headers={"Authorization": f"Bearer {made['token']}"})
     with urllib.request.urlopen(prog, timeout=10) as r:
         ps = json.load(r)
     assert ps["session"] == s2["session"] and ps["step"] == s2["step"], ps
-    status, _ = call("POST", "/table/api/tokens/revoke", {"id": made["id"]})
+    status, _ = call("POST", "/table/api/token/revoke", {})
     assert status == 200, status
     try:
         urllib.request.urlopen(prog, timeout=10)

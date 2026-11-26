@@ -91,10 +91,12 @@
   <section id="league" hidden>
     <div class="small"><span class="dim">Signed in as</span> <b id="account-name"></b> <button id="sign-out" class="link">Sign out</button></div>
     <details id="programs"><summary>Programs</summary>
-      <p class="small dim">A program token lets a program of yours (the Go SDK: <code>OBGL_TOKEN</code>) play this table as you. Anyone with it can play your table: keep it to yourself; revoke it here.</p>
-      <p class="small dim" id="token-none">No tokens yet.</p>
-      <ul id="token-list"></ul>
-      <div class="row"><input id="token-label" type="text" maxlength="40" placeholder="Name it: my bot" aria-label="Token name"><button id="token-make">Make a token</button></div>
+      <p class="small dim">Your program token lets a program of yours (the Go SDK: <code>OBGL_TOKEN</code>) play this table as you. You have one at a time. Anyone with it can play your table: keep it to yourself; revoke or regenerate it here.</p>
+      <div id="token-have" hidden>
+        <div><b id="token-name"></b> <span class="small dim" id="token-when"></span></div>
+        <div class="row"><button id="token-regenerate">Regenerate</button><button id="token-revoke" class="link">Revoke</button></div>
+      </div>
+      <div class="row" id="token-make-row" hidden><input id="token-label" type="text" maxlength="40" placeholder="Name it: my bot" aria-label="Token name"><button id="token-make">Make a token</button></div>
       <div id="token-new" hidden>
         <div class="small">Your new token. It is shown <b>this once</b>:</div>
         <div id="token-box"><code id="token-value"></code><button id="token-copy" type="button"><span>Copy</span></button></div>

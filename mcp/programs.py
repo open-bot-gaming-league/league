@@ -1,22 +1,24 @@
 """Program tokens: a bearer token a user makes on the table page and gives
 to their own program (the Go SDK's sdk.Table reads it from OBGL_TOKEN), so
-the program can play that user's table over the table's API.
+the program can play that user's table over the table's API. An account
+has one at a time: it can revoke it, or regenerate it (revoke and make a
+new one, shown once).
 
 A program token is not an OAuth token. It lives in its own record kinds,
 so the one place that accepts it is the table's API (table_web.py), and
 there only on its owner's table; /mcp, which reads `access` records only,
-never sees it as valid. A program cannot make, list or revoke tokens,
+never sees it as valid. A program cannot make, read or revoke a token,
 reset the table or change its settings: those are the signed-in
 browser's.
 
     program-tokens    sha256(token) -> {account, id, label, created_at}
-    account-programs  account id -> {tokens: [{id, key, label, created_at}]}  (key: the sha256)
+    account-programs  account id -> {tokens: [{id, key, label, created_at}]}  (key: the sha256; at most one)
     program-usage     token id -> {account, last_used_at}
 
 The token itself (`obgl_pt_` + 256 random bits) is shown once, in the
 answer that makes it, and stored only as its sha256, as access tokens
 are. No expiry: a token works until it is revoked; `last_used_at` is
-shown in the list so a forgotten one can be spotted. It is written at
+shown on the page so a forgotten one can be spotted. It is written at
 most once a minute per token, so a program playing at full speed does
 not cost a store write per move, and in a record of its own, so that
 write can never bring a revoked token back.
@@ -40,7 +42,7 @@ from dataclasses import dataclass
 from oauth.store import AuthStore
 
 PREFIX = "obgl_pt_"
-MAX_TOKENS = 5
+MAX_TOKENS = 1  # one program token an account: revoke it or regenerate it
 LABEL_MAX = 40
 RATE, BURST = 20.0, 40.0
 LAST_USED_EVERY = 60  # seconds between writes of a token's last_used_at
@@ -62,7 +64,7 @@ class Program:
 
 
 class TooMany(Exception):
-    """The account already has MAX_TOKENS tokens."""
+    """The account already has its program token."""
 
 
 class RateLimited(Exception):
@@ -82,11 +84,12 @@ class ProgramTokens:
         self._cache: dict[str, tuple[Program | None, float]] = {}  # key -> (what the token is, until when)
 
     async def create(self, account: str, label: str) -> dict:
-        """A new token for `account`: {token, id, label, created_at}. The
-        only time the token is ever returned."""
+        """The account's program token: {token, id, label, created_at}. The
+        only time the token is ever returned. TooMany if it has one already
+        (an account has one at a time: regenerate() replaces it)."""
         index = await self.store.get("account-programs", account) or {"tokens": []}
         if len(index["tokens"]) >= MAX_TOKENS:
-            raise TooMany(f"you have {MAX_TOKENS} program tokens already: revoke one first")
+            raise TooMany("you have a program token already: revoke it, or regenerate it for a new one")
         label = " ".join(label.split())[:LABEL_MAX] or "my bot"
         token = PREFIX + secrets.token_urlsafe(32)
         entry = {"id": secrets.token_hex(4), "key": _hash(token), "label": label, "created_at": int(self.clock())}
@@ -98,33 +101,38 @@ class ProgramTokens:
         await self.store.put("account-programs", account, index)
         return {"token": token, "id": entry["id"], "label": label, "created_at": entry["created_at"]}
 
-    async def list(self, account: str) -> list[dict]:
-        """The account's tokens, oldest first, without the tokens:
-        {id, label, created_at, last_used_at}."""
+    async def get(self, account: str) -> dict | None:
+        """The account's program token, without the token: {id, label,
+        created_at, last_used_at}; None when it has none."""
         index = await self.store.get("account-programs", account) or {"tokens": []}
-        out = []
-        for entry in index["tokens"]:
-            usage = await self.store.get("program-usage", entry["id"]) or {}
-            out.append({"id": entry["id"], "label": entry["label"], "created_at": entry["created_at"],
-                        "last_used_at": usage.get("last_used_at")})
-        return out
+        if not index["tokens"]:
+            return None
+        entry = index["tokens"][0]
+        usage = await self.store.get("program-usage", entry["id"]) or {}
+        return {"id": entry["id"], "label": entry["label"], "created_at": entry["created_at"],
+                "last_used_at": usage.get("last_used_at")}
 
-    async def revoke(self, account: str, token_id: str) -> bool:
-        """Revoke one of the account's tokens by id; False if it has none
-        by that id. Immediate: the next request with it is refused."""
+    async def revoke(self, account: str) -> bool:
+        """Revoke the account's program token; False if it has none.
+        Immediate: the next request with it is refused."""
         index = await self.store.get("account-programs", account) or {"tokens": []}
-        keep = [e for e in index["tokens"] if e["id"] != token_id]
-        if len(keep) == len(index["tokens"]):
+        if not index["tokens"]:
             return False
         for e in index["tokens"]:
-            if e["id"] == token_id:
-                await self.store.delete("program-tokens", e["key"])
-                await self.store.delete("program-usage", e["id"])
-                self._used.pop(e["key"], None)
-                self._cache.pop(e["key"], None)
-        index["tokens"] = keep
-        await self.store.put("account-programs", account, index)
+            await self.store.delete("program-tokens", e["key"])
+            await self.store.delete("program-usage", e["id"])
+            self._used.pop(e["key"], None)
+            self._cache.pop(e["key"], None)
+        await self.store.put("account-programs", account, {"tokens": []})
         return True
+
+    async def regenerate(self, account: str, label: str | None = None) -> dict:
+        """Revoke the account's token (if any) and make a new one, as
+        create() returns it; the label is the old one's unless given. The
+        old token is refused from here on."""
+        old = await self.get(account)
+        await self.revoke(account)
+        return await self.create(account, label if label is not None else (old["label"] if old else ""))
 
     async def check(self, token: str) -> Program | None:
         """The program a bearer token belongs to, or None (not a program

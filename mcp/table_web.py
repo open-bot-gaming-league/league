@@ -21,9 +21,10 @@ their agent over MCP, or their program with a program token (programs.py).
     POST /table/api/act              {hand, step, kind[, amount]} or {hand, step, action}
     POST /table/api/next             {hand[, seat, opponent]}: seat and opponent from the page only (403 otherwise)
     POST /table/api/new              {seat, opponent}: reset: a new table, the score from zero (page only)
-    GET  /table/api/tokens           your program tokens, without the tokens (page only)
-    POST /table/api/tokens           {label}: a new program token, shown this once (page only)
-    POST /table/api/tokens/revoke    {id}: revoke one (page only)
+    GET  /table/api/token            your program token, without the token itself, or null (page only)
+    POST /table/api/token            {label}: make your program token, shown this once; 409 if you have one (page only)
+    POST /table/api/token/regenerate [{label}]: revoke it and make a new one, shown this once (page only)
+    POST /table/api/token/revoke     revoke it (page only)
 
 Every state carries `presence` (tables.py): the last move (who, how long
 ago), the agent and programs seen lately, and who moved in each recent
@@ -466,22 +467,34 @@ class TableWeb:
         self.tables.moved(session_id, party, {"over": True})
         return self._view(state, session_id)
 
-    async def tokens(self, request: Request, account: str, party: Party) -> dict:
-        return {"tokens": await self.programs.list(account)}
+    async def token(self, request: Request, account: str, party: Party) -> dict:
+        return {"token": await self.programs.get(account)}
+
+    @staticmethod
+    def _label(b: dict) -> str | None:
+        label = b.get("label")
+        return label if isinstance(label, str) else None
 
     async def make_token(self, request: Request, account: str, party: Party) -> dict:
         b = await self._body(request)
-        label = b.get("label")
         try:
-            return await self.programs.create(account, label if isinstance(label, str) else "")
+            async with self.tables.lock("token:" + account):  # one token: no two made at once
+                return await self.programs.create(account, self._label(b) or "")
         except programs.TooMany as e:
             raise ApiError(409, str(e)) from None
 
-    async def revoke_token(self, request: Request, account: str, party: Party) -> dict:
+    async def regenerate_token(self, request: Request, account: str, party: Party) -> dict:
         b = await self._body(request)
-        if not isinstance(b.get("id"), str) or not await self.programs.revoke(account, b["id"]):
-            raise ApiError(404, "no such token")
-        return {"revoked": b["id"]}
+        async with self.tables.lock("token:" + account):
+            return await self.programs.regenerate(account, self._label(b))
+
+    async def revoke_token(self, request: Request, account: str, party: Party) -> dict:
+        await self._body(request)
+        async with self.tables.lock("token:" + account):
+            revoked = await self.programs.revoke(account)
+        if not revoked:
+            raise ApiError(404, "you have no program token")
+        return {"revoked": True}
 
 
 def register_table_routes(server: MCPServer, web: TableWeb) -> None:
@@ -514,9 +527,10 @@ def register_table_routes(server: MCPServer, web: TableWeb) -> None:
         ("POST", "act"): web.api(web.act),
         ("POST", "next"): web.api(web.next),
         ("POST", "new"): web.api(web.reset, browser_only=True),
-        ("GET", "tokens"): web.api(web.tokens, browser_only=True),
-        ("POST", "tokens"): web.api(web.make_token, browser_only=True),
-        ("POST", "tokens/revoke"): web.api(web.revoke_token, browser_only=True),
+        ("GET", "token"): web.api(web.token, browser_only=True),
+        ("POST", "token"): web.api(web.make_token, browser_only=True),
+        ("POST", "token/regenerate"): web.api(web.regenerate_token, browser_only=True),
+        ("POST", "token/revoke"): web.api(web.revoke_token, browser_only=True),
     }
     for (method, name), route in api.items():
         server.custom_route(f"{COOKIE_PATH}/api/{name}", methods=[method])(route)

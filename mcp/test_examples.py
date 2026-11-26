@@ -52,7 +52,7 @@ RUNS = [
 @pytest.mark.parametrize("command", RUNS)
 async def test_an_onboarding_example_plays_the_accounts_table(site, command):
     async with site.browser(USER_A) as browser:
-        token = (await browser.post("/table/api/tokens", json={"label": "example"})).json()["token"]
+        token = (await browser.post("/table/api/token", json={"label": "example"})).json()["token"]
         before = (await browser.get("/table/api/state")).json()
         env = {**os.environ, "OBGL_TABLE": f"{site.base}/table/", "OBGL_TOKEN": token}
         played = await anyio.to_thread.run_sync(lambda: subprocess.run(

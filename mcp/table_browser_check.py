@@ -28,10 +28,11 @@ on stdout ("OK ..." or "FAIL ..."):
     CATCHUP <h> <s>  the page (busy with a backlog of moves) gets to hand h at step s and settles, within 40 s
     EXPECT <h> <s>   within 2.5 s the page shows hand h at step s (a move someone else made), and settles
     PRESENCE <words> within 5 s the presence line (who is at the table) contains <words>
-    TOKEN <label>    in the side panel's Programs box, make a token named <label>: it is shown once, Copy puts
-                     it on the clipboard (or selects it with no clipboard), and the list has <label>;
-                     answer "OK <token>"
-    REVOKE <label>   revoke the token named <label> (confirming); the list no longer has it
+    TOKEN <label>    in the side panel's Programs box (no token yet: only Make a token), make the token named
+                     <label>: it is shown once, Copy puts it on the clipboard (or selects it with no clipboard),
+                     and the box shows <label> with Regenerate and Revoke, no Make; answer "OK <token>"
+    REGENERATE       Regenerate (confirming): a new token is shown once in place of the old; "OK <token>"
+    REVOKE           revoke the token (confirming); the box offers Make a token again
     SHOWN <h:n,...>  within 300 s the page has shown each hand h to its end with exactly n moves animated (the
                      moves its record has: no hand and no event skipped), some of them replayed (replay mode
                      came on by itself); no console errors so far; "OK <replayed> <hands>"
@@ -464,10 +465,6 @@ def copy_works(page, button, code):
     return text
 
 
-def token_labels(page):
-    return page.evaluate("() => [...document.querySelectorAll('#token-list li b')].map(b => b.textContent)")
-
-
 def main():
     with sync_playwright() as p:
         chrome = os.environ.get("OBGL_BROWSER_CHROME")
@@ -624,24 +621,32 @@ def main():
                     programs = page.locator("#programs")
                     if not programs.evaluate("d => d.open"):
                         programs.locator("summary").click()
-                    page.wait_for_function("() => !document.getElementById('token-none').hidden || document.querySelectorAll('#token-list li').length", timeout=5000)
+                    page.wait_for_function("() => !document.getElementById('token-make-row').hidden", timeout=5000)
+                    assert page.locator("#token-have").is_hidden(), "a token already shown before one was made"
                     page.locator("#token-label").fill(label)
                     page.locator("#token-make").click()
                     page.wait_for_function("() => !document.getElementById('token-new').hidden", timeout=5000)
                     token = page.locator("#token-value").inner_text().strip()
                     assert token.startswith("obgl_pt_"), token
                     assert token in page.locator("#token-use").inner_text(), "the lines to use it do not have the token"
-                    page.wait_for_function("l => [...document.querySelectorAll('#token-list li b')].some(b => b.textContent === l)", arg=label, timeout=5000)
+                    page.wait_for_function("l => !document.getElementById('token-have').hidden && document.getElementById('token-name').textContent === l", arg=label, timeout=5000)
+                    assert page.locator("#token-make-row").is_hidden(), "Make a token is still offered with a token made"
                     assert copy_works(page, "#token-copy", "#token-value") == token
                     assert within_viewport(page, "#token-new"), "the new token is not wholly in view"
                     shot(page, "token")
                     say(f"OK {token}")
+                elif cmd[0] == "REGENERATE":
+                    old = page.locator("#token-value").inner_text().strip()
+                    page.locator("#token-regenerate").click()
+                    page.wait_for_function("o => document.getElementById('token-value').textContent.trim() !== o", arg=old, timeout=5000)
+                    token = page.locator("#token-value").inner_text().strip()
+                    assert token.startswith("obgl_pt_") and token in page.locator("#token-use").inner_text(), token
+                    assert page.locator("#token-have").is_visible() and page.locator("#token-make-row").is_hidden()
+                    say(f"OK {token}")
                 elif cmd[0] == "REVOKE":
-                    label = " ".join(cmd[1:])
-                    n = len(token_labels(page))
-                    page.locator("#token-list li", has_text=label).locator("button.revoke").click()
-                    page.wait_for_function("n => document.querySelectorAll('#token-list li').length === n - 1", arg=n, timeout=5000)
-                    assert label not in token_labels(page)
+                    page.locator("#token-revoke").click()
+                    page.wait_for_function("() => !document.getElementById('token-make-row').hidden", timeout=5000)
+                    assert page.locator("#token-have").is_hidden() and page.locator("#token-new").is_hidden()
                     say("OK revoked")
                 elif cmd[0] == "SHOWN":
                     want = {int(h): int(n) for h, n in (x.split(":") for x in cmd[1].split(","))}

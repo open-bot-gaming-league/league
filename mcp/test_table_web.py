@@ -214,13 +214,14 @@ async def test_a_program_token_plays_its_owners_table_and_nothing_else(site):
     async with site.browser(USER_A) as browser:
         page = Page(browser)
         table = await page.state()
-        r = await page.post("tokens", {"label": "my bot"})
+        assert (await page.get("token")).json() == {"token": None}
+        r = await page.post("token", {"label": "my bot"})
         assert r.status_code == 200, r.text
         made = r.json()
         token = made["token"]
         assert token.startswith("obgl_pt_") and made["label"] == "my bot"
-        listed = (await page.get("tokens")).json()["tokens"]
-        assert [t["id"] for t in listed] == [made["id"]] and token not in repr(listed)
+        shown = (await page.get("token")).json()["token"]
+        assert shown["id"] == made["id"] and shown["label"] == "my bot" and token not in repr(shown)
 
         async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
             prog = Page(http, {"Authorization": f"Bearer {token}"})
@@ -232,10 +233,10 @@ async def test_a_program_token_plays_its_owners_table_and_nothing_else(site):
             seen = (await page.state())["presence"]
             assert any(o["kind"] == "program" for o in seen["others"])
             # What the page alone may do.
-            for path, body in (("new", {}), ("tokens", {"label": "x"}), ("tokens/revoke", {"id": made["id"]})):
+            for path, body in (("new", {}), ("token", {"label": "x"}), ("token/regenerate", {}), ("token/revoke", {})):
                 r = await prog.post(path, body)
                 assert r.status_code == 403, (path, r.status_code)
-            assert (await prog.get("tokens")).status_code == 403
+            assert (await prog.get("token")).status_code == 403
             s = await prog.state()
             while not s["over"]:
                 s = (await prog.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})).json()
@@ -253,16 +254,16 @@ async def test_a_program_token_plays_its_owners_table_and_nothing_else(site):
             agent = await site.agent_token(USER_A)
             assert (await http.get("/table/api/state", headers={"Authorization": f"Bearer {agent}"})).status_code == 401
             # Revoked: refused at once.
-            assert (await page.post("tokens/revoke", {"id": made["id"]})).json() == {"revoked": made["id"]}
+            assert (await page.post("token/revoke", {})).json() == {"revoked": True}
             assert (await prog.get("state")).status_code == 401
-            assert (await page.get("tokens")).json()["tokens"] == []
+            assert (await page.get("token")).json() == {"token": None}
 
 
 @pytest.mark.asyncio
 @needs_table
 async def test_a_program_token_is_rate_limited(site):
     async with site.browser(USER_A) as browser:
-        token = (await Page(browser).post("tokens", {"label": "fast"})).json()["token"]
+        token = (await Page(browser).post("token", {"label": "fast"})).json()["token"]
     async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
         prog = Page(http, {"Authorization": f"Bearer {token}"})
         # All at once, so a slow store (Firestore) cannot refill the bucket between them.
@@ -274,14 +275,33 @@ async def test_a_program_token_is_rate_limited(site):
 
 
 @pytest.mark.asyncio
-async def test_at_most_five_program_tokens(site):
-    async with site.browser(USER_A) as browser:
+@needs_table
+async def test_one_program_token_an_account_regenerated_or_revoked(site):
+    async with site.browser(USER_A) as browser, httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
         p = Page(browser)
-        for n in range(5):
-            assert (await p.post("tokens", {"label": f"bot {n}"})).status_code == 200
-        r = await p.post("tokens", {"label": "one more"})
-        assert r.status_code == 409 and "revoke one" in r.json()["error"]
-        assert (await p.post("tokens/revoke", {"id": "nope"})).status_code == 404
+        first = (await p.post("token", {"label": "bot"})).json()
+        # A second while one exists: refused, and the first is still the one.
+        r = await p.post("token", {"label": "another"})
+        assert r.status_code == 409 and "regenerate" in r.json()["error"]
+        assert (await p.get("token")).json()["token"]["id"] == first["id"]
+        # Regenerate: the old token is refused at once, the new one works, still one, same name.
+        new = (await p.post("token/regenerate", {})).json()
+        assert new["token"] != first["token"] and new["label"] == "bot"
+        old_prog = Page(http, {"Authorization": f"Bearer {first['token']}"})
+        new_prog = Page(http, {"Authorization": f"Bearer {new['token']}"})
+        assert (await old_prog.get("state")).status_code == 401
+        assert (await new_prog.get("state")).status_code == 200
+        assert (await p.get("token")).json()["token"]["id"] == new["id"]
+        # Revoke, then make: works.
+        assert (await p.post("token/revoke", {})).status_code == 200
+        assert (await new_prog.get("state")).status_code == 401
+        assert (await p.post("token/revoke", {})).status_code == 404
+        again = await p.post("token", {"label": "bot 2"})
+        assert again.status_code == 200
+        assert (await Page(http, {"Authorization": f"Bearer {again.json()['token']}"}).get("state")).status_code == 200
+        # Regenerate with none: makes one.
+        assert (await p.post("token/revoke", {})).status_code == 200
+        assert (await p.post("token/regenerate", {"label": "fresh"})).json()["label"] == "fresh"
 
 
 @pytest.mark.asyncio
@@ -324,7 +344,8 @@ async def test_the_table_needs_sign_in_but_its_files_do_not(site):
         r = await http.get("/table/api/state", params={"session": "x"})
         assert r.status_code == 401 and r.json()["signIn"].startswith("/table/signin")
         for method, path in (("POST", "/table/api/new"), ("POST", "/table/api/act"), ("POST", "/table/api/next"),
-                             ("GET", "/table/api/tokens"), ("POST", "/table/api/tokens"), ("POST", "/table/api/tokens/revoke")):
+                             ("GET", "/table/api/token"), ("POST", "/table/api/token"), ("POST", "/table/api/token/regenerate"),
+                             ("POST", "/table/api/token/revoke")):
             r = await http.request(method, path, json={} if method == "POST" else None)
             assert r.status_code == 401, (path, r.status_code)
         # The sign-in refuses to send anyone off-site afterwards.

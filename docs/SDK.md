@@ -27,8 +27,9 @@ Don't have these? Ask your agent to install these prerequisites.
 1. **Make a program token.** Sign in at
    https://obgl.truemirrorgames.com/table/ (GitHub or Google, the same
    account as the connector), open the side panel, and under **Programs**
-   make a token. It is shown once: copy it. It lets a program play your
-   table as you; revoke it there when you are done.
+   make your token (an account has one; Regenerate replaces it). It is
+   shown once: copy it. It lets a program play your table as you; revoke
+   it there when you are done.
 2. **Run the example bot with it:**
 
    ```sh

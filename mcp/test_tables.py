@@ -131,3 +131,32 @@ def test_finished_hands_are_kept_for_a_page_that_polled_past_them():
         t.observe("s", {"hand": hand, "over": True, "net": hand})
     assert t.final_state("s", 1) is None  # the latest two only
     assert t.final_state("s", 3)["net"] == 3 and t.final_state("s", 2)["net"] == 2
+
+
+def test_the_accounts_table_is_read_from_the_store_once():
+    """A program at full speed asks for the account's table on every request:
+    after the first, no account-tables read (this server is its only writer)."""
+    async def go():
+        class Counting(MemoryStore):
+            reads = 0
+
+            async def get(self, kind, key):
+                if kind == "account-tables":
+                    Counting.reads += 1
+                return await super().get(kind, key)
+
+        fake = FakeTable()
+        store = Counting()
+        old = fake.new()["session"]
+        await MemoryStore.put(store, "account-tables", A, {"sessions": [old]})
+        t = Tables(store, fake)
+        for _ in range(50):
+            assert await t.resolve(A, None) == old and await t.current(A) == old
+            assert (await t.ensure(A))[0] == old
+        assert Counting.reads == 1
+        new, _ = await t.reset(A, seat="alternate", opponent=None)  # a reset writes, and is known at once
+        assert await t.resolve(A, None) == new and Counting.reads == 2  # (the reset's own read of the list)
+        b, _ = await t.ensure(B)
+        assert await t.current(B) == b
+
+    asyncio.run(go())

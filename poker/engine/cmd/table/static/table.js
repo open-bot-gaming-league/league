@@ -538,7 +538,7 @@ const choice = () => ({ seat: seatChoice(), opponent: $('opponent').value || und
 const act = move => send(() => call('POST', 'api/act', { session: st.session, hand: st.hand, step: st.step, ...move }));   // move: {kind, amount}
 const nextHand = () => { if (st && st.over) send(() => call('POST', 'api/next', { session: st.session, hand: st.hand, ...choice() })); };
 
-/* ---------- the league: who is at the table, and the program tokens ---------- */
+/* ---------- the league: who is at the table, and the program token ---------- */
 const lately = o => o && o.ago <= LATELY;
 const someoneElse = () => {
   const p = st && st.presence;
@@ -631,35 +631,37 @@ function playedBy(number) {
   const who = st && st.presence && st.presence.hands[number];
   return who && who.some(w => w !== 'you') ? ['Played by ' + who.join(' and ') + '.'] : [];
 }
-// Programs: tokens a program sends as "Authorization: Bearer ..." to play this table. Shown once, when made.
-async function showTokens() {
-  const list = $('token-list'); list.replaceChildren();
-  const { tokens } = await call('GET', 'api/tokens');
-  for (const t of tokens) {
-    const li = document.createElement('li');
-    const used = t.last_used_at ? 'last used ' + new Date(t.last_used_at * 1000).toLocaleString() : 'not used yet';
-    li.append(Object.assign(document.createElement('b'), { textContent: t.label }), ` \u00b7 ${used} `);
-    const revoke = Object.assign(document.createElement('button'), { textContent: 'Revoke', className: 'link revoke' });
-    revoke.dataset.id = t.id;
-    revoke.onclick = async () => {
-      if (!confirm(`Revoke \u201c${t.label}\u201d? A program using it stops at once.`)) return;
-      try { await call('POST', 'api/tokens/revoke', { id: t.id }); } catch (err) { $('token-error').textContent = err.message; }
-      showTokens();
-    };
-    li.append(revoke); list.append(li);
-  }
-  $('token-none').hidden = tokens.length > 0;
+// Programs: the account's one program token, which a program sends as "Authorization: Bearer ..." to play this
+// table. Shown once, when made (or regenerated); after that, its name, when it was made and last used.
+async function showToken() {
+  const { token: t } = await call('GET', 'api/token');
+  $('token-make-row').hidden = !!t;
+  $('token-have').hidden = !t;
+  if (!t) return;
+  const when = s => new Date(s * 1000).toLocaleString();
+  $('token-name').textContent = t.label;
+  $('token-when').textContent = `made ${when(t.created_at)} \u00b7 ${t.last_used_at ? 'last used ' + when(t.last_used_at) : 'not used yet'}`;
 }
-async function makeToken() {
+function showMade(made) {
+  $('token-value').textContent = made.token;
+  $('token-use').textContent = `export OBGL_TOKEN=${made.token}\ncd poker/engine && go run ./sdk/example -table`;
+  $('token-new').hidden = false; $('token-label').value = '';
+}
+async function tokenStep(fn) {
   $('token-error').textContent = '';
-  try {
-    const made = await call('POST', 'api/tokens', { label: $('token-label').value });
-    $('token-value').textContent = made.token;
-    $('token-use').textContent = `export OBGL_TOKEN=${made.token}\ncd poker/engine && go run ./sdk/example -table`;
-    $('token-new').hidden = false; $('token-label').value = '';
-  } catch (err) { $('token-error').textContent = err.message; }
-  showTokens();
+  try { await fn(); } catch (err) { $('token-error').textContent = err.message; }
+  showToken().catch(err => { $('token-error').textContent = err.message; });
 }
+const makeToken = () => tokenStep(async () => showMade(await call('POST', 'api/token', { label: $('token-label').value })));
+$('token-regenerate').onclick = () => tokenStep(async () => {
+  if (!confirm('Regenerate the token? The one you have stops working at once; the new one is shown once.')) return;
+  showMade(await call('POST', 'api/token/regenerate', {}));
+});
+$('token-revoke').onclick = () => tokenStep(async () => {
+  if (!confirm('Revoke the token? A program using it stops at once.')) return;
+  await call('POST', 'api/token/revoke', {});
+  $('token-new').hidden = true;
+});
 // Copy: the clipboard where the page may use it; otherwise (plain http, an iframe) select the text, ready for Ctrl+C.
 function copyText(btn, code) {
   const label = btn.firstChild;
@@ -677,7 +679,7 @@ function copyText(btn, code) {
 }
 $('token-make').onclick = makeToken;
 $('token-copy').onclick = () => copyText($('token-copy'), $('token-value'));
-$('programs').addEventListener('toggle', () => { if ($('programs').open) showTokens().catch(err => { $('token-error').textContent = err.message; }); });
+$('programs').addEventListener('toggle', () => { if ($('programs').open) showToken().catch(err => { $('token-error').textContent = err.message; }); });
 // The hands the page missed (others played them between two polls) go straight to the history, oldest first.
 function fillHistory(s) {
   const add = (s.history || []).filter(r => r.number !== s.hand && !H.some(h => h.number === r.number));
