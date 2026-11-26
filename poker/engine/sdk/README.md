@@ -30,11 +30,11 @@ From a clone of the repository, in `poker/engine` (the Go module's root):
 `sdk/example/main.go` is the file to edit: `myBot.Act` is a bot. Copy
 it, or write your own type with an `Act` method.
 
-The starter bots are teaching bots, each with a leak to find. The example
-bot beats Clam (+17.4 ± 2.5 bb/100) and loses to Shark (−9.6 ± 2.8) and
-Dove (−87.7 ± 8.6), over 20,000 hands each: making it beat all three is a
-good first goal. Measure every change against your previous version
-(below), and against the house bots if you have their files.
+The starter bots are teaching bots, each with a leak to find. To see what
+the example bot beats, run the matrix (`go run ./sdk/example -matrix`;
+below); making it beat all three is a good first goal. Measure every
+change against your previous version (below), and against the house bots
+if you have their files.
 
 ## First: fork a starter bot, add one rule, measure it
 
@@ -189,21 +189,28 @@ their names.
 
 - **Dove** (`dove.go`) never bluffs: it bets and raises in proportion to its
   equity against a random hand, calls a fair price, folds weak hands to big
-  bets. Beats Clam (+4.3 ± 1.9 bb/100); loses to Shark (−67.4 ± 2.0),
-  Turtle (−36.1 ± 2.6) and Ox (−50.5 ± 2.2).
+  bets.
 - **Clam** (`clam.go`) plays premium hands only and folds to aggression.
-  Beats Turtle (+5.3 ± 0.8); loses to Ox (−49.1 ± 0.9), Shark (−16.4 ± 1.6)
-  and Dove (−4.3 ± 1.9).
 - **Shark** (`shark.go`) is tight and aggressive: a preflop chart by seat
   (edit it hand by hand), a continuation bet on the flop, then bets only a
-  real hand. Beats Dove (+67.4 ± 2.0), Clam (+16.4 ± 1.6) and Turtle
-  (+3.7 ± 1.0); loses to Ox (−33.7 ± 1.3).
-
-(Duplicate matches: 200,000 hands against Ox, 400,000 against Turtle over two
-seeds; between the starters, enough hands for an SE of 2 or less.)
+  real hand.
 
 Your own earlier versions are the other opponent worth having: keep them,
 and `Match` each change against the last.
+
+## Who beats whom: run the matrix
+
+    go run ./sdk/cmd/matrix                    # the three starter bots, every pair
+    go run ./sdk/example -matrix               # the same, with the example bot (myBot) in it
+    go run ./sdk/cmd/matrix -hands 1000000     # tighter numbers (SE about 0.5 to 1), slower
+    go run ./sdk/cmd/matrix -house turtle=abs-200-200-200.bin,turtle-k200-1500.bp -house ox=abs-2000-2000-2000-p3.bin,ox-k2000-1e9.bp
+
+Every pair plays a duplicate `Match` on the same seed (default 1, so
+everyone gets the same table), and the table shows bb/100 ± SE for the row
+bot against the column bot. House bots join with `-house` when their files
+are on your disk. For a bot of your own, add one line to `roster` in
+`sdk/cmd/matrix/main.go`, or call `sdk.Matrix` from your program with a
+`sdk.Contender` for it.
 
 ## Play your table
 
@@ -263,10 +270,12 @@ the menu sizes around them.
 | `bot.go` | `Bot`, `State`, `Legal`, `Action`, `Event`, the helpers, `Random` |
 | `cards.go` | `Card`, ranks, `Category`, `Made`, `Strength`, `Equity` |
 | `match.go` | `Match`, `Result` |
+| `matrix.go` | `Matrix`, `Contender`, `HeadToHead`: every pair, one table |
 | `house.go` | `House`, `LoadHouse` |
 | `table.go` | `Table`, the table client |
 | `bots/` | the starter bots |
 | `example/` | a bot to start from, and the command that runs it |
+| `cmd/matrix/` | the matrix command: who beats whom |
 
 In your own Go module: `go get github.com/open-bot-gaming-league/league/poker/engine@main`
 and import `github.com/open-bot-gaming-league/league/poker/engine/sdk`.

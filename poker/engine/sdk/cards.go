@@ -1,6 +1,10 @@
 package sdk
 
-import "github.com/open-bot-gaming-league/league/poker/engine"
+import (
+	"fmt"
+
+	"github.com/open-bot-gaming-league/league/poker/engine"
+)
 
 // Card is a playing card. c.Rank() is 0 (Two) to 12 (Ace), c.Suit() 0 to
 // 3 (clubs, diamonds, hearts, spades), c.String() is "As", "Td", "2c".
@@ -68,8 +72,14 @@ func (s State) Made() Category {
 // random hand, the rest of the board dealt at random: 1 always wins, 0.5
 // is an even chance, ties count half. It plays out `samples` random
 // deals drawn from s.Rand (a few hundred is plenty for a decision), so it
-// is an estimate, and the same seed gives the same answer.
+// is an estimate, and the same seed gives the same answer. samples must
+// be at least 1: a zero or negative count is a mistake in the bot, and
+// panics with a message saying so (a match reports it as the bot's
+// error) rather than answer with a number that means nothing.
 func (s State) Equity(samples int) float64 {
+	if samples < 1 {
+		panic(fmt.Sprintf("sdk: Equity needs at least 1 sample, not %d (a few hundred is plenty)", samples))
+	}
 	var used uint64
 	for _, c := range s.Hole {
 		used |= 1 << c

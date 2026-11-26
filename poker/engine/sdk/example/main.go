@@ -2,6 +2,7 @@
 //
 //	go run ./sdk/example                  # 2,000 hands against each starter bot
 //	go run ./sdk/example -vs clam -hands 20000 -seed 7
+//	go run ./sdk/example -matrix -hands 20000   # myBot and the starters, every pair: who beats whom
 //	go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
 //	go run ./sdk/example -table -hands 50  # play your table (token: obgl-token.txt or OBGL_TOKEN); watch it in the browser
 //
@@ -21,10 +22,10 @@ import (
 )
 
 // myBot is yours to change. It plays pairs, aces and two big cards
-// before the flop, and any pair after it. It beats Clam and loses to Dove
-// and Shark: make it beat all three. Measure each change against your last
-// version (the sdk README's first example), and against a house bot if you
-// have its files, to learn whether it helps.
+// before the flop, and any pair after it. Run the matrix to see what it
+// beats (go run ./sdk/example -matrix). Measure each change against your
+// last version (the sdk README's first example), and against a house bot
+// if you have its files, to learn whether it helps.
 type myBot struct{}
 
 func (myBot) Act(s sdk.State) sdk.Action {
@@ -56,6 +57,7 @@ func main() {
 	seed := flag.Uint64("seed", 1, "seed: the same seed plays the same cards and the same random choices")
 	houseBuckets := flag.String("house-buckets", "", "a house bot's bucket file, already on disk (with -house-blueprint)")
 	houseBlueprint := flag.String("house-blueprint", "", "a house bot's blueprint, already on disk (with -house-buckets)")
+	matrix := flag.Bool("matrix", false, "play every pair of myBot and the -vs bots (and the house bot), and print who beats whom")
 	table := flag.Bool("table", false, "play -hands hands at your table instead (the token: OBGL_TOKEN, or obgl-token.txt here or above; OBGL_TABLE, default the league's)")
 	flag.Parse()
 	log.SetFlags(0)
@@ -72,6 +74,26 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Printf("at %s (session %s): %v\n", t.URL, t.Session, res)
+		return
+	}
+
+	if *matrix {
+		cs := []sdk.Contender{{Name: "myBot", New: func() (sdk.Bot, error) { return myBot{}, nil }}}
+		for _, id := range strings.Split(*vs, ",") {
+			newBot, ok := bots.ByName[strings.TrimSpace(id)]
+			if !ok {
+				log.Fatalf("no starter bot %q (dove, clam, shark)", id)
+			}
+			cs = append(cs, sdk.Contender{Name: bots.Names[strings.TrimSpace(id)], New: func() (sdk.Bot, error) { return newBot(), nil }})
+		}
+		if *houseBuckets != "" && *houseBlueprint != "" {
+			cs = append(cs, sdk.Contender{Name: "house", New: func() (sdk.Bot, error) { return sdk.LoadHouse(*houseBuckets, *houseBlueprint) }})
+		}
+		t, err := sdk.Matrix(cs, *hands, *seed)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Print(t)
 		return
 	}
 
