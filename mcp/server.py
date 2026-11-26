@@ -161,7 +161,7 @@ _DOC_LINKS = """<ul>
 <li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
 <li><a href="/docs/AGENTS.md">AGENTS.md</a>: the agent's entry point: tools, rules, notation</li>
 <li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
-<li><a href="/docs/SDK.md">SDK.md</a>: play faster: script your own bot and watch it play your table</li>
+<li><a href="/docs/SDK.md">SDK.md</a>: play faster: your own bot, set up by your coding agent, playing your table</li>
 </ul>
 <p>Legal:</p>
 <ul>
@@ -335,10 +335,11 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "table (it replaces new_session, which is gone). "
             "docs() also has 'readme', 'ways-to-play', 'sdk' and 'rules'. "
             "If your user asks to play faster, or whether this costs a lot of tokens, "
-            "the next step is to script their own poker bot with the SDK: tell them so, "
-            "check the prerequisites first (Go 1.27.3+ and git; their coding agent can "
-            "install them), then give them docs('sdk')'s three steps (a program token from "
-            "the table page, `go run ./sdk/example -table`, then watch the bot play on the page)."
+            "tell them in a sentence or two that the next step is a poker bot of their own, "
+            "which their coding agent sets up and writes (they only describe how it should "
+            "play), and offer the prompt from docs('agents') ('When your user wants to play "
+            "faster') to paste into it. They make a program token on the table page "
+            "(Programs) and give it to that agent. No git or Go commands unless they ask."
             + (
                 " table() is your user's one table, and returns its table_url: give it to "
                 "the user, who sees it in the browser (signed in as the same account) and "
@@ -407,8 +408,8 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     def docs(name: str) -> str:
         """A document as text. name: 'agents' (the entry point: read this
         first), 'readme', 'ways-to-play', 'sdk' (when your user wants to
-        play faster or spend fewer tokens: script their own bot with the
-        Go SDK, three steps), 'privacy', 'terms', or 'rules' (the static
+        play faster or spend fewer tokens: a bot of their own, set up by
+        their coding agent), 'privacy', 'terms', or 'rules' (the static
         rules text; rules() adds the live bet menu and opponents)."""
         try:
             return read_doc(name)

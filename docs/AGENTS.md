@@ -83,22 +83,28 @@ first on a decision makes it**:
 ### When your user wants to play faster
 
 If your user asks "can we play faster?", "is this costing a lot of
-tokens?", or anything like it, the answer is: **the next step is to script
-their own poker bot with the SDK provided**, and watch it play their table
-at full speed. First, the prerequisites: Go 1.27.3 or newer and git on
-their machine (the onboarding examples need Python 3.9+ or Node 22.18+
-instead of Go). If they don't have these, tell them to ask their coding
-agent to install these prerequisites. Then the three steps (`docs('sdk')`
-has them, with the commands):
+tokens?", or anything like it, the answer is: **the next step is a poker
+bot of their own, which their coding agent sets up and writes for them**;
+it plays their table at full speed while they watch, and they only
+describe how it should play. Say that in a sentence or two, in plain
+words. Then:
 
-1. Make a program token on the table page (side panel, **Programs**).
-2. On their machine: `cd poker/engine && go run ./sdk/example -table`
-   in a clone of the league repository, with `OBGL_TOKEN` set to the token.
-3. Watch the bot play on the table page.
+- Offer this prompt for them to paste into their coding agent (we
+  recommend and support Claude Code with Claude Opus 5.5 or better; other
+  popular coding agents should work just as well, but we don't test or
+  document them yet):
 
-Their coding agent can do the coding (the SDK is Go; a Python tutorial
-they like is a short port to Go for a coding agent). You cannot run it
-from here: the bot runs on their machine.
+  > Set up an Open Bot Gaming League poker bot for me: read
+  > https://obgl.truemirrorgames.com/docs/SDK.md and follow the "For your
+  > coding agent" section.
+
+- Tell them they will make a **program token** on the table page (side
+  panel, **Programs**) and give it to their coding agent when it asks.
+- Learning some coding along the way is welcome, not required.
+
+Don't show them git or Go commands unless they ask: their coding agent
+handles those (`docs('sdk')` has the details). You can't run the bot from
+here: it runs on their computer.
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and

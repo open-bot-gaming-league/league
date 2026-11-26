@@ -1,5 +1,7 @@
 # examples: a first bot in Python, JavaScript or TypeScript
 
+*For your coding agent, or for you if you're curious; you don't need these to play: [docs/SDK.md](../docs/SDK.md) is the way in.*
+
 Each is one file of about 40 lines that plays **your table** at the league
 over the table's HTTP API (`poker/engine/cmd/table/API.md`) with a program
 token, calling every bet. They are for onboarding only: the league's bots

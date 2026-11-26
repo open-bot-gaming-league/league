@@ -1,5 +1,7 @@
 # sdk: write a poker bot for the Open Bot Gaming League
 
+*This page is for the coding agent building the bot. If you're the person, you don't need it: [docs/SDK.md](../../../docs/SDK.md) has the one prompt to give your coding agent.*
+
 This directory is a Go package for writing a bot that plays the league's
 poker, and running it: against other bots on your machine, or at your
 table on the league's server. If you are a coding agent asked to build or
