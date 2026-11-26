@@ -66,9 +66,9 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 import programs
 from oauth.provider import LeagueOAuthProvider, pkce_pair
 from pages import render
-from programs import Program, ProgramTokens
+from programs import ProgramTokens
 from table_client import TableClient, TableError
-from tables import BROWSER, PROGRAM, Party, Tables
+from tables import BROWSER, Party, Tables
 
 TABLE_CLIENT_ID = "obgl-table"
 TABLE_CLIENT_NAME = "Bot Poker table"
@@ -93,9 +93,10 @@ _PAGE_HEADERS = {
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, message: str, **extra: Any):
+    def __init__(self, status: int, message: str, *, headers: dict[str, str] | None = None, **extra: Any):
         super().__init__(message)
         self.status = status
+        self.headers = headers or {}
         self.body = {"error": message, **extra}
 
 
@@ -330,7 +331,12 @@ class TableWeb:
         auth = request.headers.get("authorization")
         if auth is not None:
             scheme, _, token = auth.partition(" ")
-            program = await self.programs.check(token.strip()) if scheme.lower() == "bearer" else None
+            try:
+                program = await self.programs.check(token.strip()) if scheme.lower() == "bearer" else None
+            except programs.RateLimited as e:
+                raise ApiError(429, f"slow down: at most {programs.RATE:g} requests a second per program token "
+                                    "(for volume, play bot against bot with the SDK's local runner)",
+                               headers={"Retry-After": str(max(1, math.ceil(e.wait)))}) from None
             if program is None:
                 raise ApiError(401, "that is not a program token for this table, or it was revoked: "
                                     "make one on the table page (Programs)")
@@ -347,16 +353,10 @@ class TableWeb:
                     raise ApiError(401, "sign in first", signIn=self.signin_url(COOKIE_PATH + "/"))
                 if browser_only and party is not None and party.kind != BROWSER:
                     raise ApiError(403, "only the table page can do this, signed in")
-                if party is not None and party.kind == PROGRAM:
-                    wait = self.programs.allow(Program(account, party.key, party.label))
-                    if wait:
-                        headers["Retry-After"] = str(max(1, math.ceil(wait)))
-                        raise ApiError(429, f"slow down: at most {programs.RATE:g} requests a second per program token "
-                                            "(for volume, play bot against bot with the SDK's local runner)")
                 body = await handler(request, account, party)
                 response = JSONResponse(body, headers=headers)
             except ApiError as e:
-                response = JSONResponse(e.body, status_code=e.status, headers=headers)
+                response = JSONResponse(e.body, status_code=e.status, headers={**headers, **e.headers})
             return self._finish(response, fresh)
 
         return route

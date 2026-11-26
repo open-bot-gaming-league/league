@@ -23,7 +23,10 @@ write can never bring a revoked token back.
 
 Rate: each token may make RATE requests a second on average, BURST at
 once (an in-process token bucket: one Cloud Run instance, see
-deploy/cloudrun/CLOUDRUN.md). Volume belongs in the SDK's local runner.
+deploy/cloudrun/CLOUDRUN.md), counted by the token's hash before any store
+read, so a made-up token is limited as a real one is. What a token is
+(its program, or nothing) is remembered for CACHE_TTL seconds; revoke()
+forgets it at once. Volume belongs in the SDK's local runner.
 """
 
 from __future__ import annotations
@@ -41,6 +44,8 @@ MAX_TOKENS = 5
 LABEL_MAX = 40
 RATE, BURST = 20.0, 40.0
 LAST_USED_EVERY = 60  # seconds between writes of a token's last_used_at
+CACHE_TTL = 60  # seconds a token's lookup (a program, or none) is remembered
+MAX_TRACKED = 10_000  # tokens remembered (buckets, lookups) before the stale ones are dropped
 
 
 def _hash(token: str) -> str:
@@ -60,12 +65,21 @@ class TooMany(Exception):
     """The account already has MAX_TOKENS tokens."""
 
 
+class RateLimited(Exception):
+    """A token over its rate; `wait`: seconds until its next request may go."""
+
+    def __init__(self, wait: float):
+        super().__init__(f"over the rate: wait {wait:.2f} s")
+        self.wait = wait
+
+
 class ProgramTokens:
     def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time) -> None:
         self.store = store
         self.clock = clock
         self._used: dict[str, float] = {}  # key -> when last_used_at was last written
-        self._buckets: dict[str, tuple[float, float]] = {}  # token id -> (tokens left, at)
+        self._buckets: dict[str, tuple[float, float]] = {}  # key -> (requests left, at)
+        self._cache: dict[str, tuple[Program | None, float]] = {}  # key -> (what the token is, until when)
 
     async def create(self, account: str, label: str) -> dict:
         """A new token for `account`: {token, id, label, created_at}. The
@@ -107,34 +121,52 @@ class ProgramTokens:
                 await self.store.delete("program-tokens", e["key"])
                 await self.store.delete("program-usage", e["id"])
                 self._used.pop(e["key"], None)
+                self._cache.pop(e["key"], None)
         index["tokens"] = keep
         await self.store.put("account-programs", account, index)
-        self._buckets.pop(token_id, None)
         return True
 
     async def check(self, token: str) -> Program | None:
         """The program a bearer token belongs to, or None (not a program
-        token, or revoked)."""
+        token, or revoked). RateLimited, before anything is read, when this
+        token (known or not) is over its rate. What a token is, either
+        way, is remembered for CACHE_TTL seconds, so a program playing fast,
+        or someone trying made-up tokens, costs at most one store read a
+        token a minute; revoke() forgets its token at once."""
         if not token.startswith(PREFIX):
             return None
         key = _hash(token)
-        record = await self.store.get("program-tokens", key)
-        if record is None:
-            return None
+        wait = self._take(key)
+        if wait:
+            raise RateLimited(wait)
         now = self.clock()
-        if now - self._used.get(key, 0) >= LAST_USED_EVERY:
+        hit = self._cache.get(key)
+        if hit is not None and hit[1] > now:
+            program = hit[0]
+        else:
+            record = await self.store.get("program-tokens", key)
+            program = Program(record["account"], record["id"], record["label"]) if record else None
+            self._remember(key, program, now)
+        if program is not None and now - self._used.get(key, 0) >= LAST_USED_EVERY:
             self._used[key] = now
-            await self.store.put("program-usage", record["id"], {"account": record["account"], "last_used_at": int(now)})
-        return Program(record["account"], record["id"], record["label"])
+            await self.store.put("program-usage", program.id, {"account": program.account, "last_used_at": int(now)})
+        return program
 
-    def allow(self, program: Program) -> float:
-        """Take one request from the program's bucket: 0 if it may go
-        ahead, else the seconds until it may."""
+    def _remember(self, key: str, program: Program | None, now: float) -> None:
+        if len(self._cache) >= MAX_TRACKED:
+            self._cache = {k: v for k, v in self._cache.items() if v[1] > now}
+        self._cache[key] = (program, now + CACHE_TTL)
+
+    def _take(self, key: str) -> float:
+        """Take one request from the token's bucket: 0 if it may go ahead,
+        else the seconds until it may."""
         now = self.clock()
-        left, at = self._buckets.get(program.id, (BURST, now))
+        if len(self._buckets) >= MAX_TRACKED:  # full buckets are the same as none
+            self._buckets = {k: v for k, v in self._buckets.items() if v[0] + (now - v[1]) * RATE < BURST}
+        left, at = self._buckets.get(key, (BURST, now))
         left = min(BURST, left + (now - at) * RATE)
         if left < 1:
-            self._buckets[program.id] = (left, now)
+            self._buckets[key] = (left, now)
             return (1 - left) / RATE
-        self._buckets[program.id] = (left - 1, now)
+        self._buckets[key] = (left - 1, now)
         return 0.0

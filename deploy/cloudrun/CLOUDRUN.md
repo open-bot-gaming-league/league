@@ -311,8 +311,10 @@ python deploy/cloudrun/delete_account.py github:12345 --project PROJECT --delete
 It prints one `collection/document` line per document and exits 1 if
 there is no account record. Delete, then check that the dry run now
 exits 1 with "no account record". The person's still-valid tokens stop
-working at once (their records are gone); signing in again with GitHub or
-Google makes a new, empty account under the same id.
+working at once (their records are gone), except a program token, which
+the running server remembers for up to a minute (`mcp/programs.py`,
+`CACHE_TTL`); signing in again with GitHub or Google makes a new, empty
+account under the same id.
 
 Not covered: the hands. They are in the game server's `hands.jsonl` on
 the container's disk (Session state, above), which nothing prunes by
