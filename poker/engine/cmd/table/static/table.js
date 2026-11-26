@@ -164,15 +164,12 @@ function say(who, text) {
 }
 function hush() { for (const who of ['you', 'bot']) $(who + '-said').textContent = ''; }
 
-// The opponent in this hand, as the server states it: its exploitability is shown as written.
+// The opponent in this hand, as the server states it: its note (its style) and how it was trained, shown as written.
 const botOf = id => info.bots.find(b => b.id === id) || info.bots[0];
 function showBot(id) {
   const b = botOf(id);
   $('bot-name').textContent = b.name;
   $('bot-trained').textContent = b.trained || '';
-  // the figure leads the string ("0.556 bb/hand, exact (...)"): the tag shows it, the details the whole text as written
-  $('exploitability').textContent = (/^[\d.]+ [^,(:]*/.exec(b.exploitability) || [b.exploitability])[0];
-  $('exploitability-full').textContent = b.exploitability;
   $('bot-note').textContent = b.note || '';
 }
 

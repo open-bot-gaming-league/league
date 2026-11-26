@@ -70,7 +70,7 @@ go run ./cmd/cfrbr -game holdem -config configs/tiny_20bb.json -abs data/abs-200
 
 # 7. Play against a blueprint in the browser (cmd/table/API.md has the HTTP routes the page uses).
 #    -bots is a JSON file listing the opponents on offer: bucket file, blueprint, and what the page says about
-#    each, which must state how exploitable it measured (cmd/table/API.md).
+#    each (its name, how it was trained, a note on its style; cmd/table/API.md).
 go run ./cmd/table -config configs/table_50bb.json -bots served.json -addr 127.0.0.1:9790
 
 # Kuhn and Leduc go through the same commands.
@@ -109,7 +109,7 @@ go run ./cmd/table -config configs/table_50bb.json -bots bots.json -hands hands.
 Flags: `-config` (a betting-tree JSON config, e.g. `configs/table_50bb.json`),
 `-bots` (required: a JSON file listing the opponents on offer, the default
 first — for each, its bucket file, its blueprint, and what the page says
-about it, including how exploitable it measured; see `loadBots` in
+about it (name, training, a note on its style); see `loadBots` in
 `cmd/table/main.go`), `-hands` (append every finished hand to this file, one
 JSON object per line; sessions rebuild from it on restart), `-addr` (listen
 address, default `127.0.0.1:9790`). The page uses relative URLs, so it

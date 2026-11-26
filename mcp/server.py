@@ -144,8 +144,6 @@ button has its `amount`); act(index) also takes one.
 The house bots bet only their menu (from api/info, read live): a
 round's first bet is 0.5x, 1x or 2x pot; a raise is 1x pot; a re-raise
 is 1x pot; all-in. Other sizes they read as the menu sizes around them.
-Their exploitability numbers are measured inside that menu, so against
-any size they are a lower bound.
 
 Each poker tool (state/act/next_hand/score) returns the same compact
 shape: hand, step, round, seat, opponent, you, bot, board, pot, over,

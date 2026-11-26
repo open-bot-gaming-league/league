@@ -28,9 +28,9 @@ func testTable(t *testing.T) (*httptest.Server, *server) {
 	}
 	t.Cleanup(func() { closeGame() })
 	bots := []*bot{
-		{botInfo: botInfo{ID: "uniform", Name: "uniform play (test)", Exploitability: "not measured (test blueprint)"},
+		{botInfo: botInfo{ID: "uniform", Name: "uniform play (test)", Note: "plays every legal move at random (test)"},
 			g: g, bp: engine.NewBlueprint(g, engine.UniformStrategy{})},
-		{botInfo: botInfo{ID: "caller", Name: "calling station (test)", Exploitability: "not measured (test blueprint)"},
+		{botInfo: botInfo{ID: "caller", Name: "calling station (test)", Note: "calls every bet (test)"},
 			g: g, bp: engine.NewBlueprint(g, engine.AlwaysCall{Tree: g.Tree})},
 	}
 	s := newServer(bots, 1, 2)
@@ -414,7 +414,7 @@ func TestTableServesPageAndInfo(t *testing.T) {
 		t.Errorf("unknown session: status %d", code)
 	}
 	var info gameInfo
-	if code := do(t, ts, "GET", "/api/info", nil, &info); code != 200 || info.StackBB != 50 || len(info.Bots) != 2 || info.Bots[0].ID != "uniform" || info.Bots[1].Exploitability == "" {
+	if code := do(t, ts, "GET", "/api/info", nil, &info); code != 200 || info.StackBB != 50 || len(info.Bots) != 2 || info.Bots[0].ID != "uniform" || info.Bots[1].Note == "" {
 		t.Errorf("info: status %d, %+v", code, info)
 	}
 	res, err := http.Get(ts.URL + "/")
@@ -423,7 +423,7 @@ func TestTableServesPageAndInfo(t *testing.T) {
 	}
 	page, _ := io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode != 200 || !strings.Contains(string(page), `id="exploitability"`) {
+	if res.StatusCode != 200 || !strings.Contains(string(page), `id="bot-name"`) {
 		t.Errorf("page: status %d, %d bytes", res.StatusCode, len(page))
 	}
 	// The page must work behind a proxy that strips a prefix.
@@ -450,11 +450,11 @@ func TestTableServesPageAndInfo(t *testing.T) {
 	}
 }
 
-// A bots file is refused unless every bot has an id of its own, a name
-// and a stated exploitability: the page must never offer an opponent
-// without saying how exploitable it is. File names in it are relative to
-// the file.
-func TestBotsFileMustStateExploitability(t *testing.T) {
+// A bots file is refused unless every bot has an id of its own and a
+// name. File names in it are relative to the file. A key the server no
+// longer reads (the retired "exploitability", in a file written for an
+// earlier server) is ignored, so such a file still loads.
+func TestBotsFileMustNameBots(t *testing.T) {
 	dir := t.TempDir()
 	g, closeGame, err := engine.OpenGame("holdem", "../../configs/table_50bb.json", "category")
 	if err != nil {
@@ -464,14 +464,15 @@ func TestBotsFileMustStateExploitability(t *testing.T) {
 	if err := engine.NewBlueprint(g, engine.UniformStrategy{}).WriteFile(dir + "/u.bp"); err != nil {
 		t.Fatal(err)
 	}
-	const good = `{"id":"a","name":"x","exploitability":"0.5 bb/hand, exact","abs":"category","blueprint":"u.bp"}`
+	const good = `{"id":"a","name":"x","note":"tight","abs":"category","blueprint":"u.bp"}`
 	for body, ok := range map[string]bool{
 		`[` + good + `]`: true,
 		`[` + good + `,` + strings.Replace(good, `"id":"a"`, `"id":"b"`, 1) + `]`: true,
 		`[` + good + `,` + good + `]`: false, // the same id twice
-		`[` + strings.Replace(good, `"exploitability":"0.5 bb/hand, exact",`, ``, 1) + `]`: false,
-		`[` + strings.Replace(good, `"name":"x",`, ``, 1) + `]`:                            false,
-		`[` + strings.Replace(good, `u.bp`, `missing.bp`, 1) + `]`:                         false,
+		`[` + strings.Replace(good, `"note":"tight",`, `"note":"tight","exploitability":"0.5 bb/hand, exact",`, 1) + `]`: true,
+		`[` + strings.Replace(good, `"id":"a",`, ``, 1) + `]`:                                                            false,
+		`[` + strings.Replace(good, `"name":"x",`, ``, 1) + `]`:                                                          false,
+		`[` + strings.Replace(good, `u.bp`, `missing.bp`, 1) + `]`:                                                       false,
 		`[]`: false,
 	} {
 		path := dir + "/bots.json"

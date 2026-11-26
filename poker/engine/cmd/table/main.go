@@ -7,8 +7,8 @@
 //	    -hands hands.jsonl -addr 127.0.0.1:9790
 //
 // -bots is a JSON file listing the opponents on offer (see loadBots): for
-// each its bucket file, its blueprint, and what the page says about it,
-// which must include how exploitable it measured. The page uses relative
+// each its bucket file, its blueprint, and what the page says about it
+// (its name, how it was trained, a note on its style). The page uses relative
 // URLs, so it works behind a proxy that strips a path prefix. API.md has
 // the requests.
 package main
@@ -88,11 +88,10 @@ func main() {
 // botInfo is what the page says about a bot. Every field is shown as
 // written.
 type botInfo struct {
-	ID             string `json:"id"`             // short, for requests: "cfrbr"
-	Name           string `json:"name"`           // "CFR-BR, 200 buckets per street, 2,500 iterations"
-	Trained        string `json:"trained"`        // when and how, one line
-	Exploitability string `json:"exploitability"` // the number with its unit and how it was measured, or that it was not
-	Note           string `json:"note,omitempty"`
+	ID      string `json:"id"`             // short, for requests: "cfrbr"
+	Name    string `json:"name"`           // "Turtle"
+	Trained string `json:"trained"`        // when and how, one line
+	Note    string `json:"note,omitempty"` // its style, and how it does head to head
 }
 
 // bot is an opponent on offer: a blueprint with the game it was trained
@@ -108,8 +107,8 @@ type bot struct {
 
 // loadBots reads the -bots file: a JSON array of bots, the default first.
 // File names in it are relative to the file's own directory. A bot
-// without a name or a stated exploitability is refused: the page must
-// never offer an opponent without saying how exploitable it is.
+// without an id (unique) or a name is refused. Keys the struct does not
+// name are ignored, so a file written before a field was dropped still loads.
 func loadBots(path, config string) (bots []*bot, closeAll func(), err error) {
 	var closers []func() error
 	closeAll = func() {
@@ -139,8 +138,8 @@ func loadBots(path, config string) (bots []*bot, closeAll func(), err error) {
 	}
 	seen := map[string]bool{}
 	for _, b := range bots {
-		if b.ID == "" || seen[b.ID] || b.Name == "" || b.Exploitability == "" {
-			return fail("bot %q: id (unique), name and exploitability must all be stated", b.ID)
+		if b.ID == "" || seen[b.ID] || b.Name == "" {
+			return fail("bot %q: id (unique) and name must both be stated", b.ID)
 		}
 		seen[b.ID] = true
 		g, closeGame, err := engine.OpenGame("holdem", config, rel(b.Abs))
@@ -354,8 +353,7 @@ func (s *server) gameInfo() gameInfo {
 		Menu: fmt.Sprintf("first bet of a round %s pot; raise %s pot; re-raises %s pot; all-in always",
 			fr(c.Opening), fr(c.RaiseMenu), fr(c.ThreebetMenu)),
 		Sizing: "You may bet or raise any whole number of chips from the minimum raise to all-in; the menu is the sizes the buttons offer. " +
-			"The house bots bet only the menu's sizes and read other sizes as the menu sizes around them. " +
-			"Their exploitability numbers are measured inside the menu, so against any size they are a lower bound."}
+			"The house bots bet only the menu's sizes and read other sizes as the menu sizes around them."}
 }
 
 func (s *server) session(id string) (*session, error) {

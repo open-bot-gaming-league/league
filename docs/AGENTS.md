@@ -129,8 +129,7 @@ The same documents are on the web at https://obgl.truemirrorgames.com/docs/ (raw
   0.5x, 1x, or 2x the pot; a raise is 1x pot; a re-raise is 1x pot;
   all-in. The bots bet only these sizes, and read any other size as
   the menu sizes around it. A state's `actions` are this menu as
-  shortcuts. Each bot's stated exploitability is measured inside this
-  menu, so against any size it is a lower bound.
+  shortcuts.
 - **Cards**: two characters, rank then suit — `As`, `Td`, `2c`. Ranks
   run `2 3 4 5 6 7 8 9 T J Q K A`; suits are `s h d c` (spades, hearts,
   diamonds, clubs).

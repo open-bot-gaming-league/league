@@ -103,7 +103,7 @@ kbd{font:700 .7em "Liberation Mono",monospace;background:#0005;border:1px solid 
 #side .row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 #side summary{cursor:pointer;color:var(--dim);font-size:.85rem}
 #side details p{margin:.35rem 0 0}
-#bot .tag{font-size:.78rem;color:var(--dim);border:1px solid var(--line);border-radius:1rem;padding:.05rem .5rem} #exploitability{color:#fff;font-weight:700}
+#bot>p{margin:.25rem 0 .35rem}
 #league{display:flex;flex-direction:column;gap:.4rem} #league button{padding:.3rem .7rem}
 #presence{grid-column:1/-1;justify-self:center;color:#9fd0ff;font-size:.95rem}
 #presence[hidden]{display:none}

@@ -11,9 +11,9 @@ here:
   `../../poker/engine/cmd/table/main.go`). `served.example.json` one
   level up is the served set (ids `turtle`, `ox`); copy it
   here as `served.json`, or write your own with the same fields
-  (`id`, `name`, `trained`, `exploitability`, `abs`, `blueprint`;
-  `note` optional) -- `loadBots` refuses a bot missing an `id`, `name`
-  or `exploitability`.
+  (`id`, `name`, `trained`, `abs`, `blueprint`; `note`, a line on the
+  bot's style, optional) -- `loadBots` refuses a bot missing an `id` or
+  `name`.
 - The two bucket files and two blueprints `served.json` names (one
   bucket file + one blueprint per bot -- see `served.example.json`).
   The two blueprint files are named `turtle-k200-1500.bp` and

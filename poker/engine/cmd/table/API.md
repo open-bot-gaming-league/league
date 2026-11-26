@@ -13,7 +13,7 @@ flop and last after it. Cards are two characters, rank then suit:
 
 | request | body or query | answer |
 |---|---|---|
-| `GET api/info` | | `{bots: [{id, name, trained, exploitability, note}], stackBB, smallBlind, bigBlind, menu, sizing}`. `bots` are the opponents on offer, the default first; there may be one. Show the current opponent's `exploitability` as written: it is the honest statement of how exploitable the bot is and how that was measured. `menu` is the bet sizes the buttons offer; `sizing` says, in a sentence or three, that a person may bet any size and the bots play the menu (see "Bet sizes" below). |
+| `GET api/info` | | `{bots: [{id, name, trained, note}], stackBB, smallBlind, bigBlind, menu, sizing}`. `bots` are the opponents on offer, the default first; there may be one. Show the current opponent's `name` and `note` (its style, as written). `menu` is the bet sizes the buttons offer; `sizing` says, in a sentence or three, that a person may bet any size and the bots play the menu (see "Bet sizes" below). |
 | `POST api/new` | `{seat, opponent}`: seat `"sb"`, `"bb"` or `"alternate"` (the default); opponent a bot `id` (default: the first) | a state, with `history` (empty). Starts a session and deals hand 1. |
 | `GET api/state?session=ID[&since=H]` | | a state, with the whole `history`. For a page load. 404: the server does not know the session (it restarted); start a new one. With `since`, `history` is only the hands finished after hand H, at most the latest 200, each with its `events` (as a state's): for a page replaying hands it did not see played. |
 | `POST api/act` | `{session, hand, step, kind, amount}`, or the old form `{session, hand, step, action}` | a state, after your action and every bot action that followed it. `hand` and `step` are the state's own, sent back, so a second click meant for an earlier decision is refused (409). `kind` is `fold`, `check`, `call`, `bet`, `raise` or `allin`; `amount`, for `bet` and `raise`, is any whole number of chips from the state's `legal.minTo` to `legal.maxTo` (see "Bet sizes"). The old form, `action`, a button's `index`, also works; sending both forms is a 400. |
@@ -98,10 +98,7 @@ fractions of the pot after calling), at random, with the pseudo-harmonic
 mapping (Ganzfried and Sandholm, IJCAI 2013); an all-in as all-in. Its
 own bets are played at the same fraction of the real pot, clamped to
 the legal range. If a bet it read as all-in was not one, the bot checks
-or calls for the rest of the hand. **A bot's stated exploitability is
-measured inside its bet menu**: what a perfect opponent who bets only
-the menu's sizes could win. Against any size it can only be higher, so
-those exact numbers are a lower bound on exploitability at this table.
+or calls for the rest of the hand.
 
 Restarts. The server rebuilds every session from the hands file when it
 starts, so a session id stays good across a restart (a new page, a new
@@ -182,7 +179,7 @@ Notes for a page:
 - `mcp/table_browser_check.py` (run by `mcp/test_table_browser.py`) drives the page. It relies on:
   `#actions button.<kind>` (with `data-key`, the shortcut) for the action
   buttons (fold, check, call, bet), `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,
-  `#bot-name`, `#exploitability`, `#opponent` (the selector, shown when
+  `#bot-name`, `#opponent` (the selector, shown when
   more than one bot is on offer), the card sprites `#felt .card` with
   `data-who` (you, bot, board), `data-card` once known and class `down`
   while face down, `#you-stack` / `#bot-stack`, and `window.table`:

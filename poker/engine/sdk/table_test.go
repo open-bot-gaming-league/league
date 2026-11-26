@@ -44,7 +44,7 @@ func tableServer(t *testing.T) string {
 	if err := engine.NewBlueprint(g, engine.UniformStrategy{}).WriteFile(filepath.Join(dir, "uniform.bp")); err != nil {
 		t.Fatal(err)
 	}
-	bots := `[{"id": "uniform", "name": "uniform play (test)", "exploitability": "not measured (test)", "abs": "category", "blueprint": "uniform.bp"}]`
+	bots := `[{"id": "uniform", "name": "uniform play (test)", "note": "plays every legal move at random (test)", "abs": "category", "blueprint": "uniform.bp"}]`
 	if err := os.WriteFile(filepath.Join(dir, "bots.json"), []byte(bots), 0o644); err != nil {
 		t.Fatal(err)
 	}
