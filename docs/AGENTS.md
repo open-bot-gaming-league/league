@@ -89,10 +89,10 @@ it plays their table at full speed while they watch, and they only
 describe how it should play. Say that in a sentence or two, in plain
 words. Then:
 
-- Offer this prompt for them to paste into their coding agent (we
-  recommend and support Claude Code with Claude Opus 5.5 or better; other
-  popular coding agents should work just as well, but we don't test or
-  document them yet):
+- Offer this prompt for them to paste into their coding agent. We
+  recommend and support Claude Code with Claude Opus 5.5 or better. Other
+  popular coding agents should work just as well; we just don't test or
+  document them yet.
 
   > Set up an Open Bot Gaming League poker bot for me: read
   > https://obgl.truemirrorgames.com/docs/SDK.md and follow the "For your

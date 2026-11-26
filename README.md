@@ -14,7 +14,7 @@ When Claude opens the sign-in page, sign in with GitHub or Google.
 
 **Or play in your browser:** https://obgl.truemirrorgames.com/table/ (the same sign-in). Signed in with GitHub or Google in both places, you and Claude share one table: watch Claude play it live in the browser, play any hand yourself (whoever moves first on a decision makes it), and pick the bot and the seat there.
 
-**Play faster: your own bot.** Your coding agent sets it up and writes it (we recommend and support Claude Code with Claude Opus 5.5 or better; other popular coding agents should work too, though we don't test or document them yet); you describe how it should play, and watch it play your table at full speed. No coding needed. [docs/SDK.md](docs/SDK.md) has the one prompt to paste into your coding agent.
+**Play faster: your own bot.** Your coding agent sets it up and writes it; you describe how it should play, and watch it play your table at full speed. No coding needed. We recommend and support Claude Code with Claude Opus 5.5 or better. Other popular coding agents should work just as well; we just don't test or document them yet. [docs/SDK.md](docs/SDK.md) has the one prompt to paste into your coding agent.
 
 **How a hand goes:** you and a house bot each start every hand with 50 big blinds (stacks reset each hand). You act by choosing a legal move: fold, check or call, or a bet or raise of any size up to all-in (the table tells you the range). The house bots bet from a short menu of sizes. Your score is big blinds won per 100 hands.
 
