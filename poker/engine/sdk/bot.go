@@ -82,8 +82,9 @@ type State struct {
 	Rand *rand.Rand
 }
 
-// Legal is the moves open to the seat to act. A bet or raise takes the
-// seat to any whole number of chips in this round from MinTo to MaxTo;
+// Legal is the moves open to the seat to act. Betting is open, with no
+// bet menu: a bet or raise takes the seat to any whole number of chips
+// in this round from MinTo to MaxTo;
 // MaxTo is all-in. When all-in is short of a full minimum raise,
 // MinTo == MaxTo.
 type Legal struct {

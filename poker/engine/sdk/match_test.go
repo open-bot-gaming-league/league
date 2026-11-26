@@ -3,6 +3,8 @@ package sdk
 import (
 	"strings"
 	"testing"
+
+	"github.com/open-bot-gaming-league/league/poker/engine"
 )
 
 // caller checks or calls, always: no randomness.
@@ -181,5 +183,65 @@ func TestMade(t *testing.T) {
 	}
 	if StraightFlush.String() != "a straight flush" || HighCard.String() != "high card" {
 		t.Error("category names out of step with the engine's")
+	}
+}
+
+// oddSizer bets or raises to one chip over the minimum whenever it can
+// (sizes no menu has), and remembers each "to" it asked for.
+type oddSizer struct{ asked []int }
+
+func (o *oddSizer) Act(s State) Action {
+	if s.Legal.CanRaise() && s.Legal.MinTo < s.Legal.MaxTo {
+		o.asked = append(o.asked, s.Legal.MinTo+1)
+		return Action{Kind: Raise, To: s.Legal.MinTo + 1}
+	}
+	return s.CheckOrCall()
+}
+
+// recorder calls, and notes every raise the other seat made, as its
+// States show them.
+type recorder struct{ raises map[[3]int]int }
+
+func (r *recorder) Act(s State) Action {
+	for i, e := range s.History {
+		if e.Seat != s.Seat && e.Kind == Raise {
+			r.raises[[3]int{s.Hand, i, e.Seat}] = e.To
+		}
+	}
+	return s.CheckOrCall()
+}
+
+// Betting is open: any whole "raise to" in [MinTo, MaxTo] is a legal
+// move, played as asked, not rounded to a menu size. MinTo+1 goes
+// through the engine end to end and the other seat sees exactly it;
+// a house bot, which keeps its menu inside, plays against it too.
+func TestOddSizesAreAccepted(t *testing.T) {
+	odd, rec := &oddSizer{}, &recorder{raises: map[[3]int]int{}}
+	if _, err := Match(odd, rec, 400, 1); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[int]int{}
+	for _, to := range rec.raises {
+		seen[to]++
+	}
+	asked := map[int]int{}
+	for _, to := range odd.asked {
+		asked[to]++
+	}
+	if len(odd.asked) < 200 {
+		t.Fatalf("only %d odd raises asked for", len(odd.asked))
+	}
+	// Every odd size the other seat saw was one asked for (raises the
+	// hand ended on, by a fold, are never seen: hence <=).
+	for to, n := range seen {
+		if n > asked[to] {
+			t.Fatalf("the other seat saw a raise to %d %d times; asked for %d times", to, n, asked[to])
+		}
+	}
+	if len(seen) == 0 || seen[201] == 0 { // preflop min-raise from the small blind: 200, so 201
+		t.Fatalf("no raise to 201 seen: %v", seen)
+	}
+	if _, err := Match(&oddSizer{}, testHouse(t, engine.UniformStrategy{}), 400, 2); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -72,8 +72,9 @@ possible). `Legal.CanRaise()` says whether one is.
 (a bet and a raise are the same move). For `Raise`, `To` is the chips
 you will have put in **during this betting round, blinds included**: "raise
 to 300" from the small blind before the flop is `To: 300` (it costs 250
-more). Any whole number from `Legal.MinTo` to `Legal.MaxTo` is legal;
-`MaxTo` is all-in.
+more). Betting is open: any whole number from `Legal.MinTo` to `Legal.MaxTo` is
+legal, with no bet menu; `MaxTo` is all-in. (The house bots keep a menu
+of their own inside and read your sizes onto it; that limits them, not you.)
 
 Helpers on State, each always legal:
 
