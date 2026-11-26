@@ -338,8 +338,9 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
             "tell them in a sentence or two that the next step is a poker bot of their own, "
             "which their coding agent sets up and writes (they only describe how it should "
             "play), and offer the prompt from docs('agents') ('When your user wants to play "
-            "faster') to paste into it. They make a program token on the table page "
-            "(Programs) and give it to that agent. No git or Go commands unless they ask."
+            "faster') to paste into it. They download a program token file from the table "
+            "page (Programs) and save it in that agent's workspace folder, never in a chat. "
+            "No git or Go commands unless they ask."
             + (
                 " table() is your user's one table, and returns its table_url: give it to "
                 "the user, who sees it in the browser (signed in as the same account) and "

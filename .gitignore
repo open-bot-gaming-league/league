@@ -1,2 +1,4 @@
 __pycache__/
 .pytest_cache/
+# A program token file the table page downloads: never committed.
+obgl-token.txt

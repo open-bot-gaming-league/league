@@ -5,15 +5,30 @@
 // poker/engine/sdk/example. Node 22.18+ runs it as is (it strips the types); older:
 // npx tsx call_bot.ts.
 //
-//   export OBGL_TOKEN=obgl_pt_...   # the table page, Programs: Make a token
+// The program token: OBGL_TOKEN, else obgl-token.txt (downloaded from the table
+// page's Programs box) in this folder or the nearest one above it.
+//
 //   node call_bot.ts 10             # play 10 hands; watch them on the table page
+
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 interface Legal { fold: boolean; check: boolean; call?: number; wager?: string; minTo?: number; maxTo?: number }
 interface State { hand: number; step: number; over: boolean; legal?: Legal; net: number; outcome?: string;
   totals: { hands: number; bbPer100: number } }
 
 const TABLE = (process.env.OBGL_TABLE || "https://obgl.truemirrorgames.com/table/").replace(/\/?$/, "/");
-const HEADERS = { Authorization: `Bearer ${process.env.OBGL_TOKEN || ""}`, "Content-Type": "application/json" };
+function findToken(): string {
+  const fromEnv = process.env.OBGL_TOKEN?.trim();
+  if (fromEnv) return fromEnv;
+  for (let d = process.cwd(); ; d = dirname(d)) {
+    if (existsSync(join(d, "obgl-token.txt"))) return readFileSync(join(d, "obgl-token.txt"), "utf8").trim();
+    if (dirname(d) === d) break;
+  }
+  console.error("no program token: set OBGL_TOKEN, or save obgl-token.txt (the table page, side panel, Programs) in this folder or one above it");
+  process.exit(1);
+}
+const HEADERS = { Authorization: `Bearer ${findToken()}`, "Content-Type": "application/json" };
 const sleep = (s: number) => new Promise(r => setTimeout(r, s * 1000));
 
 async function api(method: string, path: string, body?: object): Promise<State> {

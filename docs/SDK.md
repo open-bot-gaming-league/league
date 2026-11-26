@@ -18,12 +18,15 @@ bet big when you have it") is enough to have fun here.
    > https://obgl.truemirrorgames.com/docs/SDK.md and follow the "For your
    > coding agent" section.
 
-2. **Make your program token when it asks.** Sign in at
+2. **Download your token file when it asks, and save it in your coding
+   agent's workspace folder.** Sign in at
    https://obgl.truemirrorgames.com/table/ (GitHub or Google, the same
    account you use with Claude), open the side panel, and under
-   **Programs** make your token. It is shown once: copy it and give it to
-   your coding agent. It lets your bot play your table as you; you can
-   revoke it, or regenerate it for a new one, in the same place.
+   **Programs** make your token: the page downloads it as a file,
+   `obgl-token.txt`. Save that file in the folder your coding agent works
+   in (it may be in your Downloads folder). Don't paste the token into a chat. It lets your bot play your table
+   as you; you can revoke it, or regenerate it for a new file, in the same
+   place.
 3. **Watch your bot play** on the table page, and tell your coding agent
    what to change.
 
@@ -31,7 +34,8 @@ bet big when you have it") is enough to have fun here.
 
 You are setting up a poker bot for your user, who may not read code. Do the
 technical work yourself, keep them in plain words, and ask them about style,
-not syntax.
+not syntax. Before anything else, add `obgl-token.txt` to the workspace's
+`.gitignore` (start one if there is none): that is where the token will be.
 
 1. **Prerequisites.** Go 1.27.3 or newer (as `poker/engine/go.mod` names it;
    `go version` to check) and git. Install what is missing, with the user's
@@ -39,10 +43,12 @@ not syntax.
 2. **Get the code:** `git clone https://github.com/open-bot-gaming-league/league`,
    then work in `league/poker/engine`. Read `sdk/README.md` there first: it
    is the whole API, written for you.
-3. **The token.** Ask your user to make their program token on the table
-   page (side panel, **Programs**) and paste it to you. Keep it out of git
-   and out of anything you share: set it as `OBGL_TOKEN` in the environment
-   you run the bot in.
+3. **The token.** Ask your user to make their program token on the
+   table page (side panel, **Programs**), which downloads it as
+   `obgl-token.txt`, and to save that file in your workspace folder. Don't
+   ask them to paste it into the chat, and never print it, log it or put it
+   in a commit. The SDK finds the file by itself (the current folder or one
+   above it; `OBGL_TOKEN`, if set, comes first).
 4. **Run the example bot at their table:** `go run ./sdk/example -table -hands 50`.
    Tell the user to watch it on https://obgl.truemirrorgames.com/table/:
    the page replays every hand the bot plays.
@@ -62,7 +68,7 @@ When your user asks to play faster, or whether this is costing a lot of
 tokens, tell them in a sentence or two: a bot of their own can play their
 table at full speed, and their coding agent can set it all up and write it
 for them; they only describe how it should play. Give them the prompt from
-"What you do" to paste into their coding agent, and say they will make a
-program token on the table page (side panel, Programs) and give it to that
-agent. You can't run it from here: the bot runs on their computer. Show
+"What you do" to paste into their coding agent, and say they will download
+a token file from the table page (side panel, Programs) and save it in that
+agent's workspace folder, not paste it into a chat. You can't run it from here: the bot runs on their computer. Show
 commands only if they ask.

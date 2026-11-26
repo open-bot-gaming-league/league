@@ -169,3 +169,48 @@ func TestTableStateExample(t *testing.T) {
 		t.Fatalf("\n got %s\nwant %s", got, want)
 	}
 }
+
+// FindToken: OBGL_TOKEN first, then obgl-token.txt here or in the nearest
+// parent that has one, else an error that names both.
+func TestFindToken(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
+	t.Setenv("OBGL_TOKEN", "")
+	if _, err := FindToken(); err == nil || !strings.Contains(err.Error(), "OBGL_TOKEN") || !strings.Contains(err.Error(), TokenFile) {
+		t.Fatalf("no token anywhere: %v", err)
+	}
+	if _, err := TableFromEnv(); err == nil {
+		t.Fatal("TableFromEnv at the league with no token: no error")
+	}
+	if err := os.WriteFile(filepath.Join(root, TokenFile), []byte("obgl_pt_from_root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := FindToken(); err != nil || got != "obgl_pt_from_root" {
+		t.Fatalf("a parent's file: %q, %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a", TokenFile), []byte("  obgl_pt_nearer\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := FindToken(); got != "obgl_pt_nearer" {
+		t.Fatalf("the nearest file first: %q", got)
+	}
+	t.Setenv("OBGL_TOKEN", "obgl_pt_from_env")
+	if got, _ := FindToken(); got != "obgl_pt_from_env" {
+		t.Fatalf("OBGL_TOKEN before any file: %q", got)
+	}
+	tab, err := TableFromEnv()
+	if err != nil || tab.Token != "obgl_pt_from_env" || tab.URL != LeagueTable {
+		t.Fatalf("TableFromEnv: %+v, %v", tab, err)
+	}
+	t.Setenv("OBGL_TOKEN", "")
+	if err := os.WriteFile(filepath.Join(root, "a", TokenFile), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FindToken(); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("an empty file: %v", err)
+	}
+}

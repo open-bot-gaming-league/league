@@ -29,9 +29,11 @@ on stdout ("OK ..." or "FAIL ..."):
     EXPECT <h> <s>   within 2.5 s the page shows hand h at step s (a move someone else made), and settles
     PRESENCE <words> within 5 s the presence line (who is at the table) contains <words>
     TOKEN <label>    in the side panel's Programs box (no token yet: only Make a token), make the token named
-                     <label>: it is shown once, Copy puts it on the clipboard (or selects it with no clipboard),
-                     and the box shows <label> with Regenerate and Revoke, no Make; answer "OK <token>"
-    REGENERATE       Regenerate (confirming): a new token is shown once in place of the old; "OK <token>"
+                     <label>: it downloads as obgl-token.txt (the token and a newline), the box says to save it in
+                     the coding agent's workspace folder, the token as text (opened) Copies to the clipboard (or
+                     selects with no clipboard), and the box shows <label> with Regenerate and Revoke, no Make;
+                     answer "OK <token>"
+    REGENERATE       Regenerate (confirming): a new token file downloads, with a new token; "OK <token>"
     REVOKE           revoke the token (confirming); the box offers Make a token again
     SHOWN <h:n,...>  within 300 s the page has shown each hand h to its end with exactly n moves animated (the
                      moves its record has: no hand and no event skipped), some of them replayed (replay mode
@@ -465,6 +467,15 @@ def copy_works(page, button, code):
     return text
 
 
+def downloaded_token(download):
+    """A token file from the page: obgl-token.txt, the token and a newline, nothing else."""
+    assert download.suggested_filename == "obgl-token.txt", download.suggested_filename
+    with open(download.path()) as f:
+        data = f.read()
+    assert data.startswith("obgl_pt_") and data.endswith("\n") and data.count("\n") == 1, repr(data[:12])
+    return data.strip()
+
+
 def main():
     with sync_playwright() as p:
         chrome = os.environ.get("OBGL_BROWSER_CHROME")
@@ -620,27 +631,29 @@ def main():
                     label = " ".join(cmd[1:])
                     programs = page.locator("#programs")
                     if not programs.evaluate("d => d.open"):
-                        programs.locator("summary").click()
+                        programs.locator(":scope > summary").click()
                     page.wait_for_function("() => !document.getElementById('token-make-row').hidden", timeout=5000)
                     assert page.locator("#token-have").is_hidden(), "a token already shown before one was made"
                     page.locator("#token-label").fill(label)
-                    page.locator("#token-make").click()
+                    with page.expect_download(timeout=5000) as dl:
+                        page.locator("#token-make").click()
+                    token = downloaded_token(dl.value)
                     page.wait_for_function("() => !document.getElementById('token-new').hidden", timeout=5000)
-                    token = page.locator("#token-value").inner_text().strip()
-                    assert token.startswith("obgl_pt_"), token
-                    assert token in page.locator("#token-use").inner_text(), "the lines to use it do not have the token"
+                    assert "workspace folder" in page.locator("#token-new").inner_text()
+                    assert page.locator("#token-value").text_content().strip() == token
                     page.wait_for_function("l => !document.getElementById('token-have').hidden && document.getElementById('token-name').textContent === l", arg=label, timeout=5000)
                     assert page.locator("#token-make-row").is_hidden(), "Make a token is still offered with a token made"
+                    page.locator("#token-show summary").click()  # the token as text, too: secondary
                     assert copy_works(page, "#token-copy", "#token-value") == token
                     assert within_viewport(page, "#token-new"), "the new token is not wholly in view"
                     shot(page, "token")
                     say(f"OK {token}")
                 elif cmd[0] == "REGENERATE":
-                    old = page.locator("#token-value").inner_text().strip()
-                    page.locator("#token-regenerate").click()
-                    page.wait_for_function("o => document.getElementById('token-value').textContent.trim() !== o", arg=old, timeout=5000)
-                    token = page.locator("#token-value").inner_text().strip()
-                    assert token.startswith("obgl_pt_") and token in page.locator("#token-use").inner_text(), token
+                    old = page.locator("#token-value").text_content().strip()
+                    with page.expect_download(timeout=5000) as dl:
+                        page.locator("#token-regenerate").click()
+                    token = downloaded_token(dl.value)
+                    assert token != old and page.locator("#token-value").text_content().strip() == token
                     assert page.locator("#token-have").is_visible() and page.locator("#token-make-row").is_hidden()
                     say(f"OK {token}")
                 elif cmd[0] == "REVOKE":

@@ -147,8 +147,10 @@ Notes for a page:
   `#sign-out`, and the Programs box `#programs`: with no token
   `#token-make-row` (`#token-label`, `#token-make`), with one `#token-have`
   (`#token-name`, `#token-when`, `#token-regenerate`, `#token-revoke`); a
-  token just made or regenerated in `#token-new` (`#token-value`,
-  `#token-copy`, `#token-use`), `#token-error`), and
+  token just made or regenerated is downloaded as `obgl-token.txt` (the
+  token and a newline, made in the page from the answer), with `#token-new`
+  (`#token-download`, and `#token-show` with `#token-value`, `#token-copy`),
+  `#token-error`), and
   `#replay` (shown while replaying: `input[name=rspeed]` 1x, fast, fastest;
   `#behind`; `#jump`, key J). Replaying: the page polls `api/state?since=H`
   and plays each finished hand it has not shown through the same event

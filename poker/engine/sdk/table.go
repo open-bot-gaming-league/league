@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -45,14 +46,57 @@ type Table struct {
 	HTTP *http.Client
 }
 
+// TokenFile is the name of the file a program token is saved in: the
+// table page's Programs box downloads it, and the user saves it in their
+// coding agent's workspace folder.
+const TokenFile = "obgl-token.txt"
+
 // TableFromEnv is the table named by the environment: OBGL_TABLE (the
-// page's address; default LeagueTable) and OBGL_TOKEN.
-func TableFromEnv() *Table {
-	t := &Table{URL: os.Getenv("OBGL_TABLE"), Token: os.Getenv("OBGL_TOKEN")}
+// page's address; default LeagueTable), with the program token from
+// FindToken. At the league a token is required: with none it is an error
+// that says where to make one. A table you run yourself (OBGL_TABLE set)
+// may need none.
+func TableFromEnv() (*Table, error) {
+	t := &Table{URL: os.Getenv("OBGL_TABLE")}
+	token, err := FindToken()
 	if t.URL == "" {
 		t.URL = LeagueTable
+		if err != nil {
+			return nil, err
+		}
 	}
-	return t
+	t.Token = token
+	return t, nil
+}
+
+// FindToken finds the program token: the OBGL_TOKEN environment variable
+// if it is set, else the file obgl-token.txt (TokenFile) in the current
+// directory or the nearest parent that has one. An error, naming both and
+// where to make a token, when there is neither.
+func FindToken() (string, error) {
+	if token := strings.TrimSpace(os.Getenv("OBGL_TOKEN")); token != "" {
+		return token, nil
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		data, err := os.ReadFile(filepath.Join(dir, TokenFile))
+		if err == nil {
+			if token := strings.TrimSpace(string(data)); token != "" {
+				return token, nil
+			}
+			return "", fmt.Errorf("sdk: %s is empty", filepath.Join(dir, TokenFile))
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", errors.New("sdk: no program token: set OBGL_TOKEN, or save " + TokenFile +
+		" (the table page, " + LeagueTable + ", side panel, Programs: Make a token downloads it) in this folder or one above it")
 }
 
 // HandResult is one finished hand at the table.

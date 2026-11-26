@@ -642,9 +642,17 @@ async function showToken() {
   $('token-name').textContent = t.label;
   $('token-when').textContent = `made ${when(t.created_at)} \u00b7 ${t.last_used_at ? 'last used ' + when(t.last_used_at) : 'not used yet'}`;
 }
+// A token just made: a file to save in the coding agent's workspace (made here from the answer, so the token
+// is sent once), downloaded at once, and on the page too until it is left.
+let tokenURL = null;
 function showMade(made) {
+  if (tokenURL) URL.revokeObjectURL(tokenURL);
+  tokenURL = URL.createObjectURL(new Blob([made.token + '\n'], { type: 'text/plain' }));
+  const link = $('token-download');
+  link.href = tokenURL;
+  link.click();
   $('token-value').textContent = made.token;
-  $('token-use').textContent = `export OBGL_TOKEN=${made.token}\ncd poker/engine && go run ./sdk/example -table`;
+  $('token-show').open = false;
   $('token-new').hidden = false; $('token-label').value = '';
 }
 async function tokenStep(fn) {
@@ -661,6 +669,7 @@ $('token-revoke').onclick = () => tokenStep(async () => {
   if (!confirm('Revoke the token? A program using it stops at once.')) return;
   await call('POST', 'api/token/revoke', {});
   $('token-new').hidden = true;
+  if (tokenURL) { URL.revokeObjectURL(tokenURL); tokenURL = null; }
 });
 // Copy: the clipboard where the page may use it; otherwise (plain http, an iframe) select the text, ready for Ctrl+C.
 function copyText(btn, code) {

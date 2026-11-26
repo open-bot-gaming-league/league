@@ -4,13 +4,27 @@ For onboarding only: the league's bots are Go programs (poker/engine/sdk in this
 repository). Once this runs, ask your coding agent to port it to Go, or start from
 poker/engine/sdk/example. Python 3.9+, standard library only.
 
-    export OBGL_TOKEN=obgl_pt_...   # the table page, Programs: Make a token
-    python call_bot.py 10           # play 10 hands; watch them on the table page
+    python call_bot.py 10   # play 10 hands; watch them on the table page
+
+The program token: OBGL_TOKEN, else obgl-token.txt (downloaded from the table
+page's Programs box) in this folder or the nearest one above it.
 """
-import json, os, sys, time, urllib.error, urllib.request
+import json, os, pathlib, sys, time, urllib.error, urllib.request
 
 TABLE = os.environ.get("OBGL_TABLE", "https://obgl.truemirrorgames.com/table/").rstrip("/") + "/"
-HEADERS = {"Authorization": "Bearer " + os.environ.get("OBGL_TOKEN", ""), "Content-Type": "application/json"}
+
+
+def find_token():
+    if os.environ.get("OBGL_TOKEN", "").strip():
+        return os.environ["OBGL_TOKEN"].strip()
+    for d in [pathlib.Path.cwd(), *pathlib.Path.cwd().parents]:
+        if (d / "obgl-token.txt").is_file():
+            return (d / "obgl-token.txt").read_text().strip()
+    sys.exit("no program token: set OBGL_TOKEN, or save obgl-token.txt (the table page, side panel, Programs) "
+             "in this folder or one above it")
+
+
+HEADERS = {"Authorization": "Bearer " + find_token(), "Content-Type": "application/json"}
 
 
 def api(method, path, body=None):

@@ -99,7 +99,9 @@ words. Then:
   > coding agent" section.
 
 - Tell them they will make a **program token** on the table page (side
-  panel, **Programs**) and give it to their coding agent when it asks.
+  panel, **Programs**), which downloads it as a file, and save that file
+  in their coding agent's workspace folder when it asks. Not in a chat:
+  don't ask them to paste it to you either.
 - Learning some coding along the way is welcome, not required.
 
 Don't show them git or Go commands unless they ask: their coding agent

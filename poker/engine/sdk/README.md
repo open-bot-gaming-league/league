@@ -196,26 +196,32 @@ change against the last.
 
 ## Play your table
 
-`sdk.Table` plays your bot at your table on the league's server, over
-the HTTP API the table page uses (`poker/engine/cmd/table/API.md`), so you
-can watch it play in the browser.
+`sdk.Table` plays your bot at your user's table on the league's server,
+over the HTTP API the table page uses (`poker/engine/cmd/table/API.md`),
+so they can watch it play in the browser.
 
-1. Sign in at https://obgl.truemirrorgames.com/table/ (GitHub or Google).
-2. In the side panel, under **Programs**, make your token (one per
-   account; Regenerate there gives you a new one and stops the old). It is
-   shown once: copy it. Anyone with it can play your table; revoke it
-   there when done.
-3. Run your bot with it, and watch the page:
+1. Before anything else, add `obgl-token.txt` to your workspace's
+   `.gitignore`.
+2. Ask your user to sign in at https://obgl.truemirrorgames.com/table/, and
+   in the side panel, under **Programs**, make the token (one per account;
+   Regenerate gives a new one and stops the old). The page downloads it as
+   `obgl-token.txt`: have them save it in your workspace folder. Don't ask
+   them to paste it into the chat, and never print, log or commit it.
+3. Run the bot, and tell them to watch the page:
 
-       export OBGL_TOKEN=obgl_pt_...
        go run ./sdk/example -table -hands 50
 
-`OBGL_TABLE` is the table page's address (default
-`https://obgl.truemirrorgames.com/table/`); the token is sent as
-`Authorization: Bearer`. In code:
+The token is found by `sdk.FindToken`: `OBGL_TOKEN` if set, else
+`obgl-token.txt` in the current folder or the nearest one above it; with
+neither, the error says where to make one. `OBGL_TABLE` is the table
+page's address (default `https://obgl.truemirrorgames.com/table/`); the
+token is sent as `Authorization: Bearer`. In code:
 
 ```go
-t := sdk.TableFromEnv()
+t, err := sdk.TableFromEnv()
+if err != nil {
+	log.Fatal(err) // no token: the message says where to get one
+}
 res, err := t.Play(ctx, myBot{}, 50, 1, func(h sdk.HandResult) { fmt.Println(h.Hand, h.Net, h.Outcome) })
 ```
 

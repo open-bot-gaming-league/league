@@ -3,7 +3,7 @@
 //	go run ./sdk/example                  # 2,000 hands against each starter bot
 //	go run ./sdk/example -vs rock -hands 20000 -seed 7
 //	go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
-//	go run ./sdk/example -table -hands 50  # play your table (OBGL_TABLE, OBGL_TOKEN); watch it in the browser
+//	go run ./sdk/example -table -hands 50  # play your table (token: obgl-token.txt or OBGL_TOKEN); watch it in the browser
 //
 // Run it from poker/engine, the Go module's root.
 package main
@@ -57,12 +57,15 @@ func main() {
 	seed := flag.Uint64("seed", 1, "seed: the same seed plays the same cards and the same random choices")
 	houseBuckets := flag.String("house-buckets", "", "a house bot's bucket file, already on disk (with -house-blueprint)")
 	houseBlueprint := flag.String("house-blueprint", "", "a house bot's blueprint, already on disk (with -house-buckets)")
-	table := flag.Bool("table", false, "play -hands hands at your table instead (OBGL_TABLE, default the league's; OBGL_TOKEN)")
+	table := flag.Bool("table", false, "play -hands hands at your table instead (the token: OBGL_TOKEN, or obgl-token.txt here or above; OBGL_TABLE, default the league's)")
 	flag.Parse()
 	log.SetFlags(0)
 
 	if *table {
-		t := sdk.TableFromEnv()
+		t, err := sdk.TableFromEnv()
+		if err != nil {
+			log.Fatal(err)
+		}
 		res, err := t.Play(context.Background(), myBot{}, *hands, *seed, func(h sdk.HandResult) {
 			fmt.Printf("hand %d: %+d  %s\n", h.Hand, h.Net, h.Outcome)
 		})
