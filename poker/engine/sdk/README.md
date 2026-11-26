@@ -22,6 +22,11 @@ Go 1.27.3 or newer, as go.mod says):
 `sdk/example/main.go` is the file to edit: `myBot.Act` is a bot. Copy
 it, or write your own type with an `Act` method.
 
+The starter bots are teaching bots, each with one obvious leak, so even
+the example bot beats them by a lot (well over +100 bb/100 against
+Station and Maniac). That says little about a bot: measure yours against
+a house bot, or against your previous version.
+
 ## A bot
 
 ```go
