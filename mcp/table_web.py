@@ -322,12 +322,6 @@ class TableWeb:
             raise ApiError(400, "send a JSON object")
         return body
 
-    async def _table(self, fn: Callable[[], dict]) -> dict:
-        try:
-            return await anyio.to_thread.run_sync(fn)
-        except TableError as e:
-            raise ApiError(e.status if e.status in (400, 404, 409) else 502, e.message) from e
-
     async def caller(self, request: Request) -> tuple[str | None, OAuthToken | None, Party | None]:
         """(account, fresh tokens to set or None, party). A request with an
         Authorization header is a program's: its program token, and nothing
