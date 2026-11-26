@@ -56,11 +56,11 @@ def test_stay_on_base_keeps_the_table_check_off_the_issuer(league):
     base, issuer = league
     stayed = _smoke(base, "--sign-in", "github", "--stay-on-base")
     assert stayed.returncode == 0, stayed.stdout + stayed.stderr
-    assert "table    ok: GET /table/api/info -> 200" in stayed.stdout and "watch link" in stayed.stdout, stayed.stdout
+    assert "table    ok: GET /table/api/info -> 200" in stayed.stdout and "program token" in stayed.stdout, stayed.stdout
     assert f"resource {issuer}/mcp" in stayed.stdout, stayed.stdout
     # Without it the browser follows the sign-in to the issuer, where nothing answers.
     followed = _smoke(base, "--sign-in", "github")
-    assert followed.returncode != 0 and "watch link" not in followed.stdout
+    assert followed.returncode != 0 and "program token" not in followed.stdout
 
 
 @pytest.mark.skipif(not _table_up(), reason="no table reachable")

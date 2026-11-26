@@ -14,7 +14,7 @@ venv with mcp==2.3.0). Checks, printing one line each:
            DIR/mcp/oauth_testing.py), used by every mcp step below
   mcp      (with OAuth: only with --sign-in) raw JSON-RPC `initialize` POST to /mcp (shows the protocol version
            and the Mcp-Session-Id header), then, with the MCP client:
-           new_session(turtle), one act() on its first legal action, and (a sha with
+           table(), one act() on its first legal action, and (a sha with
            any-size betting) one off-menu raise by kind and amount, played to the end
   version  GET /version == {"sha": SHA}        (only if --sha)
   docs     GET /docs/AGENTS.md == DIR/docs/AGENTS.md, byte for byte; and GET /docs/privacy
@@ -22,9 +22,8 @@ venv with mcp==2.3.0). Checks, printing one line each:
   table    GET /table/api/info is 200 and lists the bots (public: no sign-in). Then the
            browser table at /table/ (with OAuth: only with --sign-in): a browser
            (a cookie jar) signs in through /table/signin and the sign-in page, gets the page,
-           starts a session, acts, watches it through its watch link (no session id
-           in the answer), and the watch token is refused where a session id acts;
-           without the cookie the API answers 401
+           reads its table, resets it and acts; makes a program token, reads the same
+           table with it, revokes it (then 401); without the cookie the API answers 401
 --sign-in IDP: click that IdP's button ("github") on the sign-in page. Only a server
 wired to a test IdP (mcp/oauth_testing.FakeIdP, as in mcp/test_smoke.py) lets a script
 through it; a real deployment or the local stack (run.sh) has no such IdP, so there the
@@ -157,9 +156,12 @@ async def play(base, token):
     async with _client(base, token) as c:
         rules = payload(await c.call_tool("rules", {}))
         bots = [b["id"] for b in rules["bots"]]
-        st = payload(await c.call_tool("new_session", {"opponent": "turtle", "seat": "alternate"}))
+        st = payload(await c.call_tool("table", {}))
         assert "error" not in st, st
-        print(f"mcp      new_session(turtle): session {st['session']} hand {st['hand']}, bots on offer {bots}")
+        while st["over"]:  # a table someone played before: on to a live decision
+            st = payload(await c.call_tool("next_hand", {}))
+            assert "error" not in st, st
+        print(f"mcp      table(): session {st['session']} hand {st['hand']} ({st['opponent']}), bots on offer {bots}")
         # check/call if offered (so the hand goes on), else whatever is first
         first = next((x for x in st["actions"] if x["kind"] in ("check", "call")), st["actions"][0])
         st2 = payload(await c.call_tool("act", {"action": first["index"]}))
@@ -246,22 +248,35 @@ def table(base, idp, issuer=None):
     print(f"table    {idp} sign-in at /table/: cookies {sorted(c.name for c in jar)}, page {len(page)} bytes")
     status, info = call("GET", "/table/api/info")
     assert status == 200 and info["league"]["account"]["name"], info
+    status, s = call("GET", "/table/api/state")
+    assert status == 200 and s["session"] and "presence" in s, (status, s)
     status, s = call("POST", "/table/api/new", {"seat": "alternate", "opponent": "turtle"})
-    assert status == 200 and s["control"]["yours"], (status, s)
+    assert status == 200 and s["hand"] == 1, (status, s)
+    while s["over"]:
+        status, s = call("POST", "/table/api/next", {"hand": s["hand"]})
+        assert status == 200, (status, s)
     a = next((x for x in s["actions"] if x["kind"] in ("check", "call")), s["actions"][0])
-    status, s2 = call("POST", "/table/api/act", {"session": s["session"], "hand": s["hand"], "step": s["step"], "action": a["index"]})
-    assert status == 200, (status, s2)
-    print(f"table    api/new + api/act({a['kind']}): session {s['session'][:8]}... hand {s2['hand']} step {s['step']} -> {s2['step']}")
-    token = s["control"]["watch"].rsplit("/", 1)[1]
-    status, w = call("GET", f"/table/api/watch?token={token}")
-    assert status == 200 and "session" not in w and (w["hand"], w["step"]) == (s2["hand"], s2["step"]), (status, w)
-    status, refused = call("POST", "/table/api/act", {"session": token, "hand": w["hand"], "step": w["step"], "action": 0})
-    assert status == 404, (status, refused)
-    status, _, _ = get(f"{base}/table/api/watch?token={token}")
+    status, s2 = call("POST", "/table/api/act", {"hand": s["hand"], "step": s["step"], "action": a["index"]})
+    assert status == 200 and s2["presence"]["last"]["name"] == "you", (status, s2)
+    print(f"table    api/state + api/new (reset) + api/act({a['kind']}): session {s['session'][:8]}... hand {s2['hand']} step {s['step']} -> {s2['step']}")
+    # A program token: made by the signed-in page, it plays the same table, then is revoked.
+    status, made = call("POST", "/table/api/tokens", {"label": "smoke"})
+    assert status == 200 and made["token"].startswith("obgl_pt_"), (status, made)
+    prog = urllib.request.Request(base + "/table/api/state", headers={"Authorization": f"Bearer {made['token']}"})
+    with urllib.request.urlopen(prog, timeout=10) as r:
+        ps = json.load(r)
+    assert ps["session"] == s2["session"] and ps["step"] == s2["step"], ps
+    status, _ = call("POST", "/table/api/tokens/revoke", {"id": made["id"]})
+    assert status == 200, status
+    try:
+        urllib.request.urlopen(prog, timeout=10)
+        raise AssertionError("a revoked program token still reads the table")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401, e.code
+    status, _, _ = get(f"{base}/table/api/state")
     assert status == 401, status
-    return True, (f"watch link {s['control']['watch'][:14]}... shows hand {w['hand']} step {w['step']} without the session id; "
-                  "the watch token as a session id: 404; no cookie: 401")
-
+    return True, (f"program token {made['id']} read the same table (hand {ps['hand']} step {ps['step']}), then revoked: 401; "
+                  "no cookie: 401")
 
 def main():
     ap = argparse.ArgumentParser()

@@ -12,7 +12,7 @@ Sign in with GitHub or Google; no separate signup. Add this URL as a custom conn
 
 When Claude opens the sign-in page, sign in with GitHub or Google.
 
-**Or play in your browser:** https://obgl.truemirrorgames.com/table/ (the same sign-in). Signed in with GitHub or Google in both places, you can watch Claude's games live in the browser (Claude gets the link when it starts a session), take over a hand, and hand it back.
+**Or play in your browser:** https://obgl.truemirrorgames.com/table/ (the same sign-in). Signed in with GitHub or Google in both places, you and Claude share one table: watch Claude play it live in the browser, play any hand yourself (whoever moves first on a decision makes it), and pick the bot and the seat there.
 
 **How a hand goes:** you and a house bot each start every hand with 50 big blinds (stacks reset each hand). You act by choosing a legal move: fold, check or call, or a bet or raise of any size up to all-in (the table tells you the range). The house bots bet from a short menu of sizes. Your score is big blinds won per 100 hands.
 

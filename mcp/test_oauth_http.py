@@ -5,7 +5,7 @@ across a server restart. Every test runs with the file store, and again
 with Firestore when FIRESTORE_EMULATOR_HOST names an emulator
 (test_oauth_store.py says how to start one).
 
-The table-touching test (new_session + act) skips itself if the live
+The table-touching tests (table + act) skips itself if the live
 table at localhost:9777/poker/ is not reachable; the rest need no table.
 
     python -m pytest mcp/test_oauth_http.py -q
@@ -26,7 +26,7 @@ from conftest import USER_A, USER_B, league_app
 from oauth.provider import LeagueOAuthProvider
 from oauth.store import FileStore, FirestoreStore
 from table_client import TableClient
-from tables import TableSessions
+from tables import Tables
 
 
 def _table_up() -> bool:
@@ -101,7 +101,6 @@ async def test_sign_in_then_tools(oauth_server):
         _, tok = await ot.sign_in_tokens(base)
         async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
             assert "Bot Poker" in (await mcp.call_tool("docs", {"name": "rules"})).content[0].text
-            assert "new_session" in _payload(await mcp.call_tool("state", {}))["error"]
 
 
 @pytest.mark.asyncio
@@ -111,7 +110,7 @@ async def test_signed_in_agent_plays_a_hand(oauth_server):
     with start():
         _, tok = await ot.sign_in_tokens(base)
         async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
-            state = _payload(await mcp.call_tool("new_session", {}))
+            state = _payload(await mcp.call_tool("table", {}))
             assert state["hand"] == 1, state
             for _ in range(50):
                 if state.get("over"):
@@ -126,10 +125,10 @@ async def test_signed_in_agent_plays_a_hand(oauth_server):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _table_up(), reason="live table not reachable at localhost:9777")
-async def test_new_session_records_its_owner_durably(oauth_server, open_store):
-    """Each table session opened over MCP is recorded against the account
-    that opened it, in the OAuth store, so it outlives the server process;
-    and only that account can read the record."""
+async def test_each_accounts_table_is_recorded_durably(oauth_server, open_store):
+    """The table an agent plays over MCP is its account's, recorded in the
+    OAuth store, so it outlives the server process; each account has its
+    own."""
     base, start, fake = oauth_server
     sessions = {}
     with start():
@@ -137,18 +136,19 @@ async def test_new_session_records_its_owner_durably(oauth_server, open_store):
             fake.userinfo = user
             _, tok = await ot.sign_in_tokens(base)
             async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
-                sessions[who] = (tok["access_token"], _payload(await mcp.call_tool("new_session", {}))["session"])
+                sessions[who] = (tok["access_token"], _payload(await mcp.call_tool("table", {}))["session"])
     # The server is gone; read the store a restarted one would.
     store = open_store()
     provider = LeagueOAuthProvider(store, issuer_url=base, resource_url=f"{base}/mcp")
-    tables = TableSessions(store)
+    tables = Tables(store, TableClient())
     owner = {who: (await provider.load_access_token(tok)).subject for who, (tok, _) in sessions.items()}
     assert owner == {"a": "github:1001", "b": "github:2002"}
     sid_a, sid_b = sessions["a"][1], sessions["b"][1]
-    assert (await tables.table_session_for(sid_a, owner["a"]))["owner"] == owner["a"]
-    assert (await tables.table_session_for(sid_b, owner["b"]))["owner"] == owner["b"]
-    assert await tables.table_session_for(sid_a, owner["b"]) is None
-    assert await tables.table_session_for(sid_b, owner["a"]) is None
+    assert sid_a != sid_b
+    assert await tables.current(owner["a"]) == sid_a and await tables.current(owner["b"]) == sid_b
+    assert (await store.get("table-sessions", sid_a))["owner"] == owner["a"]
+    with pytest.raises(LookupError):
+        await tables.resolve(owner["b"], sid_a)
 
 
 @pytest.mark.asyncio
@@ -203,7 +203,7 @@ async def test_a_standard_mcp_oauth_client_finds_its_own_way(oauth_server):
     with start():
         async with httpx2.AsyncClient(auth=auth, timeout=30) as http:
             async with Client(streamable_http_client(f"{base}/mcp", http_client=http)) as mcp:
-                assert "new_session" in _payload(await mcp.call_tool("state", {}))["error"]
+                assert "Bot Poker" in (await mcp.call_tool("docs", {"name": "rules"})).content[0].text
     assert storage.tokens.access_token.startswith("obgl_at_")
 
 
@@ -234,7 +234,7 @@ async def test_tokens_survive_a_restart(oauth_server):
     # Server stopped; a new process on the same port and the same store.
     with start():
         async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
-            assert "new_session" in _payload(await mcp.call_tool("state", {}))["error"]
+            assert "Bot Poker" in (await mcp.call_tool("docs", {"name": "rules"})).content[0].text
         async with httpx2.AsyncClient() as http:
             r = await ot.refresh(http, base, client, tok["refresh_token"])
             assert r.status_code == 200, r.text

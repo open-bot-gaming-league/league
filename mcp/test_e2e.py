@@ -90,6 +90,9 @@ async def test_three_hands_end_to_end_and_score_matches_table_history():
             assert "error" not in state
             assert state["hand"] == 1
             table_session_id = state["session"]
+            # Without sign-in table() is this connection's session: the one just started.
+            again = _payload(await client_session.call_tool("table", {}))
+            assert again["session"] == table_session_id and (again["hand"], again["step"]) == (state["hand"], state["step"])
 
             hands_completed = 0
             for _ in range(200):  # a generous cap so a stuck test fails, not hangs

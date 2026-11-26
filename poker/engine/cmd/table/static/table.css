@@ -53,7 +53,7 @@ main{display:grid;grid-template-rows:1fr auto;min-height:0;min-width:0;padding:.
 #outcome{font-size:1.15rem;font-weight:700}
 #outcome.won{color:var(--pos)} #outcome.lost{color:var(--neg)}
 #skip{display:none;border-color:var(--glow)}
-body.busy:not(.watching) #skip{display:inline-block}
+body.busy #skip{display:inline-block}
 #cluster{display:flex;flex-direction:column;gap:.45rem;min-width:0}
 #actions{display:grid;grid-template-columns:1fr 1fr 1.35fr;gap:.45rem}
 #actions:empty{display:none}
@@ -95,16 +95,6 @@ kbd{font:700 .7em "Liberation Mono",monospace;background:#0005;border:1px solid 
 #amt span{color:var(--dim);font-size:.9rem}
 
 /* handed to the agent: a prompt to paste into its chat */
-#watch-bar{grid-column:1/-1;justify-self:center;width:100%;max-width:44rem;display:flex;flex-direction:column;gap:.5rem;background:#17222b;border:1px solid #2f4a60;border-radius:.8rem;padding:.7rem .9rem}
-#watch-bar[hidden]{display:none}
-#watch-status{font-size:1.05rem} #watch-status b{color:#9fd0ff}
-#codebox{display:flex;align-items:stretch;background:#0b0e10;border:1px solid #2d3a44;border-radius:.5rem;overflow:hidden}
-#handoff-text{flex:1;font:.95rem/1.4 "Liberation Mono",Menlo,Consolas,monospace;color:#e8eef3;padding:.55rem .7rem;user-select:all;-webkit-user-select:all;white-space:pre-wrap;word-break:break-word;min-width:0}
-#copy{border:0;border-left:1px solid #2d3a44;border-radius:0;background:#2a3a48;font-weight:700;min-width:5.5rem}
-#copy.ok{background:#2e6a45}
-#watch-foot{display:flex;justify-content:space-between;align-items:center;gap:.6rem;font-size:.9rem}
-#take-over{background:#2f5c86;border-color:#4a7aa6;font-size:1.05rem}
-body.watching .play-only,body.watching #status,body.watching #cluster{display:none!important}
 
 /* the side panel */
 #side{background:var(--panel);border-left:1px solid var(--line);padding:.8rem 1rem;display:flex;flex-direction:column;gap:.7rem;min-height:0;overflow:auto;font-size:.95rem}
@@ -115,7 +105,17 @@ body.watching .play-only,body.watching #status,body.watching #cluster{display:no
 #side details p{margin:.35rem 0 0}
 #bot .tag{font-size:.78rem;color:var(--dim);border:1px solid var(--line);border-radius:1rem;padding:.05rem .5rem} #exploitability{color:#fff;font-weight:700}
 #league{display:flex;flex-direction:column;gap:.4rem} #league button{padding:.3rem .7rem}
-#tag-in{background:#2a3a48;border-color:#3f5a70}
+#presence{grid-column:1/-1;justify-self:center;color:#9fd0ff;font-size:.95rem}
+#presence[hidden]{display:none}
+#programs ul{margin:.3rem 0;padding-left:1.1rem} #programs li{margin:.15rem 0}
+#programs .row{display:flex;gap:.4rem;align-items:center} #token-label{flex:1;min-width:0}
+#token-new{display:flex;flex-direction:column;gap:.3rem;background:#17222b;border:1px solid #2f4a60;border-radius:.5rem;padding:.5rem}
+#token-new[hidden]{display:none}
+#token-box{display:flex;align-items:stretch;background:#0b0e10;border:1px solid #2d3a44;border-radius:.5rem;overflow:hidden}
+#token-value,#token-use{flex:1;font:.85rem/1.4 "Liberation Mono",Menlo,Consolas,monospace;color:#e8eef3;padding:.4rem .5rem;user-select:all;-webkit-user-select:all;white-space:pre-wrap;word-break:break-all;min-width:0}
+#token-copy{border:0;border-left:1px solid #2d3a44;border-radius:0;background:#2a3a48;font-weight:700;min-width:5rem}
+#token-copy.ok{background:#2e6a45}
+#token-error{color:#ff9d8f}
 .link{background:none!important;border:0!important;color:#9fd0ff;padding:0 .2rem!important;text-decoration:underline}
 #keys kbd{margin:0 .1em}
 /* the session's score sits on the felt, under the hand number: always in view, whatever the layout of the side panel */

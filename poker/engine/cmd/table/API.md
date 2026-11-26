@@ -128,20 +128,32 @@ Notes for a page:
   options: `#speed=2` (0.5-2), `#rm=1` (reduced motion).
 - Behind the league's MCP server (`mcp/table_web.py`, at `/table/`) the
   same page gets `league` in `api/info` and the server's extra routes
-  (sign-in, `api/watch`, `api/takeover`, `api/tagin`; every state then
-  carries `control`): it signs in and has a Watch mode. Without `league`
-  (this server alone) it is the page described here. The extra ids it
-  uses: `#watch-bar` (`#watch-status`, `#take-over`), `#league`
-  (`#account-name`, `#sign-out`, `#tag-in`), `#you-name`.
+  (sign-in, `api/tokens`; every state then carries `presence`). The table
+  is then the account's one table: `session` is optional in every request
+  (the account's table either way; any other id is 404), `api/new` resets
+  it (a new session, the score from zero), and the user's agent (over MCP)
+  and programs (with a program token, `Authorization: Bearer obgl_pt_...`)
+  play it too: whoever sends the move for a decision first makes it, and
+  the others get 409 (the page reloads the state). Only the page may change
+  the bot or the seat (`api/next` with `seat` or `opponent` from anyone else
+  is 403), reset, or make and revoke tokens. `presence` is `{last: {kind,
+  name, ago, hand} | null, others: [{kind, name, ago}], hands: {"<hand>":
+  [names]}}`: the last move (kind `browser`, `agent` or `program`; name in
+  words: "you", "your agent", "your program “my bot”"; ago in seconds), who
+  else was seen lately, and who moved in each recent hand. A program over
+  20 requests a second gets 429 with `Retry-After`. Without `league` (this
+  server alone) it is the page described here. The extra ids it uses:
+  `#presence` (who is at the table), `#league` (`#account-name`,
+  `#sign-out`, and the Programs box `#programs`: `#token-label`,
+  `#token-make`, `#token-list` with a `button.revoke` per token, `#token-new`
+  with `#token-value`, `#token-copy` and `#token-use`, `#token-error`).
+
 - The page always sends the `{kind, amount}` form of `api/act`. The dock
   has three buttons: Fold, Check or Call, and the wager, `#size-go`
   (`#actions button.fold|check|call|bet`, shortcuts F, C, R), which sends
   `legal.wager` with the amount the sizer shows. The menu's own buttons
   are gone from the page (`actions` is for other clients). The sizer
-  (`#sizer`: the detents `#detents button`, the track `#size-range`, the
-  box `#size-amount`) shows whenever the range has more than one amount.
-  All amounts on the page are in big blinds (the box takes 0.5 bb steps);
-  the server is sent chips, always the amount shown. Three spots have
+  (`#sizer`: the dver is sent chips, always the amount shown. Three spots have
   their own detents and their own remembered size, `localStorage`
   `poker50.size.pre|bet|raise`, kept as a unit, never as chips: preflop
   in multiples of the bet faced (2x 2.5x 3x 4x), a postflop bet in
@@ -157,7 +169,7 @@ Notes for a page:
 - Handed to the agent, the page shows a box with the prompt to paste
   into the agent's chat (`#codebox`, `#handoff-text`) and a Copy button
   (`#copy`; it selects the text when the clipboard is not available).
-- `scripts/table_browser_test.py` drives the page. It relies on:
+- `mcp/table_browser_check.py` (run by `mcp/test_table_browser.py`) drives the page. It relies on:
   `#actions button.<kind>` (with `data-key`, the shortcut) for the action
   buttons (fold, check, call, bet), `#next`, `#outcome`, `#stat-hands`, `#history details.hand`,
   `#bot-name`, `#exploitability`, `#opponent` (the selector, shown when

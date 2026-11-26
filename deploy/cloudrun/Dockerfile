@@ -36,7 +36,7 @@ WORKDIR /app
 # and installs exactly those files or fails.
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
-COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/markdown_lite.py mcp/tables.py mcp/table_web.py ./mcp/
+COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/markdown_lite.py mcp/tables.py mcp/programs.py mcp/table_web.py ./mcp/
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).
 COPY mcp/oauth/ ./mcp/oauth/
 # server.py reads the docs from ../docs and ../README.md relative to its

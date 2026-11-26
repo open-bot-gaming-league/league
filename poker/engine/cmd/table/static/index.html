@@ -51,11 +51,7 @@
       <div id="actions"></div>
       <div id="next-wrap" hidden><button id="next">Next hand <kbd>N</kbd></button></div>
     </div>
-    <div id="watch-bar" hidden>
-      <div id="watch-status"></div>
-      <div id="codebox" hidden><code id="handoff-text"></code><button id="copy" type="button"><span>Copy</span></button></div>
-      <div id="watch-foot"><span id="watch-wait" class="dim"></span><button id="take-over"><span></span><kbd>T</kbd></button></div>
-    </div>
+    <div id="presence" hidden></div>
     <div id="error" role="alert"></div>
   </div>
 </main>
@@ -73,23 +69,34 @@
   <section id="history-wrap"><h2>Hand history</h2><div id="history"></div></section>
   <details id="controls">
     <summary>Table settings</summary>
-    <div class="row play-only">Seat:
+    <div class="row">Seat:
       <label><input type="radio" name="seat" value="alternate" checked> alternate</label>
       <label><input type="radio" name="seat" value="sb"> button</label>
       <label><input type="radio" name="seat" value="bb"> big blind</label>
     </div>
-    <div class="row play-only" id="opp-row" hidden>Opponent <select id="opponent"></select> <span class="dim small">from the next hand</span></div>
+    <div class="row" id="opp-row" hidden>Opponent <select id="opponent"></select> <span class="dim small">from the next hand</span></div>
     <div class="row">
       <label>Speed <input id="speed" type="range" min="0.5" max="2" step="0.25" value="1"> <span id="speedv">1x</span></label>
       <label><input id="rm" type="checkbox"> reduced motion</label>
     </div>
-    <div class="row play-only"><button id="new-session">New session</button></div>
+    <div class="row"><button id="new-session">Reset score</button></div>
   </details>
   <section id="league" hidden>
     <div class="small"><span class="dim">Signed in as</span> <b id="account-name"></b> <button id="sign-out" class="link">Sign out</button></div>
-    <div class="row"><button id="tag-in" hidden>Hand to my agent</button></div>
+    <details id="programs"><summary>Programs</summary>
+      <p class="small dim">A program token lets a program of yours (the Go SDK: <code>OBGL_TOKEN</code>) play this table as you. Anyone with it can play your table: keep it to yourself; revoke it here.</p>
+      <p class="small dim" id="token-none">No tokens yet.</p>
+      <ul id="token-list"></ul>
+      <div class="row"><input id="token-label" type="text" maxlength="40" placeholder="Name it: my bot" aria-label="Token name"><button id="token-make">Make a token</button></div>
+      <div id="token-new" hidden>
+        <div class="small">Your new token. It is shown <b>this once</b>:</div>
+        <div id="token-box"><code id="token-value"></code><button id="token-copy" type="button"><span>Copy</span></button></div>
+        <code id="token-use"></code>
+      </div>
+      <div class="small" id="token-error" role="alert"></div>
+    </details>
   </section>
-  <section id="keys" class="small dim play-only">Keys: <kbd>F</kbd> fold &middot; <kbd>C</kbd> check/call &middot; <kbd>1</kbd>&ndash;<kbd>6</kbd> pick a size &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> &plusmn;0.5 bb (<kbd>Shift</kbd> &plusmn;1) &middot; <kbd>R</kbd> or <kbd>Enter</kbd> bet or raise &middot; <kbd>N</kbd> next hand &middot; <kbd>Esc</kbd> skip the animation</section>
+  <section id="keys" class="small dim">Keys: <kbd>F</kbd> fold &middot; <kbd>C</kbd> check/call &middot; <kbd>1</kbd>&ndash;<kbd>6</kbd> pick a size &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> &plusmn;0.5 bb (<kbd>Shift</kbd> &plusmn;1) &middot; <kbd>R</kbd> or <kbd>Enter</kbd> bet or raise &middot; <kbd>N</kbd> next hand &middot; <kbd>Esc</kbd> skip the animation</section>
 </aside>
 <div id="scrim"></div>
 <div id="asleep" hidden role="alertdialog" aria-labelledby="asleep-title">

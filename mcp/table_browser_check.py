@@ -1,13 +1,14 @@
-"""A headless-browser check of the table's Play and Watch, driven step by
-step by mcp/test_table_browser.py (which runs the server, the fake GitHub
-and the agent, and tells this script what to expect). Not shipped.
+"""A headless-browser check of the table page, driven step by step by
+mcp/test_table_browser.py (which runs the server, the fake GitHub, the
+agent and a program, and tells this script what to expect). Not shipped.
 
-    <python with playwright> table_browser_check.py <base URL> <watch URL> [shot dir]
+    <python with playwright> table_browser_check.py <base URL> [shot dir]
 
 Reads commands from stdin, one per line, and answers each with one line
 on stdout ("OK ..." or "FAIL ..."):
 
-    PLAY             sign in at /table/ (GitHub), play one hand by clicking, check the history
+    PLAY             sign in at /table/ (GitHub): the account's table; its score is the server's; play one hand
+                     by clicking, check the score counts it and the history has it
     SIZER            at 1280 wide, on a decision with a range of sizes: the detents are the spot's (Min, its sizes
                      as the model prices them, All-in), evenly spaced on the track; a detent button, a slider
                      near a detent (snap) and between two (free, 0.5 bb steps), the bb box (typed, rounded to
@@ -21,24 +22,23 @@ on stdout ("OK ..." or "FAIL ..."):
     RAISE            at phone width (390): the dock fits, nothing scrolls sideways, the drawer opens and closes
                      (button, scrim, H), your cards stay above the dock; then price a size from the state, type
                      it into the box in bb, and bet it; the table's log shows that many chips; "OK <chips>"
-    WATCH            open the watch link; the table shows the agent's session, no action buttons or slider
-    SCORE            the session's running score on the felt (hands, net bb, bb/100) equals the server's
+    STATE            "OK <hand> <step>": where the page's table is, once settled
+    SCORE            the table's running score on the felt (hands, net bb, bb/100) equals the server's
                      totals for the hands finished; answer "OK <hands> <net bb>"
     CATCHUP <h> <s>  the page (busy with a backlog of moves) gets to hand h at step s and settles, within 40 s
-    EXPECT <h> <s>   within 2 s the page shows hand h at step s, and the table settles
-    TAKEOVER         click Take over: action buttons appear; click one; answer "OK <hand> <step>"
-    TAGIN            click Hand to my agent: the page drops to Watch and shows the copy box (the prompt names
-                     the tools; Copy puts it on the clipboard, or selects it when there is none); the same at
-                     phone width, with nothing scrolling sideways
-    PROMPT <word>... words (the agent's tool names and their arguments, from the server's own tool list)
-                     the hand-off prompt must contain
-    UNSIGNED         in a fresh browser (no cookies) open the watch link: it goes to sign-in; sign in
-                     (GitHub); it lands on THAT watch link, showing the watched session (not a new one)
-    SLEEPER <s>      a second page on the watch link, told to sleep after <s> idle seconds (#idle=<s>);
-                     it counts its /table/api/watch requests from here on
+    EXPECT <h> <s>   within 2.5 s the page shows hand h at step s (a move someone else made), and settles
+    PRESENCE <words> within 5 s the presence line (who is at the table) contains <words>
+    TOKEN <label>    in the side panel's Programs box, make a token named <label>: it is shown once, Copy puts
+                     it on the clipboard (or selects it with no clipboard), and the list has <label>;
+                     answer "OK <token>"
+    REVOKE <label>   revoke the token named <label> (confirming); the list no longer has it
+    OLDLINK          in a fresh browser (no cookies) open an old watch link (/table/watch/<anything>): sign
+                     in (GitHub); it lands on /table/, the account's table; "OK <hand> <step>"
+    SLEEPER <s>      a second page on the table, told to sleep after <s> idle seconds (#idle=<s>);
+                     it counts its /table/api/state requests from here on
     AWAKE            the sleeper has not paused, and its polling goes on
     ASLEEP           within 15 s the sleeper puts up the pause screen (Resume), then makes no
-                     /table/api/watch request for 4 s
+                     /table/api/state request for 4 s
     HIDE / SHOW      the sleeper's tab goes to the background (Page Visibility) / comes back: it pauses
                      at once and stays paused (and quiet) when shown again until Resume
     RESUME <h> <s>   click Resume: one request at once, then the polling goes on; the pause screen is gone;
@@ -55,11 +55,10 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-BASE, WATCH = sys.argv[1].rstrip("/"), sys.argv[2]
-SHOTS = sys.argv[3] if len(sys.argv) > 3 else None
+BASE = sys.argv[1].rstrip("/")
+SHOTS = sys.argv[2] if len(sys.argv) > 2 else None
 SETTLE = 20000  # ms: a whole all-in run-out at 1x is ~6 s
 problems = []
-PROMPT_WORDS = []
 
 
 def say(line):
@@ -99,15 +98,15 @@ def score_on_page(page):
 
 
 class Sleeper:
-    """A watching page that counts the requests it makes to the watch API."""
+    """A second page on the table that counts the requests it makes for the table's state."""
 
     def __init__(self, browser, seconds):
         self.page = browser.new_context(viewport={"width": 1600, "height": 900}).new_page()
         self.requests = []
-        self.page.on("request", lambda r: self.requests.append(time.monotonic()) if "/table/api/watch" in r.url else None)
+        self.page.on("request", lambda r: self.requests.append(time.monotonic()) if "/table/api/state" in r.url else None)
         self.page.on("pageerror", lambda e: problems.append(f"page error: {e}"))
         self.sign_in()
-        self.page.goto(f"{WATCH}#idle={seconds}")
+        self.page.goto(f"{BASE}/table/?sleeper#idle={seconds}")  # (a new query: a page load, not only a new hash)
         settle(self.page)
 
     def sign_in(self):
@@ -119,13 +118,13 @@ class Sleeper:
     asleep = property(lambda self: self.page.evaluate("() => window.table.asleep"))
 
     def quiet_for(self, seconds):
-        """No watch request for `seconds`."""
+        """No state request for `seconds`."""
         n = len(self.requests)
         self.page.wait_for_timeout(seconds * 1000)  # (not time.sleep: playwright delivers events only inside its own calls)
-        assert len(self.requests) == n, f"{len(self.requests) - n} watch requests while paused"
+        assert len(self.requests) == n, f"{len(self.requests) - n} state requests while paused"
 
     def polling(self):
-        """At least 2 more watch requests within 10 s (the table does not poll while it animates a move)."""
+        """At least 2 more state requests within 10 s (the table does not poll while it animates a move)."""
         settle(self.page)
         n = len(self.requests)
         deadline = time.monotonic() + 10
@@ -444,28 +443,24 @@ def faster(page):
     settle(page)
 
 
-def check_prompt(page, words):
-    text = page.locator("#handoff-text").inner_text().strip()
-    for word in words:
-        assert word in text, f"the hand-off prompt lacks {word!r}: {text!r}"
-    return text
-
-
-def check_copy_box(page, words):
-    """The hand-off box: the prompt, a Copy button that fills the clipboard, and, with no clipboard, selects the text."""
-    assert page.locator("#codebox").is_visible() and page.locator("#copy").is_visible(), "no copy box on the hand-off"
-    text = check_prompt(page, words)
+def copy_works(page, button, code):
+    """A Copy button: it fills the clipboard and, with no clipboard, selects the text."""
+    text = page.locator(code).inner_text().strip()
     page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=BASE)
-    page.locator("#copy").click()
-    page.wait_for_function("() => document.querySelector('#copy span').textContent === 'Copied'", timeout=3000)
-    assert page.evaluate("() => navigator.clipboard.readText()") == text, "Copy did not put the prompt on the clipboard"
-    page.wait_for_function("() => document.querySelector('#copy span').textContent === 'Copy'", timeout=4000)
+    page.locator(button).click()
+    page.wait_for_function("b => document.querySelector(b + ' span').textContent === 'Copied'", arg=button, timeout=3000)
+    assert page.evaluate("() => navigator.clipboard.readText()") == text, "Copy did not put the text on the clipboard"
+    page.wait_for_function("b => document.querySelector(b + ' span').textContent === 'Copy'", arg=button, timeout=4000)
     page.evaluate("() => Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })")   # as on plain http
     page.evaluate("() => getSelection().removeAllRanges()")
-    page.locator("#copy").click()
-    assert page.evaluate("() => getSelection().toString().trim()") == text, "with no clipboard, Copy did not select the prompt"
-    page.wait_for_function("() => document.querySelector('#copy span').textContent === 'Copy'", timeout=4000)
+    page.locator(button).click()
+    assert page.evaluate("() => getSelection().toString().trim()") == text, "with no clipboard, Copy did not select the text"
+    page.wait_for_function("b => document.querySelector(b + ' span').textContent === 'Copy'", arg=button, timeout=4000)
     return text
+
+
+def token_labels(page):
+    return page.evaluate("() => [...document.querySelectorAll('#token-list li b')].map(b => b.textContent)")
 
 
 def main():
@@ -475,6 +470,7 @@ def main():
         page = browser.new_context(viewport={"width": 1600, "height": 900}).new_page()
         page.on("console", lambda m: problems.append(f"console {m.type}: {m.text}") if m.type in ("error", "warning") else None)
         page.on("pageerror", lambda e: problems.append(f"page error: {e}"))
+        page.on("dialog", lambda d: d.accept())   # the page confirms a revoke and a reset
         for line in sys.stdin:
             cmd = line.split()
             if not cmd:
@@ -486,10 +482,9 @@ def main():
                     page.wait_for_url(BASE + "/table/")
                     settle(page)
                     assert page.locator("#league").is_visible() and page.locator("#account-name").inner_text() == "alice"
-                    assert page.locator("#watch-bar").is_hidden()
-                    assert score_on_page(page) == (0, 0.0, None), "a new session does not start at 0 hands, 0 bb"
+                    before = check_score(page)[0]
                     hand = play_hand(page)
-                    assert check_score(page)[0] == 1, "the score did not count the hand just played"
+                    assert check_score(page)[0] == before + 1, "the score did not count the hand just played"
                     outcome = check_outcome(page)
                     tall = page.viewport_size
                     page.set_viewport_size({"width": 900, "height": 1100})  # the side panel goes under the felt
@@ -587,17 +582,8 @@ def main():
                         page.set_viewport_size(size)
                     settle(page)
                     say(f"OK {amount}")
-                elif cmd[0] == "WATCH":
-                    page.goto(WATCH)
+                elif cmd[0] == "STATE":
                     settle(page)
-                    assert page.locator("#watch-bar").is_visible(), "no watch bar"
-                    assert page.locator("#actions button").count() == 0, "action buttons while watching"
-                    assert page.locator("#sizer").is_hidden(), "the bet slider while watching"
-                    assert page.locator("#you-name").inner_text() == "Your agent"
-                    assert page.evaluate("() => window.table.st.session") is None, "a watcher holds the session id"
-                    down = page.evaluate("() => [...document.querySelectorAll('#felt .card[data-who=bot]')].every(c => c.classList.contains('down'))")
-                    assert down or page.evaluate("() => window.table.st.over"), "the bot's cards are showing"
-                    shot(page, "watch")
                     st = page.evaluate("() => [window.table.st.hand, window.table.st.step]")
                     say(f"OK {st[0]} {st[1]}")
                 elif cmd[0] == "SCORE":
@@ -622,54 +608,45 @@ def main():
                     seen = time.monotonic() - start
                     settle(page)
                     say(f"OK seen in {seen:.2f}s")
-                elif cmd[0] == "TAKEOVER":
-                    page.locator("#take-over").click()
-                    page.wait_for_function("() => document.querySelectorAll('#actions button').length > 0 && window.table.settled()", timeout=5000)
-                    assert page.locator("#watch-bar").is_hidden() and page.url == BASE + "/table/"
-                    assert page.locator("#you-name").inner_text() == "You"
-                    page.locator("#actions button.check, #actions button.call").first.click()
-                    settle(page)
-                    st = page.evaluate("() => [window.table.st.hand, window.table.st.step, window.table.st.over]")
-                    for _ in range(10):  # the click ended the hand (or the bot folded the next): deal on until there is a decision to hand over
-                        if not st[2]:
-                            break
-                        page.locator("#next").click()
-                        settle(page)
-                        st = page.evaluate("() => [window.table.st.hand, window.table.st.step, window.table.st.over]")
-                    shot(page, "taken-over")
-                    say(f"OK {st[0]} {st[1]}")
-                elif cmd[0] == "PROMPT":
-                    PROMPT_WORDS[:] = cmd[1:]
-                    say("OK " + " ".join(PROMPT_WORDS))
-                elif cmd[0] == "TAGIN":
-                    size = page.viewport_size
-                    page.set_viewport_size({"width": 1280, "height": 720})
-                    page.locator("#tag-in").click()
-                    page.wait_for_function("() => !document.getElementById('watch-bar').hidden", timeout=5000)
-                    assert "/table/watch/" in page.url and page.locator("#actions button").count() == 0
-                    assert "Handed to your agent" in page.locator("#watch-status").inner_text()
-                    assert PROMPT_WORDS, "the test did not say what the prompt must contain (PROMPT)"
-                    check_copy_box(page, PROMPT_WORDS)
-                    shot(page, "a-1280-agent")
-                    page.set_viewport_size(PHONE)
-                    no_sideways_scroll(page)
-                    assert within_viewport(page, "#watch-bar, #codebox, #copy, #take-over"), "the hand-off box does not fit the phone's screen"
-                    shot(page, "a-390-agent")
-                    page.set_viewport_size(size)
-                    shot(page, "tagged-in")
-                    say("OK tagged in")
-                elif cmd[0] == "UNSIGNED":
+                elif cmd[0] == "PRESENCE":
+                    words = " ".join(cmd[1:])
+                    page.wait_for_function("w => !document.getElementById('presence').hidden && document.getElementById('presence').textContent.includes(w)",
+                                           arg=words, timeout=5000)
+                    shot(page, "presence")
+                    say("OK " + page.locator("#presence").inner_text())
+                elif cmd[0] == "TOKEN":
+                    label = " ".join(cmd[1:])
+                    programs = page.locator("#programs")
+                    if not programs.evaluate("d => d.open"):
+                        programs.locator("summary").click()
+                    page.wait_for_function("() => !document.getElementById('token-none').hidden || document.querySelectorAll('#token-list li').length", timeout=5000)
+                    page.locator("#token-label").fill(label)
+                    page.locator("#token-make").click()
+                    page.wait_for_function("() => !document.getElementById('token-new').hidden", timeout=5000)
+                    token = page.locator("#token-value").inner_text().strip()
+                    assert token.startswith("obgl_pt_"), token
+                    assert token in page.locator("#token-use").inner_text(), "the lines to use it do not have the token"
+                    page.wait_for_function("l => [...document.querySelectorAll('#token-list li b')].some(b => b.textContent === l)", arg=label, timeout=5000)
+                    assert copy_works(page, "#token-copy", "#token-value") == token
+                    assert within_viewport(page, "#token-new"), "the new token is not wholly in view"
+                    shot(page, "token")
+                    say(f"OK {token}")
+                elif cmd[0] == "REVOKE":
+                    label = " ".join(cmd[1:])
+                    n = len(token_labels(page))
+                    page.locator("#token-list li", has_text=label).locator("button.revoke").click()
+                    page.wait_for_function("n => document.querySelectorAll('#token-list li').length === n - 1", arg=n, timeout=5000)
+                    assert label not in token_labels(page)
+                    say("OK revoked")
+                elif cmd[0] == "OLDLINK":
                     fresh = browser.new_context(viewport={"width": 1600, "height": 900}).new_page()
                     fresh.on("pageerror", lambda e: problems.append(f"page error: {e}"))
-                    fresh.goto(WATCH)
-                    assert fresh.url.startswith(BASE + "/login"), f"an unsigned watch link went to {fresh.url}"
+                    fresh.goto(BASE + "/table/watch/an-old-watch-token")
+                    assert fresh.url.startswith(BASE + "/login"), f"an unsigned old watch link went to {fresh.url}"
                     fresh.get_by_role("button", name="Continue with GitHub").click()  # the fake GitHub approves
-                    fresh.wait_for_url(WATCH)
+                    fresh.wait_for_url(BASE + "/table/")
                     settle(fresh)
-                    assert fresh.locator("#watch-bar").is_visible(), "signed in, but not on the watched session"
-                    assert fresh.locator("#actions button").count() == 0, "action buttons while watching"
-                    assert fresh.evaluate("() => window.table.st.session") is None, "a watcher holds the session id"
-                    shot(fresh, "unsigned-watch")
+                    shot(fresh, "old-link")
                     st = fresh.evaluate("() => [window.table.st.hand, window.table.st.step]")
                     fresh.context.close()
                     say(f"OK {st[0]} {st[1]}")

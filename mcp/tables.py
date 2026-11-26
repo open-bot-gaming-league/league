@@ -1,79 +1,69 @@
-"""Who owns a table session and who is playing it: the record behind the
-browser table's Play and Watch (table_web.py) and the MCP tools'
-control checks (server.py).
+"""Each account's one table, and who is at it: the record behind the
+browser table (table_web.py), the MCP tools (server.py) and programs with
+a token (programs.py).
 
-A *table session* is the Go table's session (cmd/table/API.md): one
-stranger's run of hands against a bot. The Go table knows nothing about
-accounts; this module is where a session gets an owner and a controller.
+A *table session* is the Go table's session (cmd/table/API.md): a run of
+hands against a bot with its running score. The Go table knows nothing
+about accounts; this module gives each account exactly one table, its
+newest table session:
 
-    owner       the signed-in account that opened it ("github:<id>",
-                "google:<sub>"), through the connector
-                (new_session) or the browser table (api/new). Fixed.
-    controller  who may act in it right now, exactly one of:
-                  browser          the owner, in the browser table (any tab)
-                  agent <conn>     the owner's agent on one MCP connection
-                  agent (waiting)  handed to the owner's agent, not claimed yet
-                Everyone else -- the owner's other agents, a browser
-                while an agent plays -- may only read.
-    watch       the session's watch token: what a watch link carries
-                (/table/watch/<token>). It names the session for reading
-                only, and only the owner can read through it. It is never
-                the table session id, so a leaked watch link cannot act.
-    switches    every change of controller: when (`at`), at which hand and
-                step, from and to (browser | agent | unclaimed), and `by`
-                (browser | agent: who asked). Shown in the browser's hand history and
-                returned by the my_sessions() tool.
-
-Every read is owner-scoped (table_session_for, by_watch, list_for): another
-account's session looks exactly like one that does not exist, so a page
-can only answer 404 for both. The controller does not change the pending
-decision: the table state is the session's, so whoever takes over next
-sees the same hand and step and makes that decision.
-
-Records live in the OAuth store (oauth/store.py), so they survive a
-restart with a durable store, as the tokens that name their owners do:
-
-    table-sessions   table session id -> {owner, created_at, watch,
-                     controller: {kind, agent}, switches: [...]}
-    watch-tokens     sha256(watch token) -> {session}
     account-tables   account id -> {sessions: [table session ids, newest first]}
+    table-sessions   table session id -> {owner, created_at}
 
-Not stored: `lock(session)` serialises a control check with the action
-it guards (one process: Cloud Run runs at most one instance, see
-deploy/cloudrun/CLOUDRUN.md), and `observe()` keeps each session's last
-finished-hand state, so a watcher who polled past the end of a hand can
-still be shown how it ended (table_web.py, api/watch).
+The table is made the first time anything asks for it (ensure), and
+replaced only by a reset (the browser's "Reset score": a new table
+session, the score from zero). Older sessions stay on record but are no
+longer anyone's table. An account from before one-table-per-login gets
+its newest session as its table, as it stands.
+
+Who may play it: the owner, in any of three ways -- the browser, the
+owner's agent (on any MCP connection), a program with one of the owner's
+tokens -- and whoever acts first on the pending decision makes it. There
+is no controller to hand over: the Go table refuses a move meant for a
+decision that has already been made (409, a stale hand or step), and
+`lock(session)` serialises the moves made through this server with the
+bookkeeping around them.
+
+Who is at the table (`presence`): the last move (who, when, at which
+hand and step), when the agent and each program were last seen, and who
+made the moves of each recent hand. Kept in memory only (Cloud Run runs
+one instance: deploy/cloudrun/CLOUDRUN.md), so a program moving many
+times a second costs no store writes; a restart forgets it, and the page
+just stops saying who moved last.
+
+Not stored either: `observe()` keeps each session's last finished-hand
+state, so a page that polled past the end of a hand can still be shown
+how it ended (table_web.py, api/state).
 """
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import anyio
+import anyio.to_thread
 
-from oauth.store import AuthStore, Record
+from oauth.store import AuthStore
+from table_client import TableClient, TableError
 
 BROWSER = "browser"
 AGENT = "agent"
+PROGRAM = "program"
 LIST_LIMIT = 20  # sessions remembered per account (newest first); older ones drop off the list
-
-
-def _hash(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
+HANDS_KEPT = 50  # recent hands whose players presence remembers
 
 
 @dataclass(frozen=True)
 class Party:
-    """Who is asking to act: the browser (the owner, signed in at the table)
-    or the agent on one MCP connection (`conn`: server.py's per-connection
-    key)."""
+    """Who is asking: the owner in the browser, the owner's agent on one
+    MCP connection (`key`: server.py's per-connection key), or a program
+    (`key`: its token id, `label`: what the owner called it)."""
 
     kind: str
-    conn: str | None = None
+    key: str | None = None
+    label: str | None = None
 
     @classmethod
     def browser(cls) -> Party:
@@ -83,149 +73,136 @@ class Party:
     def agent(cls, conn: str) -> Party:
         return cls(AGENT, conn)
 
-    def as_controller(self) -> dict:
-        return {"kind": self.kind, "agent": self.conn}
+    @classmethod
+    def program(cls, token_id: str, label: str) -> Party:
+        return cls(PROGRAM, token_id, label)
+
+    @property
+    def name(self) -> str:
+        """In words, for the owner: "you", "your agent", "your program
+        “my bot”"."""
+        if self.kind == BROWSER:
+            return "you"
+        if self.kind == AGENT:
+            return "your agent"
+        return f"your program \u201c{self.label}\u201d"
 
 
-class NotInControl(Exception):
-    """The session is the caller's owner's, but someone else is playing it.
-    `record` is the session record, for saying who."""
-
-    def __init__(self, message: str, record: Record):
-        super().__init__(message)
-        self.record = record
-
-
-def controller_name(controller: dict) -> str:
-    """The controller in words, from the owner's point of view."""
-    if controller["kind"] == BROWSER:
-        return "you, in the browser"
-    if controller.get("agent") is None:
-        return "your agent (waiting for it to claim the session)"
-    return "your agent"
-
-
-def _label(controller: dict) -> str:
-    """A controller in a switch record: browser, agent, or unclaimed (handed
-    to the owner's agent, none has claimed it yet)."""
-    if controller["kind"] == AGENT and controller.get("agent") is None:
-        return "unclaimed"
-    return controller["kind"]
-
-
-def is_controller(record: Record, party: Party) -> bool:
-    c = record["controller"]
-    return c["kind"] == party.kind and (party.kind == BROWSER or c.get("agent") == party.conn)
-
-
-class TableSessions:
-    def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time) -> None:
+class Tables:
+    def __init__(self, store: AuthStore, client: TableClient, clock: Callable[[], float] = time.time) -> None:
         self.store = store
+        self.client = client
         self.clock = clock
         self._locks: dict[str, anyio.Lock] = {}
         self._finals: dict[str, dict] = {}  # session -> {hand number: that hand's final state}
+        self._last: dict[str, dict] = {}  # session -> the last move: {kind, name, at, hand, step}
+        self._seen: dict[str, dict[tuple[str, str | None], tuple[Party, float]]] = {}  # session -> party -> (party, when)
+        self._hands: dict[str, dict[int, list[str]]] = {}  # session -> hand -> who moved in it, in order
 
-    # ---- records ----------------------------------------------------------
+    # ---- the table -----------------------------------------------------------
 
-    async def create(self, session_id: str, owner: str, controller: Party) -> Record:
-        """File a new table session: owner, first controller, a fresh watch
-        token, and its place at the top of the owner's list."""
-        watch = secrets.token_urlsafe(24)
-        record = {
-            "owner": owner,
-            "created_at": int(self.clock()),
-            "watch": watch,
-            "controller": controller.as_controller(),
-            "switches": [],
-        }
-        await self.store.put("table-sessions", session_id, record)
-        await self.store.put("watch-tokens", _hash(watch), {"session": session_id})
-        index = await self.store.get("account-tables", owner) or {"sessions": []}
-        index["sessions"] = [session_id, *[s for s in index["sessions"] if s != session_id]][:LIST_LIMIT]
-        await self.store.put("account-tables", owner, index)
-        return record
-
-    async def table_session_for(self, session_id: str, account: str) -> Record | None:
-        """The record, only if `account` owns the session. There is
-        deliberately no owner-blind read: another account's session looks
-        the same as a session that does not exist."""
-        record = await self.store.get("table-sessions", session_id)
-        if record is None or record["owner"] != account:
-            return None
-        return record
-
-    async def by_watch(self, token: str, account: str) -> tuple[str, Record] | None:
-        """(session id, record) for a watch token, only for the owner."""
-        entry = await self.store.get("watch-tokens", _hash(token)) if token else None
-        if entry is None:
-            return None
-        record = await self.table_session_for(entry["session"], account)
-        return (entry["session"], record) if record is not None else None
-
-    async def list_for(self, account: str) -> list[tuple[str, Record]]:
-        """The account's sessions, newest first."""
-        index = await self.store.get("account-tables", account) or {"sessions": []}
-        out = []
-        for session_id in index["sessions"]:
-            record = await self.table_session_for(session_id, account)
-            if record is not None:
-                out.append((session_id, record))
-        return out
-
-    # ---- control ------------------------------------------------------------
-
-    def lock(self, session_id: str) -> anyio.Lock:
-        """Hold this across a control check and the action it allows (or a
-        switch), so a switch cannot land between the two."""
-        lock = self._locks.get(session_id)
+    def lock(self, key: str) -> anyio.Lock:
+        """Hold this across a step and its bookkeeping (key: a table session
+        id), or across making an account's table (key: "account:<id>")."""
+        lock = self._locks.get(key)
         if lock is None:
-            lock = self._locks[session_id] = anyio.Lock()
+            lock = self._locks[key] = anyio.Lock()
         return lock
 
-    async def require_control(self, session_id: str, account: str, party: Party) -> Record:
-        """The record if `party` may act now. LookupError: no such session
-        for this account. NotInControl: the owner's, but someone else is
-        playing it."""
-        record = await self.table_session_for(session_id, account)
-        if record is None:
-            raise LookupError("no such session")
-        if not is_controller(record, party):
-            raise NotInControl(f"{controller_name(record['controller'])} is playing this session", record)
-        return record
+    async def current(self, account: str) -> str | None:
+        """The account's table session id, or None before it has one."""
+        index = await self.store.get("account-tables", account) or {"sessions": []}
+        return index["sessions"][0] if index["sessions"] else None
 
-    async def switch(
-        self, session_id: str, account: str, to: Party, *, hand: int, step: int, by: Party | None = None
-    ) -> Record:
-        """Make `to` the controller (hold lock(session_id)), and log it.
-        `by`: who asked, when not `to` itself (the browser tagging its agent
-        in). A switch to whoever already controls is not logged. The
-        decision pending at `hand`/`step` is the new controller's."""
-        record = await self.table_session_for(session_id, account)
-        if record is None:
-            raise LookupError("no such session")
-        new = to.as_controller()
-        if record["controller"] != new:
-            record["switches"].append(
-                {
-                    "at": int(self.clock()),
-                    "hand": hand,
-                    "step": step,
-                    "from": _label(record["controller"]),
-                    "to": _label(new),
-                    "by": (by or to).kind,
-                }
-            )
-            record["controller"] = new
-            await self.store.put("table-sessions", session_id, record)
-        return record
+    async def ensure(self, account: str) -> tuple[str, dict]:
+        """(table session id, its state): the account's table, made if it
+        has none, or if the Go table no longer knows it (a session with no
+        finished hand does not survive a table restart)."""
+        async with self.lock("account:" + account):
+            session_id = await self.current(account)
+            if session_id is not None:
+                try:
+                    return session_id, await anyio.to_thread.run_sync(lambda: self.client.state(session_id))
+                except TableError as e:
+                    if e.status != 404:
+                        raise
+            return await self._new(account, seat="alternate", opponent=None)
 
-    # ---- finished hands, for watchers --------------------------------------
+    async def reset(self, account: str, seat: str, opponent: str | None) -> tuple[str, dict]:
+        """A new table for the account: a new table session, hand 1, the
+        score from zero, with these settings."""
+        async with self.lock("account:" + account):
+            return await self._new(account, seat=seat, opponent=opponent)
+
+    async def _new(self, account: str, seat: str, opponent: str | None) -> tuple[str, dict]:
+        state = await anyio.to_thread.run_sync(lambda: self.client.new(seat=seat, opponent=opponent))
+        session_id = state["session"]
+        await self.store.put("table-sessions", session_id, {"owner": account, "created_at": int(self.clock())})
+        index = await self.store.get("account-tables", account) or {"sessions": []}
+        index["sessions"] = [session_id, *[s for s in index["sessions"] if s != session_id]][:LIST_LIMIT]
+        await self.store.put("account-tables", account, index)
+        self.observe(session_id, state)
+        return session_id, state
+
+    async def resolve(self, account: str, session_id: object) -> str:
+        """The table a request means: the account's own, named or not.
+        LookupError for any other session id (another account's, an old one
+        of this account's, one that does not exist: all alike) and when the
+        account has no table yet."""
+        current = await self.current(account)
+        if current is None or (session_id not in (None, "") and session_id != current):
+            raise LookupError("no such session")
+        return current
+
+    # ---- who is at the table -------------------------------------------------
+
+    def moved(self, session_id: str, party: Party, before: dict) -> None:
+        """`party` made the move (or dealt the hand) pending in `before`."""
+        now = self.clock()
+        self.seen(session_id, party)
+        self._last[session_id] = {"kind": party.kind, "name": party.name, "at": now,
+                                  "hand": before.get("hand"), "step": before.get("step")}
+        hands = self._hands.setdefault(session_id, {})
+        hand = before.get("hand")
+        if hand is not None and not before.get("over"):
+            who = hands.setdefault(hand, [])
+            if party.name not in who:
+                who.append(party.name)
+            for old in sorted(hands)[:-HANDS_KEPT]:
+                del hands[old]
+
+    def seen(self, session_id: str, party: Party) -> None:
+        self._seen.setdefault(session_id, {})[(party.kind, party.key)] = (party, self.clock())
+
+    def last_mover(self, session_id: str) -> str | None:
+        last = self._last.get(session_id)
+        return last["name"] if last else None
+
+    def presence(self, session_id: str) -> dict:
+        """Who is at the table, for the page: `last` (the last move: kind,
+        name, seconds ago, hand), `others` (the agent and programs seen,
+        with seconds since), `hands` (hand number -> who moved in it)."""
+        now = self.clock()
+        last = self._last.get(session_id)
+        others = [
+            {"kind": p.kind, "name": p.name, "ago": round(now - at)}
+            for p, at in self._seen.get(session_id, {}).values()
+            if p.kind != BROWSER
+        ]
+        others.sort(key=lambda o: o["ago"])
+        return {
+            "last": {"kind": last["kind"], "name": last["name"], "ago": round(now - last["at"]), "hand": last["hand"]} if last else None,
+            "others": others,
+            "hands": {str(h): who for h, who in self._hands.get(session_id, {}).items()},
+        }
+
+    # ---- finished hands, for a page that polled past them --------------------
 
     def observe(self, session_id: str, state: dict) -> None:
-        """Every table state that passes through this server (an act, a
-        next hand, a page load): a finished hand's final state is kept
-        (the latest two hands), so a watcher who polled past it can still
-        be shown how it ended."""
+        """Every table state that passes through this server (a move, a
+        next hand, a page load): a finished hand's final state is kept (the
+        latest two hands), so a page that polled past it can still be
+        shown how it ended."""
         if state.get("over"):
             finals = self._finals.setdefault(session_id, {})
             finals[state["hand"]] = state

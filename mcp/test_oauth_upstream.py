@@ -104,9 +104,9 @@ async def test_sign_in_with_upstream_idp(upstream):
 
     # And the token plays: the MCP endpoint takes it, tools answer.
     async with ot.mcp_client(f"{base}/mcp", tok["access_token"]) as mcp:
-        r = await mcp.call_tool("state", {})
+        r = await mcp.call_tool("docs", {"name": "rules"})
         assert not r.is_error
-        assert "new_session" in r.content[0].text  # "no active session: call new_session() first"
+        assert "Bot Poker" in r.content[0].text
 
 
 @pytest.mark.asyncio

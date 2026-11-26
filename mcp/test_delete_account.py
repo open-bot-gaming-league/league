@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pytest
 
 from oauth.store import FirestoreStore
-from tables import LIST_LIMIT, Party, TableSessions
+from programs import ProgramTokens
+from tables import LIST_LIMIT
 
 SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deploy", "cloudrun", "delete_account.py")
 ME, OTHER = "github:1", "github:2"
@@ -27,15 +28,27 @@ def _run(project, *args):
     return subprocess.run([sys.executable, SCRIPT, "--project", project, *args], capture_output=True, text=True, env=env, timeout=60)
 
 
-async def _populate(store, account, sessions):
+async def _populate(store, account, sessions, old_sessions=0):
     """What a signed-in account leaves behind: the account, its table
-    sessions, an access and a refresh token."""
+    sessions (the newest is its table; `old_sessions` more from before one
+    table per login, each with a watch token), an access and a refresh
+    token, and two program tokens, one of them used."""
     await store.put("accounts", account, {"provider": "github", "provider_user_id": account[7:], "display_name": "n"})
-    tables = TableSessions(store)
-    for n in range(sessions):
-        await tables.create(f"{account}-s{n}", account, Party.browser())
+    ids = [f"{account}-s{n}" for n in range(sessions + old_sessions)]
+    for n, session_id in enumerate(ids):
+        record = {"owner": account, "created_at": 1}
+        if n < old_sessions:
+            record["watch"] = f"watch-{session_id}"
+            await store.put("watch-tokens", hashlib.sha256(record["watch"].encode()).hexdigest(), {"session": session_id})
+        await store.put("table-sessions", session_id, record)
+    await store.put("account-tables", account, {"sessions": list(reversed(ids))[:LIST_LIMIT]})
     for kind in ("access", "refresh"):
         await store.put(kind, hashlib.sha256(f"{kind}-{account}".encode()).hexdigest(), {"subject": account, "expires_at": FAR})
+    programs = ProgramTokens(store)
+    used = await programs.create(account, "one")
+    await programs.create(account, "two")
+    assert await programs.check(used["token"]) is not None  # writes its program-usage record
+    return used["token"]
 
 
 @pytest.mark.asyncio
@@ -44,14 +57,16 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
         pytest.skip("FIRESTORE_EMULATOR_HOST not set (no Firestore emulator)")
     project = f"demo-obgl-{uuid.uuid4().hex[:12]}"
     store = FirestoreStore(project)
-    extra = 2  # past the 20 sessions an account's list remembers: the script must still find them
-    await _populate(store, ME, LIST_LIMIT + extra)
-    await _populate(store, OTHER, 2)
+    new, old = LIST_LIMIT, 2  # past the 20 sessions an account's list remembers: the script must still find them
+    my_token = await _populate(store, ME, new, old)
+    other_token = await _populate(store, OTHER, 2)
 
     dry = _run(project, ME)
     assert dry.returncode == 0, dry.stderr
     listed = dry.stdout.splitlines()
-    assert len(listed) == 2 + 2 * (LIST_LIMIT + extra) + 2  # account + its list, each session + its watch token, access + refresh
+    # account + its list + its program list, each session (+ an old one's watch token),
+    # access + refresh, two program tokens + one usage record
+    assert len(listed) == 3 + (new + old) + old + 2 + 2 + 1, listed
     assert all(line.startswith("would delete oauth_") for line in listed) and not any("github:2" in line for line in listed)
     assert await store.get("accounts", ME) is not None  # a dry run deletes nothing
 
@@ -59,14 +74,19 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert done.returncode == 0, done.stderr
     assert await store.get("accounts", ME) is None
     assert await store.get("account-tables", ME) is None
+    assert await store.get("account-programs", ME) is None
     assert await store.get("table-sessions", f"{ME}-s0") is None
-    assert await store.get("table-sessions", f"{ME}-s{LIST_LIMIT + extra - 1}") is None
+    assert await store.get("table-sessions", f"{ME}-s{new + old - 1}") is None
+    assert await store.get("watch-tokens", hashlib.sha256(f"watch-{ME}-s0".encode()).hexdigest()) is None
     for kind in ("access", "refresh"):
         assert await store.get(kind, hashlib.sha256(f"{kind}-{ME}".encode()).hexdigest()) is None
+    assert await ProgramTokens(store).check(my_token) is None
     # The other account is whole.
     assert await store.get("accounts", OTHER) is not None
-    assert len(await TableSessions(store).list_for(OTHER)) == 2
+    assert len((await store.get("account-tables", OTHER))["sessions"]) == 2
     assert await store.get("access", hashlib.sha256(f"access-{OTHER}".encode()).hexdigest()) is not None
+    assert await ProgramTokens(store).check(other_token) is not None
+    assert len(await ProgramTokens(store).list(OTHER)) == 2
 
     again = _run(project, ME)
     assert again.returncode == 1 and "no account record" in again.stderr

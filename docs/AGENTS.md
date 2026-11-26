@@ -14,11 +14,9 @@ everything you need to make legal moves.
 Bot Poker is a heads-up (you against one bot), 50 big-blind table.
 Stacks **reset to 50 bb at the start of every hand** — nothing carries
 over *between* hands; what accumulates across hands, and is what gets
-measured, is the session's running score (see `score()`). You play
-through seven MCP tools: six wrap the table's HTTP API and one,
-`docs()`, returns these documents; you never call HTTP yourself. On the
-hosted connector, where your user signs in, there are two more
-(`my_sessions()`, `claim_session()`: see "Your user at the table").
+measured, is the table's running score (see `score()`). You play
+through MCP tools: all but `docs()` wrap the table's HTTP API, and
+`docs()` returns these documents; you never call HTTP yourself.
 
 ## The tools
 
@@ -28,12 +26,18 @@ hosted connector, where your user signs in, there are two more
 - **`rules()`** — the bet menu, blind sizes, and the opponents on
   offer, read live from the table (so this stays correct even if the
   table's menu changes). Call this once at the start.
-- **`new_session(opponent?, seat?)`** — starts a session and deals hand
-  1. `opponent` is a bot `id` from `rules()`'s `bots` list (default:
-  the first, which is the least exploitable one on offer). `seat` is
-  `"sb"`, `"bb"`, or `"alternate"` (default — alternates seat every
-  hand). On the hosted connector the answer also has a `watch_url`:
-  give it to your user (see "Your user at the table").
+- **`table()`** — your table, as it stands: the hand in play and, on
+  your turn, `legal`. Call it before you act. On the hosted connector
+  it is your user's one table (see "Your user at the table"), and the
+  answer has its `table_url`: give it to your user. Without sign-in it
+  starts a session for this connection the first time.
+- **`new_session(opponent?, seat?)`** — the old name of `table()`, kept
+  for one release. On the hosted connector it starts nothing new: it
+  returns your user's table, and refuses an `opponent` or `seat` other
+  than the table's. Without sign-in it starts a new session for this
+  connection, as it always has: `opponent` a bot `id` from `rules()`,
+  `seat` `"sb"`, `"bb"` or `"alternate"` (the default, alternating every
+  hand).
 - **`state()`** — the current hand: your cards, the bot's visible
   state, the board, the pot, and on your turn `legal` (every legal
   move, any size) and `actions` (the bet menu as shortcuts). Call this if a
@@ -52,31 +56,30 @@ hosted connector, where your user signs in, there are two more
   hand is over (`state().over` is `true`); otherwise you get a clear
   rejection telling you to finish the hand first.
 - **`score()`** — hands played, net bb, bb/100, overall and split by
-  opponent, computed from this session's hand history on the table
-  (not just this session's local count — if the table server
+  opponent, computed from the table's hand history on the table
+  (not just this connection's local count — if the table server
   restarted, your score is still correct).
 
 ### Your user at the table
 
-Your user can play at the browser table themselves
-(https://obgl.truemirrorgames.com/table/) and, when they signed in to
-the connector with GitHub or Google, watch your sessions there live
-through the `watch_url` that `new_session()` and `score()` return. The
-link opens only for them; it cannot act. One player is in control of a
-session at a time:
+On the hosted connector your user signs in with GitHub or Google, and
+has **one table**: the one `table()` returns, which they also see at its
+`table_url` (https://obgl.truemirrorgames.com/table/) when signed in the
+same way. Everyone of theirs can play it — your user in the browser, you
+(on any connection), and their own programs (a bot they wrote with the
+Go SDK, using a token they make on the table page) — and **whoever moves
+first on a decision makes it**:
 
-- If your user **takes over** in the browser, your `act()` and
-  `next_hand()` answer with an error saying so; `state()` still works
-  and says who is playing. Do not try to act around it.
-- If your user **hands a game to you** ("Hand to my agent" at the table), or asks you
-  to pick up a game they are playing: **`my_sessions()`** lists their
-  sessions, newest first, with who is playing each; **`claim_session(session)`**
-  makes you the player from where it stands. The decision pending in it
-  is yours: read the state it returns and act.
-  The hand-off prompt the user pastes does not name a session. Call
-  `my_sessions()` and claim the one nobody is playing. If more than one is
-  unclaimed, ask the user which, naming each by opponent and hands played;
-  do not guess.
+- If someone else moved first, your `act()` or `next_hand()` does not
+  happen; its answer is the table's new state with a `note` saying who
+  moved ("you already acted on this decision" means your user, in the
+  browser). Read it, and act again only if `legal` says it is your turn.
+  Do not race your user: when they are playing, ask before you move.
+- **Your user picks the bot and the seat** on the table page. You cannot
+  change them: `new_session()` with other settings is refused. Ask your
+  user to change them there.
+- If your user resets the table (a new score) on the page, your next
+  call says so in a `note` and shows the new table.
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and
@@ -118,13 +121,14 @@ The same documents are on the web at https://obgl.truemirrorgames.com/docs/ (raw
   `over` field is `true` from then until you call `next_hand()`;
   `outcome` is a one-line result and `net` is the chips you won or
   lost on that hand (negative if you lost).
-- **Score** accumulates only across hands you actually played in this
-  session; it does not compare you to anyone else's run.
+- **Score** accumulates across the table's hands (on the hosted
+  connector, whoever played them, until your user resets it); it does
+  not compare you to anyone else's run.
 
 ## A normal turn
 
 1. `rules()` once per session, to see the opponents on offer.
-2. `new_session(opponent=..., seat=...)`.
+2. `table()`.
 3. Loop: look at `state()`'s (or the last `act`/`next_hand` result's)
    `legal`, choose a move, call `act(action="call")` or
    `act(action="raise", amount=650)`. When `over` is `true`, call

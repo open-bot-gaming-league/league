@@ -1,29 +1,32 @@
 """The browser table at /table: the Go table's own page (cmd/table/static),
-served by this server on the same origin as /mcp, with sign-in, Play and
-Watch. Registered by server.py when OAuth is on (an owner needs an account).
+served by this server on the same origin as /mcp, with sign-in. Registered
+by server.py when OAuth is on (an owner needs an account). Each account
+has one table (tables.py), played by whoever moves first: the user here,
+their agent over MCP, or their program with a program token (programs.py).
 
-    GET  /table/                     Play: the page (sign-in first if needed)
-    GET  /table/watch/<watch token>  Watch: the same page, on a session the
-                                     signed-in user owns (404 otherwise)
+    GET  /table/                     the page (sign-in first if needed)
+    GET  /table/watch/<anything>     an old watch link: sent to /table/
     GET  /table/<asset>              the page's files (table.js, table.css, cardmotion.js)
     GET  /table/signin?next=<path>   sign in (GitHub or Google), then back to <path>
     GET  /table/signin/callback      where /login sends the browser back
     POST /table/signout
 
-    the page's API (JSON; every route but info needs a signed-in user: 401
-    with {error, signIn} otherwise):
+    the table's API (JSON; every route but info needs the signed-in user's
+    cookies or a program token, `Authorization: Bearer obgl_pt_...`: 401
+    otherwise, with `signIn` for a browser). `session` is optional: the
+    account's table is meant either way, and any other id is 404.
     GET  /table/api/info             the table's api/info + `league` (who is signed in)
-    POST /table/api/new              {seat, opponent}: a new session, owned and played by you
-    GET  /table/api/state            ?session=ID[&brief=1]: your session's state
-    POST /table/api/act              {session, hand, step, kind[, amount]} or {..., action} (you must be in control)
-    POST /table/api/next             {session, hand[, seat, opponent]} (you must be in control)
-    GET  /table/api/watch            ?token=T[&hand=H&over=0|1][&brief=1]: read-only, no session id
-    POST /table/api/takeover         {token}: Watch -> Play; the answer has the session id
-    POST /table/api/tagin            {session}: Play -> your agent (it claims with claim_session())
+    GET  /table/api/state            [?session=ID][&brief=1][&hand=H&over=0|1]: your table's state
+    POST /table/api/act              {hand, step, kind[, amount]} or {hand, step, action}
+    POST /table/api/next             {hand[, seat, opponent]}: seat and opponent from the page only (403 otherwise)
+    POST /table/api/new              {seat, opponent}: reset: a new table, the score from zero (page only)
+    GET  /table/api/tokens           your program tokens, without the tokens (page only)
+    POST /table/api/tokens           {label}: a new program token, shown this once (page only)
+    POST /table/api/tokens/revoke    {id}: revoke one (page only)
 
-Every state the page gets carries `control` (tables.py): who is playing,
-the watch link, the switches so far, and whether this user can hand the
-session to an agent. Another account's session and a session that does not exist answer 404 alike.
+Every state carries `presence` (tables.py): the last move (who, how long
+ago), the agent and programs seen lately, and who moved in each recent
+hand. A program over its rate (programs.py) gets 429 with Retry-After.
 
 Sign-in. The table is an OAuth client of this same server ("Bot Poker
 table", registered here at start, public, PKCE): /table/signin sends the
@@ -36,7 +39,9 @@ sign in with the same GitHub or Google account are the same owner.
 
 Requests that change anything are POSTs with a JSON body, and refused if
 the browser says they come from another origin: with SameSite=Lax cookies
-that keeps other sites from acting for a signed-in user.
+that keeps other sites from acting for a signed-in user. A program's
+token is sent by the program itself, never by a browser on its own, so it
+needs no such check; a request carrying one is judged by it alone.
 """
 
 from __future__ import annotations
@@ -45,6 +50,7 @@ import base64
 import hashlib
 import html
 import json
+import math
 import secrets
 from collections.abc import Callable
 from typing import Any
@@ -56,10 +62,12 @@ from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
+import programs
 from oauth.provider import LeagueOAuthProvider, pkce_pair
 from pages import render
+from programs import Program, ProgramTokens
 from table_client import TableClient, TableError
-from tables import AGENT, BROWSER, NotInControl, Party, TableSessions, controller_name
+from tables import BROWSER, PROGRAM, Party, Tables
 
 TABLE_CLIENT_ID = "obgl-table"
 TABLE_CLIENT_NAME = "Bot Poker table"
@@ -123,24 +131,21 @@ class TableWeb:
     def __init__(
         self,
         provider: LeagueOAuthProvider,
-        tables: TableSessions,
+        tables: Tables,
+        programs: ProgramTokens,
         client: TableClient,
         public_url: str,
         resource_url: str,
     ) -> None:
         self.provider = provider
         self.tables = tables
+        self.programs = programs
         self.client = client
         self.public_url = public_url.rstrip("/")
         self.resource_url = resource_url
         self.redirect_uri = self.public_url + COOKIE_PATH + "/signin/callback"
         self.secure = self.public_url.startswith("https://")
         self._client_info: OAuthClientInformationFull | None = None
-
-    # ---- links ---------------------------------------------------------------
-
-    def watch_url(self, record: dict) -> str:
-        return f"{self.public_url}{COOKIE_PATH}/watch/{record['watch']}"
 
     # ---- sign-in ----------------------------------------------------------------
 
@@ -281,25 +286,12 @@ class TableWeb:
         account, fresh = await self.signed_in(request)
         if account is None:
             return RedirectResponse(self.signin_url(request.url.path), status_code=303, headers={"Cache-Control": "no-store"})
-        token = request.path_params.get("token")
-        if token is not None and await self.tables.by_watch(token, account) is None:
-            return self._finish(
-                HTMLResponse(
-                    render(
-                        "No such session",
-                        "<h1>No session here</h1><p>A watch link opens only for the account that started the "
-                        "session, signed in the same way (GitHub or Google).</p>"
-                        # The usual cause is being signed in as someone else: sign in again,
-                        # and come back to this very link (not to a new session).
-                        f'<p><a href="{html.escape(self.signin_url(request.url.path))}">Sign in as a different account</a></p>'
-                        f'<p><a href="{COOKIE_PATH}/">Play at the table</a></p>',
-                    ),
-                    status_code=404,
-                    headers=_PAGE_HEADERS,
-                ),
-                fresh,
-            )
         return self._finish(Response(await self._page_html(), media_type="text/html; charset=utf-8", headers=_PAGE_HEADERS), fresh)
+
+    async def old_watch_link(self, request: Request) -> Response:  # noqa: ARG002
+        """/table/watch/<token>, from before one table per login: the table
+        itself (the owner's own, after sign-in), whatever the token."""
+        return RedirectResponse(COOKIE_PATH + "/", status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
     async def asset(self, name: str) -> Response:
         status, ctype, body = await anyio.to_thread.run_sync(lambda: self.client.asset(name))
@@ -335,48 +327,74 @@ class TableWeb:
         except TableError as e:
             raise ApiError(e.status if e.status in (400, 404, 409) else 502, e.message) from e
 
-    def control_view(self, record: dict) -> dict:
-        c = record["controller"]
-        return {
-            "controller": c["kind"],
-            "waiting": c["kind"] == AGENT and c.get("agent") is None,
-            "yours": c["kind"] == BROWSER,
-            "who": controller_name(c),
-            "watch": f"watch/{record['watch']}",
-            "switches": record["switches"],
-        }
+    async def caller(self, request: Request) -> tuple[str | None, OAuthToken | None, Party | None]:
+        """(account, fresh tokens to set or None, party). A request with an
+        Authorization header is a program's: its program token, and nothing
+        else, says who it is (cookies are not looked at). Otherwise the
+        browser's sign-in cookies. (None, None, None): neither."""
+        auth = request.headers.get("authorization")
+        if auth is not None:
+            scheme, _, token = auth.partition(" ")
+            program = await self.programs.check(token.strip()) if scheme.lower() == "bearer" else None
+            if program is None:
+                raise ApiError(401, "that is not a program token for this table, or it was revoked: "
+                                    "make one on the table page (Programs)")
+            return program.account, None, Party.program(program.id, program.label)
+        account, fresh = await self.signed_in(request)
+        return account, fresh, Party.browser() if account else None
 
-    def _view(self, state: dict, account: str, record: dict, *, watch: bool = False, history: bool = True) -> dict:
-        out = dict(state)
-        if watch:
-            out.pop("session", None)
-        if not history:
-            out.pop("history", None)
-        out["control"] = self.control_view(record)
-        return out
-
-    def api(self, handler: Callable, *, auth: bool = True) -> Callable:
+    def api(self, handler: Callable, *, auth: bool = True, browser_only: bool = False) -> Callable:
         async def route(request: Request) -> Response:
-            account, fresh = await self.signed_in(request)
+            fresh, headers = None, {"Cache-Control": "no-store"}
             try:
+                account, fresh, party = await self.caller(request)
                 if auth and account is None:
                     raise ApiError(401, "sign in first", signIn=self.signin_url(COOKIE_PATH + "/"))
-                body = await handler(request, account)
-                response = JSONResponse(body, headers={"Cache-Control": "no-store"})
+                if browser_only and party is not None and party.kind != BROWSER:
+                    raise ApiError(403, "only the table page can do this, signed in")
+                if party is not None and party.kind == PROGRAM:
+                    wait = self.programs.allow(Program(account, party.key, party.label))
+                    if wait:
+                        headers["Retry-After"] = str(max(1, math.ceil(wait)))
+                        raise ApiError(429, f"slow down: at most {programs.RATE:g} requests a second per program token "
+                                            "(for volume, play bot against bot with the SDK's local runner)")
+                body = await handler(request, account, party)
+                response = JSONResponse(body, headers=headers)
             except ApiError as e:
-                response = JSONResponse(e.body, status_code=e.status, headers={"Cache-Control": "no-store"})
+                response = JSONResponse(e.body, status_code=e.status, headers=headers)
             return self._finish(response, fresh)
 
         return route
 
-    async def _owned(self, session_id: Any, account: str) -> dict:
-        record = await self.tables.table_session_for(session_id, account) if isinstance(session_id, str) else None
-        if record is None:
-            raise ApiError(404, "no such session")
-        return record
+    def _view(self, state: dict, session_id: str, *, history: bool = True) -> dict:
+        out = dict(state)
+        if not history:
+            out.pop("history", None)
+        out["presence"] = self.tables.presence(session_id)
+        return out
 
-    async def info(self, request: Request, account: str | None) -> dict:
-        info = await self._table(self.client.info)
+    async def _table(self, account: str, party: Party, session_param: Any = None) -> tuple[str, dict]:
+        """(session id, state) of the account's table, made if it has none.
+        A session id other than the table's is 404, as for any session that
+        is not this account's."""
+        try:
+            session_id, state = await self.tables.ensure(account)
+        except TableError as e:
+            raise ApiError(e.status if e.status in (400, 404, 409) else 502, e.message) from e
+        if session_param not in (None, "") and session_param != session_id:
+            raise ApiError(404, "no such session")
+        self.tables.seen(session_id, party)
+        self.tables.observe(session_id, state)
+        return session_id, state
+
+    async def _call(self, fn: Callable[[], Any]) -> Any:
+        try:
+            return await anyio.to_thread.run_sync(fn)
+        except TableError as e:
+            raise ApiError(e.status if e.status in (400, 404, 409) else 502, e.message) from e
+
+    async def info(self, request: Request, account: str | None, party: Party | None) -> dict:
+        info = await self._call(self.client.info)
         who = None
         if account is not None:
             rec = await self.provider.account(account) or {}
@@ -384,70 +402,9 @@ class TableWeb:
         info["league"] = {"account": who, "signIn": self.signin_url(COOKIE_PATH + "/"), "signOut": COOKIE_PATH + "/signout"}
         return info
 
-    async def new(self, request: Request, account: str) -> dict:
-        body = await self._body(request)
-        state = await self._table(lambda: self.client.new(seat=body.get("seat") or "alternate", opponent=body.get("opponent")))
-        record = await self.tables.create(state["session"], account, Party.browser())
-        self.tables.observe(state["session"], state)
-        return self._view(state, account, record)
-
-    async def state(self, request: Request, account: str) -> dict:
-        session_id = request.query_params.get("session")
-        record = await self._owned(session_id, account)
-        state = await self._table(lambda: self.client.state(session_id))
-        self.tables.observe(session_id, state)
-        return self._view(state, account, record, history=request.query_params.get("brief") != "1")
-
-    async def _require_browser(self, session_id: Any, account: str) -> dict:
-        """The record, if this user's browser is in control (hold the lock)."""
-        if not isinstance(session_id, str):
-            raise ApiError(404, "no such session")
-        try:
-            return await self.tables.require_control(session_id, account, Party.browser())
-        except LookupError:
-            raise ApiError(404, "no such session") from None
-        except NotInControl as e:
-            raise ApiError(409, f"{controller_name(e.record['controller'])} is playing this session",
-                           control=self.control_view(e.record)) from None
-
-    async def _controlled(self, session_id: Any, account: str, step: Callable[[], dict]) -> dict:
-        await self._owned(session_id, account)  # before the lock: no lock for a made-up id
-        async with self.tables.lock(session_id):
-            record = await self._require_browser(session_id, account)
-            state = await self._table(step)
-        self.tables.observe(session_id, state)
-        return self._view(state, account, record)
-
-    async def act(self, request: Request, account: str) -> dict:
-        b = await self._body(request)
-        # Either api/act form (cmd/table/API.md): a menu button's `action` index, or a
-        # `kind` with an `amount` ("raise to" chips).
-        return await self._controlled(
-            b.get("session"), account,
-            lambda: self.client.act(
-                b["session"], b.get("hand"), b.get("step"),
-                action=b.get("action"), kind=b.get("kind"), amount=b.get("amount"),
-            ),
-        )
-
-    async def next(self, request: Request, account: str) -> dict:
-        b = await self._body(request)
-        return await self._controlled(
-            b.get("session"), account,
-            lambda: self.client.next(b["session"], b.get("hand"), seat=b.get("seat"), opponent=b.get("opponent")),
-        )
-
-    async def _watched(self, token: Any, account: str) -> tuple[str, dict]:
-        found = await self.tables.by_watch(token, account) if isinstance(token, str) else None
-        if found is None:
-            raise ApiError(404, "no such session")
-        return found
-
-    async def watch(self, request: Request, account: str) -> dict:
+    async def state(self, request: Request, account: str, party: Party) -> dict:
         q = request.query_params
-        session_id, record = await self._watched(q.get("token"), account)
-        state = await self._table(lambda: self.client.state(session_id))
-        self.tables.observe(session_id, state)
+        session_id, state = await self._table(account, party, q.get("session"))
         try:
             shown = int(q["hand"])
         except (KeyError, ValueError):
@@ -457,36 +414,70 @@ class TableWeb:
             # from the final state this server saw, before the hand after it.
             final = self.tables.final_state(session_id, shown)
             if final is not None:
-                return {**self._view(final, account, record, watch=True, history=False), "catchUp": True}
-        # The history only when the page needs it: a first load, or a new hand
-        # (it adds the hands it missed).
-        history = q.get("brief") != "1" or shown != state["hand"]
-        return self._view(state, account, record, watch=True, history=history)
+                return {**self._view(final, session_id, history=False), "catchUp": True}
+        # The history only when asked for all of it, or on a new hand (the
+        # page adds the hands it missed).
+        history = q.get("brief") != "1" or (shown is not None and shown != state["hand"])
+        return self._view(state, session_id, history=history)
 
-    async def takeover(self, request: Request, account: str) -> dict:
-        b = await self._body(request)
-        session_id, _ = await self._watched(b.get("token"), account)
+    async def _move(self, account: str, party: Party, b: dict, step: Callable[[str, dict], dict], *, deal: bool) -> dict:
+        """act / next on the account's table: whoever sends it first makes
+        the pending decision; the Go table refuses (409) one meant for a
+        decision already made. `deal`: the step deals the next hand."""
+        session_id = await self._own_table(account, b.get("session"))
         async with self.tables.lock(session_id):
-            state = await self._table(lambda: self.client.state(session_id))
-            record = await self.tables.switch(session_id, account, Party.browser(), hand=state["hand"], step=state["step"])
+            state = await self._call(lambda: step(session_id, b))
+            self.tables.moved(session_id, party, {"hand": b.get("hand"), "step": b.get("step"), "over": deal})
         self.tables.observe(session_id, state)
-        # From here the page plays: it gets the session id, as from api/new.
-        return self._view(state, account, record)
+        return self._view(state, session_id)
 
-    async def tagin(self, request: Request, account: str) -> dict:
+    async def _own_table(self, account: str, session_param: Any) -> str:
+        try:
+            return await self.tables.resolve(account, session_param)
+        except LookupError:
+            raise ApiError(404, "no such session") from None
+
+    def _act_step(self, session_id: str, b: dict) -> dict:
+        # Either api/act form (cmd/table/API.md): a menu button's `action`
+        # index, or a `kind` with an `amount` ("raise to" chips).
+        return self.client.act(session_id, b.get("hand"), b.get("step"),
+                               action=b.get("action"), kind=b.get("kind"), amount=b.get("amount"))
+
+    def _next_step(self, session_id: str, b: dict) -> dict:
+        return self.client.next(session_id, b.get("hand"), seat=b.get("seat"), opponent=b.get("opponent"))
+
+    async def act(self, request: Request, account: str, party: Party) -> dict:
+        return await self._move(account, party, await self._body(request), self._act_step, deal=False)
+
+    async def next(self, request: Request, account: str, party: Party) -> dict:
         b = await self._body(request)
-        session_id = b.get("session")
-        await self._owned(session_id, account)
-        async with self.tables.lock(session_id):
-            await self._require_browser(session_id, account)
-            # The browser hands its seat to the owner's agent: unclaimed
-            # until the agent calls claim_session().
-            state = await self._table(lambda: self.client.state(session_id))
-            record = await self.tables.switch(
-                session_id, account, Party(AGENT, None), hand=state["hand"], step=state["step"], by=Party.browser()
-            )
-        self.tables.observe(session_id, state)
-        return self._view(state, account, record, watch=True)
+        if party.kind != BROWSER and (b.get("seat") is not None or b.get("opponent") is not None):
+            raise ApiError(403, "settings are changed on the table page: the bot and the seat are the user's to pick there")
+        return await self._move(account, party, b, self._next_step, deal=True)
+
+    async def reset(self, request: Request, account: str, party: Party) -> dict:
+        """api/new: a new table for this account (Reset score)."""
+        b = await self._body(request)
+        session_id, state = await self.tables.reset(account, seat=b.get("seat") or "alternate", opponent=b.get("opponent"))
+        self.tables.moved(session_id, party, {"over": True})
+        return self._view(state, session_id)
+
+    async def tokens(self, request: Request, account: str, party: Party) -> dict:
+        return {"tokens": await self.programs.list(account)}
+
+    async def make_token(self, request: Request, account: str, party: Party) -> dict:
+        b = await self._body(request)
+        label = b.get("label")
+        try:
+            return await self.programs.create(account, label if isinstance(label, str) else "")
+        except programs.TooMany as e:
+            raise ApiError(409, str(e)) from None
+
+    async def revoke_token(self, request: Request, account: str, party: Party) -> dict:
+        b = await self._body(request)
+        if not isinstance(b.get("id"), str) or not await self.programs.revoke(account, b["id"]):
+            raise ApiError(404, "no such token")
+        return {"revoked": b["id"]}
 
 
 def register_table_routes(server: MCPServer, web: TableWeb) -> None:
@@ -495,7 +486,7 @@ def register_table_routes(server: MCPServer, web: TableWeb) -> None:
     # Cloud Run's TLS termination.
     for path in (COOKIE_PATH, COOKIE_PATH + "/"):
         server.custom_route(path, methods=["GET"])(web.page)
-    server.custom_route(COOKIE_PATH + "/watch/{token}", methods=["GET"])(web.page)
+    server.custom_route(COOKIE_PATH + "/watch/{token}", methods=["GET"])(web.old_watch_link)
     server.custom_route(COOKIE_PATH + "/signin", methods=["GET"])(web.signin)
     server.custom_route(COOKIE_PATH + "/signin/callback", methods=["GET"])(web.callback)
 
@@ -515,13 +506,13 @@ def register_table_routes(server: MCPServer, web: TableWeb) -> None:
         _asset(name)
     api = {
         ("GET", "info"): web.api(web.info, auth=False),
-        ("POST", "new"): web.api(web.new),
         ("GET", "state"): web.api(web.state),
         ("POST", "act"): web.api(web.act),
         ("POST", "next"): web.api(web.next),
-        ("GET", "watch"): web.api(web.watch),
-        ("POST", "takeover"): web.api(web.takeover),
-        ("POST", "tagin"): web.api(web.tagin),
+        ("POST", "new"): web.api(web.reset, browser_only=True),
+        ("GET", "tokens"): web.api(web.tokens, browser_only=True),
+        ("POST", "tokens"): web.api(web.make_token, browser_only=True),
+        ("POST", "tokens/revoke"): web.api(web.revoke_token, browser_only=True),
     }
     for (method, name), route in api.items():
         server.custom_route(f"{COOKIE_PATH}/api/{name}", methods=[method])(route)

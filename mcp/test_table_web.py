@@ -1,8 +1,8 @@
-"""The browser table at /table (table_web.py) and the control rules behind
-it (tables.py), over real HTTP: our server in-process on a local socket,
-signed in through a fake GitHub (oauth_testing.FakeIdP) so a browser and
-an agent can be the same account, and the live table behind it (the
-`site` fixture, conftest.py).
+"""The browser table at /table (table_web.py), each account's one table
+(tables.py) and program tokens (programs.py), over real HTTP: our server
+in-process on a local socket, signed in through a fake GitHub
+(oauth_testing.FakeIdP) so a browser and an agent can be the same account,
+and the live table behind it (the `site` fixture, conftest.py).
 
 The table-touching tests skip themselves if the live table at
 localhost:9777/poker/ is not reachable.
@@ -51,59 +51,278 @@ def _pick(state):
     return kinds.get("check", kinds.get("call", state["actions"][0]["index"]))
 
 
-async def _agent_to_a_live_decision(mcp):
-    """new_session, then act until the agent faces a decision mid-hand
-    (a new hand if one ends first). Returns that state."""
-    s = _payload(await mcp.call_tool("new_session", {"opponent": "turtle"}))
-    for _ in range(20):
-        if not s["over"] and s["actions"]:
+async def _to_a_decision(get_state, act, deal):
+    """From a state, check/call (act) and deal until a decision is pending."""
+    s = get_state
+    for _ in range(40):
+        if not s["over"] and s.get("legal"):
             return s
-        s = _payload(await mcp.call_tool("next_hand", {}))
+        s = await deal(s) if s["over"] else await act(s)
     raise AssertionError("no live decision")
+
+
+def _move(s):
+    """Check or call, as the {kind} form."""
+    return {"kind": "check" if s["legal"]["check"] else "call"}
+
+
+class Page:
+    """The table's API as the page (or a program) calls it."""
+
+    def __init__(self, http, headers=None):
+        self.http, self.headers = http, headers or {}
+
+    async def get(self, path, **params):
+        return await self.http.get("/table/api/" + path, params=params, headers=self.headers)
+
+    async def post(self, path, body):
+        return await self.http.post("/table/api/" + path, json=body, headers=self.headers)
+
+    async def state(self, **params):
+        r = await self.get("state", **params)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    async def decision(self):
+        async def act(s):
+            r = await self.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        async def deal(s):
+            r = await self.post("next", {"hand": s["hand"]})
+            assert r.status_code == 200, r.text
+            return r.json()
+
+        return await _to_a_decision(await self.state(), act, deal)
+
+
+async def _agent_decision(mcp):
+    s = _payload(await mcp.call_tool("table", {}))
+
+    async def act(s):
+        return _payload(await mcp.call_tool("act", {"action": _move(s)["kind"]}))
+
+    async def deal(s):
+        return _payload(await mcp.call_tool("next_hand", {}))
+
+    return await _to_a_decision(s, act, deal)
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_one_table_for_the_browser_and_every_agent_connection(site):
+    async with site.browser(USER_A) as browser:
+        page = await browser.get("/table/")
+        assert page.status_code == 200 and '<base href="/table/">' in page.text
+        assert page.headers["referrer-policy"] == "no-referrer"
+        assert (await browser.get("/table/table.js")).status_code == 200
+        info = (await browser.get("/table/api/info")).json()
+        assert info["league"]["account"] == {"name": "alice"}
+        p = Page(browser)
+        first = await p.state()  # the table is made on first sight
+        assert first["session"] and "presence" in first and "control" not in first
+        assert (await p.state())["session"] == first["session"]  # ... and kept
+        assert (await p.state(session=first["session"]))["session"] == first["session"]
+        token = await site.agent_token(USER_A)
+        async with ot.mcp_client(f"{site.base}/mcp", token) as one, ot.mcp_client(f"{site.base}/mcp", token) as two:
+            t1, t2 = _payload(await one.call_tool("table", {})), _payload(await two.call_tool("table", {}))
+            assert t1["session"] == t2["session"] == first["session"]
+            assert t1["table_url"] == f"{site.base}/table/" and t1["seatMode"] == first["seatMode"]
+            # The old name, for one release: the same table, nothing new started.
+            assert _payload(await one.call_tool("new_session", {}))["session"] == first["session"]
+            assert _payload(await one.call_tool("score", {}))["table_url"] == t1["table_url"]
+        # A request from another origin is refused, signed in or not.
+        r = await browser.post("/table/api/act", json={}, headers={"Origin": "https://evil.example"})
+        assert r.status_code == 403
+        # The page plays a whole hand on it.
+        s = await p.decision()
+        while not s["over"]:
+            r = await p.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})
+            assert r.status_code == 200, r.text
+            s = r.json()
+        r = await p.post("next", {"hand": s["hand"]})
+        assert r.status_code == 200 and r.json()["hand"] == s["hand"] + 1
+        assert r.json()["presence"]["last"]["name"] == "you"
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_whoever_moves_first_makes_the_decision(site):
+    async with site.browser(USER_A) as browser, ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
+        p = Page(browser)
+        s = await _agent_decision(mcp)
+        # The browser makes the agent's pending decision first ...
+        r = await p.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})
+        assert r.status_code == 200, r.text
+        b = r.json()
+        assert b["presence"]["last"]["name"] == "you"
+        # ... so the agent's move for it is not made, and it is told so in words, with the new state.
+        after = _payload(await mcp.call_tool("act", {"action": _move(s)["kind"]}))
+        assert "error" not in after, after
+        assert after["note"].startswith("you already acted on this decision"), after["note"]
+        assert (after["hand"], after["step"]) == (b["hand"], b["step"])
+        # Second to move, the browser gets the table's 409; the page reloads the state.
+        s = await _agent_decision(mcp)
+        moved = _payload(await mcp.call_tool("act", {"action": _move(s)["kind"]}))
+        assert "error" not in moved and "note" not in moved, moved
+        r = await p.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})
+        assert r.status_code == 409
+        assert (await p.state())["presence"]["last"]["name"] == "your agent"
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_settings_are_the_pages_and_reset_is_the_pages(site):
+    async with site.browser(USER_A) as browser, ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
+        p = Page(browser)
+        s = await p.state()
+        refused = _payload(await mcp.call_tool("new_session", {"opponent": "ox" if s["opponent"] != "ox" else "turtle"}))
+        assert "settings are changed on the table page" in refused["error"], refused
+        same = _payload(await mcp.call_tool("new_session", {"opponent": s["opponent"], "seat": s["seatMode"]}))
+        assert same["session"] == s["session"]  # asking for what it already is: fine
+        # The page resets: a new table, the score from zero; the agent is told when it next looks.
+        r = await p.post("new", {"seat": "bb", "opponent": s["opponent"]})
+        assert r.status_code == 200, r.text
+        fresh = r.json()
+        assert fresh["session"] != s["session"] and fresh["seatMode"] == "bb" and fresh["hand"] == 1
+        looked = _payload(await mcp.call_tool("state", {}))
+        assert looked["session"] == fresh["session"] and "reset the table" in looked["note"]
+        assert (await p.get("state", session=s["session"])).status_code == 404  # the old one is nobody's table now
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_a_table_is_its_owners_only(site):
+    async with site.browser(USER_A) as alice:
+        s = await Page(alice).state()
+    async with site.browser(USER_B) as bob:
+        p = Page(bob)
+        mine = await p.state()
+        assert mine["session"] != s["session"]
+        assert (await p.get("state", session=s["session"])).status_code == 404
+        for path, body in (("act", {"session": s["session"], "hand": s["hand"], "step": s["step"], "kind": "call"}),
+                           ("next", {"session": s["session"], "hand": s["hand"]})):
+            r = await p.post(path, body)
+            assert r.status_code == 404 and r.json() == {"error": "no such session"}, (path, r.text)
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_a_program_token_plays_its_owners_table_and_nothing_else(site):
+    async with site.browser(USER_A) as browser:
+        page = Page(browser)
+        table = await page.state()
+        r = await page.post("tokens", {"label": "my bot"})
+        assert r.status_code == 200, r.text
+        made = r.json()
+        token = made["token"]
+        assert token.startswith("obgl_pt_") and made["label"] == "my bot"
+        listed = (await page.get("tokens")).json()["tokens"]
+        assert [t["id"] for t in listed] == [made["id"]] and token not in repr(listed)
+
+        async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
+            prog = Page(http, {"Authorization": f"Bearer {token}"})
+            s = await prog.decision()
+            assert s["session"] == table["session"]
+            r = await prog.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})
+            assert r.status_code == 200, r.text
+            assert r.json()["presence"]["last"]["name"] == "your program \u201cmy bot\u201d"
+            seen = (await page.state())["presence"]
+            assert any(o["kind"] == "program" for o in seen["others"])
+            # What the page alone may do.
+            for path, body in (("new", {}), ("tokens", {"label": "x"}), ("tokens/revoke", {"id": made["id"]})):
+                r = await prog.post(path, body)
+                assert r.status_code == 403, (path, r.status_code)
+            assert (await prog.get("tokens")).status_code == 403
+            s = await prog.state()
+            while not s["over"]:
+                s = (await prog.post("act", {"hand": s["hand"], "step": s["step"], **_move(s)})).json()
+            r = await prog.post("next", {"hand": s["hand"], "opponent": "ox"})
+            assert r.status_code == 403 and "settings are changed on the table page" in r.json()["error"]
+            assert (await prog.post("next", {"hand": s["hand"]})).status_code == 200
+            # Not an MCP token, and not a key to anything else.
+            r = await http.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                                headers={"Authorization": f"Bearer {token}", "Accept": "application/json, text/event-stream"})
+            assert r.status_code == 401
+            # A bad token is a 401 even with the owner's cookies: the header decides.
+            r = await browser.get("/table/api/state", headers={"Authorization": "Bearer obgl_pt_nope"})
+            assert r.status_code == 401 and "program token" in r.json()["error"]
+            # An agent's access token is not a program token either.
+            agent = await site.agent_token(USER_A)
+            assert (await http.get("/table/api/state", headers={"Authorization": f"Bearer {agent}"})).status_code == 401
+            # Revoked: refused at once.
+            assert (await page.post("tokens/revoke", {"id": made["id"]})).json() == {"revoked": made["id"]}
+            assert (await prog.get("state")).status_code == 401
+            assert (await page.get("tokens")).json()["tokens"] == []
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_a_program_token_is_rate_limited(site):
+    async with site.browser(USER_A) as browser:
+        token = (await Page(browser).post("tokens", {"label": "fast"})).json()["token"]
+    async with httpx2.AsyncClient(base_url=site.base, timeout=30) as http:
+        prog = Page(http, {"Authorization": f"Bearer {token}"})
+        codes = [(await prog.get("info")).status_code for _ in range(60)]
+        assert codes[:40] == [200] * 40 and 429 in codes
+        r = await prog.get("info")
+        assert r.status_code == 429 and int(r.headers["retry-after"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_at_most_five_program_tokens(site):
+    async with site.browser(USER_A) as browser:
+        p = Page(browser)
+        for n in range(5):
+            assert (await p.post("tokens", {"label": f"bot {n}"})).status_code == 200
+        r = await p.post("tokens", {"label": "one more"})
+        assert r.status_code == 409 and "revoke one" in r.json()["error"]
+        assert (await p.post("tokens/revoke", {"id": "nope"})).status_code == 404
+
+
+@pytest.mark.asyncio
+@needs_table
+async def test_a_page_behind_a_finished_hand_is_shown_its_end(site):
+    async with site.browser(USER_A) as browser, ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
+        p = Page(browser)
+        s = await _agent_decision(mcp)
+        hand = s["hand"]
+        while not s["over"]:
+            s = _payload(await mcp.call_tool("act", {"action": _move(s)["kind"]}))
+        final = s
+        s = _payload(await mcp.call_tool("next_hand", {}))
+        # The page last saw `hand` unfinished: it gets that hand's end first ...
+        w = await p.state(brief="1", hand=hand, over="0")
+        assert w["catchUp"] and w["hand"] == hand and w["over"] and w["net"] == final["net"]
+        # ... then, having shown it, the hand in play, with the history to fill in.
+        w = await p.state(brief="1", hand=hand, over="1")
+        assert "catchUp" not in w and w["hand"] == s["hand"] and hand in [h["number"] for h in w["history"]]
+        assert w["presence"]["hands"][str(hand)] == ["your agent"]
+        # Nothing new: no history resent.
+        assert "history" not in await p.state(brief="1", hand=s["hand"])
 
 
 @pytest.mark.asyncio
 async def test_the_table_needs_sign_in_but_its_files_do_not(site):
     async with httpx2.AsyncClient(base_url=site.base, timeout=10) as http:
-        for path in ("/table", "/table/", "/table/watch/sometoken"):
+        for path in ("/table", "/table/"):
             r = await http.get(path)
             assert r.status_code == 303, (path, r.status_code)
             assert r.headers["location"].startswith("/table/signin?next="), r.headers["location"]
+        # An old watch link (from before one table per login) goes to the table, whatever it says.
+        r = await http.get("/table/watch/sometoken")
+        assert r.status_code == 303 and r.headers["location"] == "/table/"
         r = await http.get("/table/api/state", params={"session": "x"})
         assert r.status_code == 401 and r.json()["signIn"].startswith("/table/signin")
-        r = await http.post("/table/api/new", json={})
-        assert r.status_code == 401
+        for method, path in (("POST", "/table/api/new"), ("POST", "/table/api/act"), ("POST", "/table/api/next"),
+                             ("GET", "/table/api/tokens"), ("POST", "/table/api/tokens"), ("POST", "/table/api/tokens/revoke")):
+            r = await http.request(method, path, json={} if method == "POST" else None)
+            assert r.status_code == 401, (path, r.status_code)
         # The sign-in refuses to send anyone off-site afterwards.
         r = await http.get("/table/signin", params={"next": "https://evil.example/"})
         assert r.status_code == 303
         assert "evil" not in r.cookies.get("obgl_table_signin", "")
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_a_watch_link_survives_sign_in_and_a_wrong_account_can_try_again(site):
-    """Signed out, the watch link goes to sign-in and sign-in returns to THAT
-    link; signed in as someone else, its dead end offers the same round trip."""
-    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
-        s = await _agent_to_a_live_decision(mcp)
-    watch = urlparse(s["watch_url"]).path
-    async with httpx2.AsyncClient(base_url=site.base, timeout=10) as http:
-        r = await http.get(watch)  # signed out
-        assert r.status_code == 303
-        assert parse_qs(urlparse(r.headers["location"]).query)["next"] == [watch]
-        site.fake.userinfo = USER_B  # the wrong account signs in, back to the link: nothing here
-        assert await ot.table_sign_in(http, site.base, "github", next_path=watch) == watch
-        r = await http.get(watch)
-        assert r.status_code == 404 and "No session here" in r.text
-        again = parse_qs(urlparse(site.base + r.text.split('<a href="', 1)[1].split('"', 1)[0].replace("&amp;", "&")).query)
-        assert again["next"] == [watch]  # the page's "Sign in as a different account" link
-        site.fake.userinfo = USER_A  # the owner signs in through it: the same link, now the session
-        assert await ot.table_sign_in(http, site.base, "github", next_path=again["next"][0]) == watch
-        assert (await http.get(watch)).status_code == 200
-        # `next` is only ever a path on the table, whatever is asked.
-        for bad in ("https://evil.example/", "//evil.example/table/", "/table/\\evil", "/tablet/x", "evil", ""):
-            r = await http.get("/table/signin", params={"next": bad})
-            assert json.loads(base64.urlsafe_b64decode(r.cookies["obgl_table_signin"]))["next"] == "/table/", bad
 
 
 @pytest.mark.asyncio
@@ -130,175 +349,6 @@ async def test_a_hand_made_signin_cookie_is_refused_or_sent_to_the_table(site):
         r = await http.get(back, headers={"Cookie": f"obgl_table_signin={cookie(pending)}"})
         assert r.status_code == 303 and r.headers["location"] == "/table/", (r.status_code, r.text)
         assert "obgl_table_at" in r.cookies
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_a_signed_in_browser_plays_a_hand(site):
-    async with site.browser(USER_A) as browser:
-        page = await browser.get("/table/")
-        assert page.status_code == 200 and '<base href="/table/">' in page.text
-        assert page.headers["referrer-policy"] == "no-referrer"
-        assert (await browser.get("/table/table.js")).status_code == 200
-        info = (await browser.get("/table/api/info")).json()
-        assert info["league"]["account"] == {"name": "alice"}
-        s = (await browser.post("/table/api/new", json={"seat": "alternate", "opponent": "turtle"})).json()
-        assert s["control"]["yours"] and "canTagIn" not in s["control"]
-        for _ in range(50):
-            if s["over"]:
-                break
-            r = await browser.post("/table/api/act", json={"session": s["session"], "hand": s["hand"], "step": s["step"], "action": _pick(s)})
-            assert r.status_code == 200, r.text
-            s = r.json()
-        assert s["over"]
-        r = await browser.post("/table/api/next", json={"session": s["session"], "hand": s["hand"]})
-        assert r.status_code == 200 and r.json()["hand"] == s["hand"] + 1
-        # Tagging in is open to every account: the owner's agent is the same account.
-        r = await browser.post("/table/api/tagin", json={"session": s["session"]})
-        assert r.status_code == 200 and r.json()["control"]["controller"] == "agent", r.text
-        # A request from another origin is refused, signed in or not.
-        r = await browser.post("/table/api/new", json={}, headers={"Origin": "https://evil.example"})
-        assert r.status_code == 403
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_watch_is_for_the_owner_only(site):
-    token = await site.agent_token(USER_A)
-    async with ot.mcp_client(f"{site.base}/mcp", token) as mcp:
-        s = _payload(await mcp.call_tool("new_session", {"opponent": "turtle"}))
-        watch_url = s["watch_url"]
-        assert watch_url.startswith(f"{site.base}/table/watch/")
-        watch_token = watch_url.rsplit("/", 1)[1]
-        assert watch_token != s["session"]
-        assert _payload(await mcp.call_tool("score", {}))["watch_url"] == watch_url
-
-    async with site.browser(USER_A) as owner:
-        page = await owner.get(f"/table/watch/{watch_token}")
-        assert page.status_code == 200 and '<base href="/table/">' in page.text
-        w = (await owner.get("/table/api/watch", params={"token": watch_token})).json()
-        assert "session" not in w  # a watcher never gets the id that acts
-        assert w["hand"] == s["hand"] and w["you"]["cards"] == s["you"]["cards"]
-        assert "cards" not in w["bot"] or w["over"]  # the bot's cards only when shown
-        assert w["control"]["controller"] == "agent" and not w["control"]["yours"]
-        assert w.get("history", []) == []  # the table leaves an empty history out
-
-    for who in (USER_B,):  # another account
-        async with site.browser(who) as other:
-            assert (await other.get(f"/table/watch/{watch_token}")).status_code == 404
-            r = await other.get("/table/api/watch", params={"token": watch_token})
-            assert r.status_code == 404 and r.json() == {"error": "no such session"}
-            assert (await other.post("/table/api/takeover", json={"token": watch_token})).status_code == 404
-            # Nor by the session id, had it leaked.
-            assert (await other.get("/table/api/state", params={"session": s["session"]})).status_code == 404
-            r = await other.post("/table/api/act", json={"session": s["session"], "hand": s["hand"], "step": s["step"], "action": _pick(s)})
-            assert r.status_code == 404
-        # ... and as an agent: not in its list, and it cannot claim it.
-        async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(who)) as mcp:
-            listed = _payload(await mcp.call_tool("my_sessions", {}))["sessions"]
-            assert s["session"] not in [x["session"] for x in listed]
-            assert "no such session" in _payload(await mcp.call_tool("claim_session", {"session": s["session"]}))["error"]
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_a_watch_token_cannot_act(site):
-    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
-        s = await _agent_to_a_live_decision(mcp)
-        watch_token = s["watch_url"].rsplit("/", 1)[1]
-        async with site.browser(USER_A) as owner:
-            move = {"hand": s["hand"], "step": s["step"], "action": _pick(s)}
-            for path, body in (
-                ("/table/api/act", {"session": watch_token, **move}),
-                ("/table/api/act", {"token": watch_token, **move}),
-                ("/table/api/next", {"session": watch_token, "hand": s["hand"]}),
-                ("/table/api/tagin", {"session": watch_token}),
-            ):
-                r = await owner.post(path, json=body)
-                assert r.status_code == 404, (path, r.status_code, r.text)
-            assert (await owner.get("/table/api/state", params={"session": watch_token})).status_code == 404
-            # The owner's browser, with the real id, still cannot act while the agent plays.
-            r = await owner.post("/table/api/act", json={"session": s["session"], **move})
-            assert r.status_code == 409 and r.json()["control"]["controller"] == "agent"
-        # Nothing moved: the agent's decision is still pending, and it is the agent's.
-        after = _payload(await mcp.call_tool("act", {"action": _pick(s)}))
-        assert "error" not in after, after
-        assert (after["hand"], after["step"]) != (s["hand"], s["step"])
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_take_over_then_tag_in_hands_the_pending_decision_across(site):
-    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as first:
-        s = await _agent_to_a_live_decision(first)
-        session, watch_token = s["session"], s["watch_url"].rsplit("/", 1)[1]
-        async with site.browser(USER_A) as owner:
-            # Watch -> Play, mid-decision: the browser inherits exactly that decision.
-            t = (await owner.post("/table/api/takeover", json={"token": watch_token})).json()
-            assert t["session"] == session and (t["hand"], t["step"]) == (s["hand"], s["step"])
-            assert t["actions"] == s["actions"] and t["control"]["yours"]
-            refused = _payload(await first.call_tool("act", {"action": _pick(s)}))
-            assert "not playing this session" in refused["error"] and "claim_session" in refused["error"]
-            assert "browser" in _payload(await first.call_tool("state", {}))["control"]
-            assert "not playing" in _payload(await first.call_tool("next_hand", {}))["error"]
-            r = await owner.post("/table/api/act", json={"session": session, "hand": t["hand"], "step": t["step"], "action": _pick(t)})
-            assert r.status_code == 200, r.text
-            b = r.json()
-            assert (b["hand"], b["step"]) != (t["hand"], t["step"])
-            while b["over"]:  # get to a live decision again, in the browser
-                b = (await owner.post("/table/api/next", json={"session": session, "hand": b["hand"]})).json()
-
-            # Play -> agent: the browser drops to Watch; nobody acts until an agent claims it.
-            g = (await owner.post("/table/api/tagin", json={"session": session})).json()
-            assert g["control"]["waiting"] and "session" not in g and g["control"]["watch"] == f"watch/{watch_token}"
-            r = await owner.post("/table/api/act", json={"session": session, "hand": b["hand"], "step": b["step"], "action": _pick(b)})
-            assert r.status_code == 409
-            assert "not playing" in _payload(await first.call_tool("act", {"action": _pick(b)}))["error"]
-
-            # The owner's agent, on a new connection, finds it and claims it.
-            async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as second:
-                listed = _payload(await second.call_tool("my_sessions", {}))["sessions"]
-                mine = next(x for x in listed if x["session"] == session)
-                assert mine["playing"].startswith("nobody") and not mine["yours"]
-                assert mine["watch_url"] == s["watch_url"]
-                c = _payload(await second.call_tool("claim_session", {"session": session}))
-                assert (c["hand"], c["step"]) == (b["hand"], b["step"]) and c["actions"] == b["actions"]
-                d = _payload(await second.call_tool("act", {"action": _pick(c)}))
-                assert "error" not in d, d
-                # The first connection is still out; the browser watches it land.
-                assert "not playing" in _payload(await first.call_tool("act", {"action": _pick(d) if d["actions"] else 0}))["error"]
-                w = (await owner.get("/table/api/watch", params={"token": watch_token, "brief": "1", "hand": c["hand"]})).json()
-                assert (w["hand"], w["step"]) == (d["hand"], d["step"])
-                switches = [(x["from"], x["to"], x["by"]) for x in w["control"]["switches"]]
-                assert switches == [
-                    ("agent", "browser", "browser"),
-                    ("browser", "unclaimed", "browser"),
-                    ("unclaimed", "agent", "agent"),
-                ]
-                assert (w["control"]["switches"][0]["hand"], w["control"]["switches"][0]["step"]) == (s["hand"], s["step"])
-
-
-@pytest.mark.asyncio
-@needs_table
-async def test_a_watcher_behind_a_finished_hand_is_shown_its_end(site):
-    async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_A)) as mcp:
-        s = await _agent_to_a_live_decision(mcp)
-        watch_token = s["watch_url"].rsplit("/", 1)[1]
-        hand = s["hand"]
-        while s["hand"] == hand and not s["over"]:
-            s = _payload(await mcp.call_tool("act", {"action": _pick(s)}))
-        final = s
-        s = _payload(await mcp.call_tool("next_hand", {}))
-        async with site.browser(USER_A) as owner:
-            # The page last saw `hand` unfinished: it gets that hand's end first ...
-            w = (await owner.get("/table/api/watch", params={"token": watch_token, "brief": "1", "hand": hand, "over": "0"})).json()
-            assert w["catchUp"] and w["hand"] == hand and w["over"] and w["net"] == final["net"]
-            # ... then, having shown it, the hand in play, with the history to fill in.
-            w = (await owner.get("/table/api/watch", params={"token": watch_token, "brief": "1", "hand": hand, "over": "1"})).json()
-            assert "catchUp" not in w and w["hand"] == s["hand"] and hand in [h["number"] for h in w["history"]]
-            # Nothing new: no history resent.
-            w = (await owner.get("/table/api/watch", params={"token": watch_token, "brief": "1", "hand": s["hand"]})).json()
-            assert "history" not in w
 
 
 @pytest.mark.asyncio

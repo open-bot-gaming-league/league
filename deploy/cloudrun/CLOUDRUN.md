@@ -217,16 +217,19 @@ delete an account, see "Deleting an account" below.
 ### Storage: Firestore
 
 The OAuth records -- registered clients, pending sign-ins, codes, tokens
-(by sha256), accounts, and each table session's owner, controller, watch
-token and switch log (`mcp/tables.py`) -- live in Firestore
+(by sha256), accounts, each account's table sessions and each session's
+owner (`mcp/tables.py`), and program tokens (by sha256) with when each
+was last used (`mcp/programs.py`) -- live in Firestore
 (`FirestoreStore`, `mcp/oauth/store.py`). Layout: one
 collection per record kind, `oauth_<kind>`; document id = the record's
 key; fields `record` (the record as a JSON string) and `expires_at` (a
 Timestamp, on the kinds that expire). Records past `expires_at` read as
 absent. The server reads and writes documents by id only.
 `oauth_clients`, `oauth_accounts`, `oauth_table-sessions`,
-`oauth_watch-tokens` and `oauth_account-tables` never expire (no
-`expires_at`, no TTL policy). `/register` has no cap, so `oauth_clients`
+`oauth_watch-tokens` (no longer written: old watch links), `oauth_account-tables`,
+`oauth_program-tokens`, `oauth_account-programs` and `oauth_program-usage`
+never expire (no `expires_at`, no TTL policy): a program token lasts until
+its owner revokes it. `/register` has no cap, so `oauth_clients`
 grows by one document per registration.
 
 Create, in `PROJECT`:
@@ -277,7 +280,10 @@ document fields `record` and, on some, `expires_at`):
 | `oauth_accounts` | the account id | by id |
 | `oauth_account-tables` | the account id | by id. Its `sessions` list holds only the newest 20 session ids; do not use it to find them all |
 | `oauth_table-sessions` | the table session id | every document whose `record.owner` is the account id: scan the collection (`record` is one unindexed JSON string) |
-| `oauth_watch-tokens` | sha256 of the session's `record.watch` | computed from each session found above |
+| `oauth_watch-tokens` | sha256 of the session's `record.watch` | computed from each session found above that has a `watch` (sessions from before one table per login) |
+| `oauth_account-programs` | the account id | by id |
+| `oauth_program-tokens` | sha256 of the token (not reversible) | scan for `record.account` equal to the account id |
+| `oauth_program-usage` | the token's id | scan for `record.account` equal to the account id |
 | `oauth_access`, `oauth_refresh`, `oauth_codes` | sha256 of the token (not reversible) | scan each for `record.subject` equal to the account id |
 
 `oauth_clients` and `oauth_pending` hold no account id and are left alone.
@@ -332,20 +338,26 @@ still works without signing in again.
 ## Browser table
 
 `/table/` (`mcp/table_web.py`) serves the table's page, proxied from the
-table binary, and the API calls it allows, to the signed-in owner of
-each session; watch links are `/table/watch/<token>`. It signs in
+table binary, and the API calls it allows: each account's one table, to
+the signed-in owner (cookies) and to the owner's programs (program
+tokens, `Authorization: Bearer obgl_pt_...`, made and revoked on the page;
+20 requests a second each). Old watch links (`/table/watch/<token>`) go
+to `/table/`. It signs in
 through the same OAuth server, as its own client (`obgl-table`,
 redirect `<OBGL_PUBLIC_URL>/table/signin/callback`, registered by the
 server at start). Its cookies are `Secure` when `OBGL_PUBLIC_URL` is
-https. Nothing to create or set beyond "OAuth". Each session's control
-lock and the last finished hand shown to watchers are in the instance's
+https. Nothing to create or set beyond "OAuth". Each table's move lock,
+who is at it (the last move, who was seen), each program token's rate
+bucket and the last finished hand shown to a page are in the instance's
 memory: keep `--max-instances 1`.
 
 Check: the `table` check of `deploy/local/smoke.py` signs in at `/table/`,
-plays a step, and opens the session's watch link. It needs a server wired
-to a test IdP (`--sign-in github`, as in `mcp/test_smoke.py`), so against a
-real deployment a person does it: sign in at `/table/`, play a step, open
-the watch link Claude gives.
+reads and resets the table, plays a step, and makes, uses and revokes a
+program token. It needs a server wired to a test IdP (`--sign-in github`,
+as in `mcp/test_smoke.py`), so against a real deployment a person does it:
+sign in at `/table/`, play a step, make a token under Programs and run
+`OBGL_TOKEN=<it> go run ./sdk/example -table -hands 3` in `poker/engine`
+(the page shows the program's moves), then revoke it.
 
 ## Docs: what the service serves
 

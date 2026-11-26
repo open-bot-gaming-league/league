@@ -18,6 +18,12 @@ class StaleStateError(Exception):
     """The cached hand/step no longer matches what act()/next_hand() needs."""
 
 
+class MovedOnError(StaleStateError):
+    """The table refused a move because the decision it was meant for has
+    already been made (409): with one table played by whoever moves
+    first, usually by someone else at it (the user, or their program)."""
+
+
 class InvalidActionError(Exception):
     """The requested action is not one the current state allows."""
 
@@ -100,7 +106,7 @@ class PokerSession:
 
     def _require_session(self) -> None:
         if not self.session_id or self.last_state is None:
-            raise NoSessionError("no active session: call new_session() first")
+            raise NoSessionError("no active session: call table() first")
 
     def new(self, opponent: str | None = None, seat: str | None = None) -> dict:
         info = self.client.info()
@@ -112,10 +118,9 @@ class PokerSession:
         return state
 
     def attach(self, session_id: str) -> dict:
-        """Play an existing table session from here on (claim_session: a
-        session the owner opened elsewhere, or one this connection played
-        before someone took it over). The state is fetched fresh, so the
-        decision pending in it is the one act() makes next."""
+        """Play an existing table session from here on (with sign-in: the
+        account's one table). The state is fetched fresh, so the decision
+        pending in it is the one act() makes next."""
         info = self.client.info()
         state = self.client.state(session_id)
         self.big_blind = info["bigBlind"]
@@ -172,7 +177,7 @@ class PokerSession:
             )
         except TableError as e:
             if e.status == 409:
-                raise StaleStateError(
+                raise MovedOnError(
                     f"stale: {e.message}; call state() to refresh, then act() again"
                 ) from e
             if e.status == 400:
@@ -194,7 +199,7 @@ class PokerSession:
             state = self.client.next(self.session_id, self.last_state["hand"])
         except TableError as e:
             if e.status == 409:
-                raise StaleStateError(
+                raise MovedOnError(
                     f"stale: {e.message}; call state() to refresh"
                 ) from e
             raise

@@ -25,14 +25,16 @@ from google.cloud import firestore
 
 def find(db, account):
     """[(collection, document id)] holding `account`'s data."""
-    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables") if db.collection(c).document(account).get().exists]
-    for collection, field in (("table-sessions", "owner"), ("access", "subject"), ("refresh", "subject"), ("codes", "subject")):
+    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs")
+            if db.collection(c).document(account).get().exists]
+    for collection, field in (("table-sessions", "owner"), ("access", "subject"), ("refresh", "subject"), ("codes", "subject"),
+                              ("program-tokens", "account"), ("program-usage", "account")):
         for doc in db.collection(f"oauth_{collection}").stream():
             record = json.loads(doc.get("record"))
             if record.get(field) != account:
                 continue
             refs.append((f"oauth_{collection}", doc.id))
-            if collection == "table-sessions":  # its watch token: keyed by the token's sha256
+            if collection == "table-sessions" and "watch" in record:  # an old watch token: keyed by its sha256
                 refs.append(("oauth_watch-tokens", hashlib.sha256(record["watch"].encode()).hexdigest()))
     return refs
 
