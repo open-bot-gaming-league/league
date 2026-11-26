@@ -2,13 +2,13 @@ package bots
 
 import "github.com/open-bot-gaming-league/league/poker/engine/sdk"
 
-// Rock plays premium hands and nothing else. Before the flop it raises
+// Clam plays premium hands and nothing else. Before the flop it raises
 // with a big pair or two big cards and folds the rest (checking when it
 // can); after the flop it bets two pair or better and gives up on
 // anything less as soon as it meets a bet.
-type Rock struct{}
+type Clam struct{}
 
-func (Rock) Act(s sdk.State) sdk.Action {
+func (Clam) Act(s sdk.State) sdk.Action {
 	if s.Round == sdk.Preflop {
 		if premium(s.Hole) {
 			return s.RaisePot(1)

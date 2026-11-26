@@ -63,3 +63,44 @@ func (s State) Made() Category {
 	}
 	return Category(engine.HandCategory(Strength(s.Hole[:], s.Board)))
 }
+
+// Equity is the share of pots the seat's hand would win against one
+// random hand, the rest of the board dealt at random: 1 always wins, 0.5
+// is an even chance, ties count half. It plays out `samples` random
+// deals drawn from s.Rand (a few hundred is plenty for a decision), so it
+// is an estimate, and the same seed gives the same answer.
+func (s State) Equity(samples int) float64 {
+	var used uint64
+	for _, c := range s.Hole {
+		used |= 1 << c
+	}
+	for _, c := range s.Board {
+		used |= 1 << c
+	}
+	deck := make([]Card, 0, 52)
+	for c := Card(0); c < 52; c++ {
+		if used&(1<<c) == 0 {
+			deck = append(deck, c)
+		}
+	}
+	need := 2 + 5 - len(s.Board) // the other hand, and the board still to come
+	board := make([]Card, 5)
+	copy(board, s.Board)
+	won := 0.0
+	for range samples {
+		// A partial shuffle: the first `need` cards of the deck, at random.
+		for i := range need {
+			j := i + s.Rand.IntN(len(deck)-i)
+			deck[i], deck[j] = deck[j], deck[i]
+		}
+		copy(board[len(s.Board):], deck[2:need])
+		mine, theirs := Strength(s.Hole[:], board), Strength(deck[:2], board)
+		switch {
+		case mine > theirs:
+			won++
+		case mine == theirs:
+			won += 0.5
+		}
+	}
+	return won / float64(samples)
+}

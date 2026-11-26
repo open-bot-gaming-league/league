@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -243,5 +244,37 @@ func TestOddSizesAreAccepted(t *testing.T) {
 	}
 	if _, err := Match(&oddSizer{}, testHouse(t, engine.UniformStrategy{}), 400, 2); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Equity: against one random hand, aces win about 85% before the flop,
+// seven-deuce about 35%, the nuts on the river always; a seed repeats it.
+func TestEquity(t *testing.T) {
+	at := func(hole, board string, seed uint64) float64 {
+		s := State{Rand: rand.New(rand.NewPCG(seed, 0))}
+		for i := 0; i+1 < len(hole); i += 2 {
+			s.Hole[i/2], _ = ParseCard(hole[i : i+2])
+		}
+		for i := 0; i+1 < len(board); i += 2 {
+			c, _ := ParseCard(board[i : i+2])
+			s.Board = append(s.Board, c)
+		}
+		return s.Equity(4000)
+	}
+	for _, tc := range []struct {
+		hole, board string
+		lo, hi      float64
+	}{
+		{"AcAd", "", 0.82, 0.88},
+		{"7c2d", "", 0.31, 0.38},
+		{"AhKh", "QhJhTh2c3d", 1, 1},
+		{"7c2d", "AsAhAdKsKh", 0.4, 0.5}, // the board plays: a split (half) unless they hold the last ace or king
+	} {
+		if e := at(tc.hole, tc.board, 1); e < tc.lo || e > tc.hi {
+			t.Errorf("%s on %q: equity %.3f, want %.2f-%.2f", tc.hole, tc.board, e, tc.lo, tc.hi)
+		}
+	}
+	if at("9c8c", "Ks7c2d", 5) != at("9c8c", "Ks7c2d", 5) {
+		t.Error("the same seed gave two answers")
 	}
 }

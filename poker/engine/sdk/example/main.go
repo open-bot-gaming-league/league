@@ -1,7 +1,7 @@
 // Command example is a bot to start from. Edit myBot.Act, then:
 //
 //	go run ./sdk/example                  # 2,000 hands against each starter bot
-//	go run ./sdk/example -vs rock -hands 20000 -seed 7
+//	go run ./sdk/example -vs clam -hands 20000 -seed 7
 //	go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
 //	go run ./sdk/example -table -hands 50  # play your table (token: obgl-token.txt or OBGL_TOKEN); watch it in the browser
 //
@@ -21,11 +21,10 @@ import (
 )
 
 // myBot is yours to change. It plays pairs, aces and two big cards
-// before the flop, and any pair after it. It beats the starter bots by a
-// lot, as nearly anything sensible does: they are teaching bots, each
-// with one obvious leak. Measure against your last version (the sdk
-// README's first example), or a house bot if you have its files, to learn
-// whether a change helps.
+// before the flop, and any pair after it. It beats Clam and loses to Dove
+// and Shark: make it beat all three. Measure each change against your last
+// version (the sdk README's first example), and against a house bot if you
+// have its files, to learn whether it helps.
 type myBot struct{}
 
 func (myBot) Act(s sdk.State) sdk.Action {
@@ -52,7 +51,7 @@ func (myBot) Act(s sdk.State) sdk.Action {
 }
 
 func main() {
-	vs := flag.String("vs", "station,maniac,rock", "starter bots to play, comma-separated")
+	vs := flag.String("vs", "dove,clam,shark", "starter bots to play, by id, comma-separated")
 	hands := flag.Int("hands", 2000, "hands per match (every deal is played twice, seats swapped)")
 	seed := flag.Uint64("seed", 1, "seed: the same seed plays the same cards and the same random choices")
 	houseBuckets := flag.String("house-buckets", "", "a house bot's bucket file, already on disk (with -house-blueprint)")
@@ -87,9 +86,9 @@ func main() {
 		}
 		newBot, ok := bots.ByName[name]
 		if !ok {
-			log.Fatalf("no starter bot %q (station, maniac, rock)", name)
+			log.Fatalf("no starter bot %q (dove, clam, shark)", name)
 		}
-		opps = append(opps, opponent{name, newBot()})
+		opps = append(opps, opponent{bots.Names[name], newBot()})
 	}
 	switch {
 	case *houseBuckets != "" && *houseBlueprint != "":
@@ -98,7 +97,7 @@ func main() {
 			log.Fatal(err)
 		}
 		defer house.Close()
-		opps = append(opps, opponent{"house", house})
+		opps = append(opps, opponent{"house bot", house})
 	case *houseBuckets != "" || *houseBlueprint != "":
 		log.Fatal("a house bot needs both -house-buckets and -house-blueprint")
 	}
@@ -108,6 +107,6 @@ func main() {
 			log.Print(err)
 			os.Exit(1)
 		}
-		fmt.Printf("myBot vs %-8s %v\n", o.name, res)
+		fmt.Printf("myBot vs %-9s %v\n", o.name, res)
 	}
 }

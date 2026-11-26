@@ -7,18 +7,18 @@ import (
 	"github.com/open-bot-gaming-league/league/poker/engine/sdk/bots"
 )
 
-// riverBettor is Station with one rule added: on the river, when the other
-// seat checks to it, it bets three quarters of the pot.
-type riverBettor struct{ bots.Station }
+// respectful is Dove with one rule added: Dove never bluffs, so facing a
+// bet of half the pot or more, fold unless the hand is very strong.
+type respectful struct {
+	bots.Dove
+	strong float64 // the equity it takes to go on
+}
 
-func (b riverBettor) Act(s sdk.State) sdk.Action {
-	if s.Round == sdk.River && s.Legal.Check && len(s.History) > 0 {
-		last := s.History[len(s.History)-1]
-		if last.Seat != s.Seat && last.Round == sdk.River && last.Kind == sdk.Check {
-			return s.RaisePot(0.75)
-		}
+func (b respectful) Act(s sdk.State) sdk.Action {
+	if s.Legal.Call > 0 && 3*s.Legal.Call >= s.Pot && s.Equity(300) < b.strong {
+		return s.CheckOrFold() // a big bet from a bot that never bluffs: let it go
 	}
-	return b.Station.Act(s) // everything else: Station as it was
+	return b.Dove.Act(s) // everything else: Dove as it was
 }
 
 // Fork a starter bot, add one rule, and measure it against the bot it came
@@ -26,30 +26,21 @@ func (b riverBettor) Act(s sdk.State) sdk.Action {
 // swapped, so what is left is mostly the rule. This is the README's first
 // worked example.
 func Example_forkAStarterBot() {
-	res, err := sdk.Match(riverBettor{}, bots.Station{}, 20000, 1)
+	res, err := sdk.Match(respectful{strong: 0.8}, bots.Dove{}, 20000, 1)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(res)
-	// Output: -2.7 ± 1.0 bb/100 over 20000 hands
+	// Output: +59.6 ± 6.0 bb/100 over 20000 hands
 }
 
-// valueBettor is the rule refined after measuring: bet the river when
-// checked to only with a pair or better (Station calls; bluffing it loses).
-type valueBettor struct{ bots.Station }
-
-func (b valueBettor) Act(s sdk.State) sdk.Action {
-	if s.Made() >= sdk.Pair {
-		return riverBettor{b.Station}.Act(s)
-	}
-	return b.Station.Act(s)
-}
-
+// The rule refined after measuring: fold a little less. (It won less: the
+// two are within noise of each other, so the simpler first rule stays.)
 func Example_refineTheRule() {
-	res, err := sdk.Match(valueBettor{}, bots.Station{}, 20000, 1)
+	res, err := sdk.Match(respectful{strong: 0.7}, bots.Dove{}, 20000, 1)
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(res)
-	// Output: +7.5 ± 0.9 bb/100 over 20000 hands
+	// Output: +47.1 ± 6.9 bb/100 over 20000 hands
 }

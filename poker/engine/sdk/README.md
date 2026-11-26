@@ -24,16 +24,17 @@ Don't have these? Ask your agent to install these prerequisites.
 From a clone of the repository, in `poker/engine` (the Go module's root):
 
     go run ./sdk/example                       # your bot vs each starter bot, 2,000 hands each
-    go run ./sdk/example -vs rock -hands 20000 -seed 7
+    go run ./sdk/example -vs clam -hands 20000 -seed 7
     go test ./sdk/...
 
 `sdk/example/main.go` is the file to edit: `myBot.Act` is a bot. Copy
 it, or write your own type with an `Act` method.
 
-The starter bots are teaching bots, each with one obvious leak, so even
-the example bot beats them by a lot (well over +100 bb/100 against
-Station and Maniac). That says little about a bot: measure yours against
-your previous version (below), or a house bot if you have its files.
+The starter bots are teaching bots, each with a leak to find. The example
+bot beats Clam (+17.4 ± 2.5 bb/100) and loses to Shark (−9.6 ± 2.8) and
+Dove (−87.7 ± 8.6), over 20,000 hands each: making it beat all three is a
+good first goal. Measure every change against your previous version
+(below), and against the house bots if you have their files.
 
 ## First: fork a starter bot, add one rule, measure it
 
@@ -42,47 +43,40 @@ version against the old on the same seed. The same seed deals the same
 cards, and every deal is played twice with the seats swapped, so what is
 left in the result is mostly your change.
 
-Station with one rule added: on the river, when the other seat checks to
-it, bet three quarters of the pot.
+Dove never bluffs: a big bet from it means a strong hand. So, Dove with one
+rule added: facing a bet of half the pot or more, fold unless the hand is
+very strong (equity 0.8 or more).
 
 ```go
-type riverBettor struct{ bots.Station }
-
-func (b riverBettor) Act(s sdk.State) sdk.Action {
-	if s.Round == sdk.River && s.Legal.Check && len(s.History) > 0 {
-		last := s.History[len(s.History)-1]
-		if last.Seat != s.Seat && last.Round == sdk.River && last.Kind == sdk.Check {
-			return s.RaisePot(0.75)
-		}
-	}
-	return b.Station.Act(s) // everything else: Station as it was
+type respectful struct {
+	bots.Dove
+	strong float64 // the equity it takes to go on
 }
 
-res, _ := sdk.Match(riverBettor{}, bots.Station{}, 20000, 1)
-fmt.Println(res) // -2.7 ± 1.0 bb/100 over 20000 hands
+func (b respectful) Act(s sdk.State) sdk.Action {
+	if s.Legal.Call > 0 && 3*s.Legal.Call >= s.Pot && s.Equity(300) < b.strong {
+		return s.CheckOrFold() // a big bet from a bot that never bluffs: let it go
+	}
+	return b.Dove.Act(s) // everything else: Dove as it was
+}
+
+res, _ := sdk.Match(respectful{strong: 0.8}, bots.Dove{}, 20000, 1)
+fmt.Println(res) // +59.6 ± 6.0 bb/100 over 20000 hands
 ```
 
-The rule lost, by more than twice its SE: it bets every hand, and Station
-calls nearly every bet, so the bluffs pay. Refine it: bet only with a pair
-or better.
+The rule wins, by nearly ten times its SE: Dove calls by price and so pays
+off its own kind of bet, and the fork stops doing that. Refine it: fold a
+little less (0.7).
 
 ```go
-type valueBettor struct{ bots.Station }
-
-func (b valueBettor) Act(s sdk.State) sdk.Action {
-	if s.Made() >= sdk.Pair {
-		return riverBettor{b.Station}.Act(s)
-	}
-	return b.Station.Act(s)
-}
-
-res, _ = sdk.Match(valueBettor{}, bots.Station{}, 20000, 1)
-fmt.Println(res) // +7.5 ± 0.9 bb/100 over 20000 hands
+res, _ = sdk.Match(respectful{strong: 0.7}, bots.Dove{}, 20000, 1)
+fmt.Println(res) // +47.1 ± 6.9 bb/100 over 20000 hands
 ```
 
-Now it wins: value bets against a bot that calls. Both are in
-`sdk/bots/example_test.go` and run with `go test ./sdk/bots/`, which checks
-those exact numbers.
+Less, but the two are within noise of each other (their difference is
+smaller than their SEs added up): keep the first, or run more hands to
+tell them apart. Both are in `sdk/bots/example_test.go` and run with
+`go test ./sdk/bots/`, which checks those exact numbers.
 
 ## A bot
 
@@ -149,6 +143,7 @@ Helpers on State, each always legal:
 | `s.AllIn()` | raise to `MaxTo`, or call when you cannot raise |
 | `s.Facing()` | (a question) has the other seat bet or raised this round since you last moved? |
 | `s.Made()` | your best hand's category now: `sdk.HighCard` .. `sdk.StraightFlush` (preflop: `Pair` or `HighCard`) |
+| `s.Equity(n)` | (a question) the share of pots your hand wins against one random hand, from `n` random deals (a few hundred is plenty; drawn from `s.Rand`) |
 
 Cards: `sdk.Card`, with `c.Rank()` 0..12 (`sdk.Two` .. `sdk.Ace`),
 `c.Suit()` 0..3, `c.String()` like `"As"`. `sdk.ParseCard("Td")` reads one;
@@ -171,7 +166,7 @@ stops a match with an error that names the hand.
 ## Measure it: Match
 
 ```go
-res, err := sdk.Match(myBot{}, bots.Rock{}, 20000, 1)
+res, err := sdk.Match(myBot{}, bots.Clam{}, 20000, 1)
 fmt.Println(res) // like "+17.4 ± 2.5 bb/100 over 20000 hands"
 ```
 
@@ -187,12 +182,28 @@ your bot into every kind of spot (a match fails on an illegal move).
 
 ## Opponents
 
-`bots.Station`, `bots.Maniac`, `bots.Rock` (`sdk/bots/`): three starter
-bots, one short file each. Station calls almost everything, Maniac raises
-and shoves with anything, Rock plays only premium hands and folds to
-aggression. `bots.ByName["rock"]()` builds one by name. Your own earlier
-versions are the other opponent worth having: keep them, and `Match` each
-change against the last.
+`bots.Dove`, `bots.Clam`, `bots.Shark` (`sdk/bots/`): three starter bots,
+one short file each, and with Turtle and Ox (below) the league's five
+house bots. `bots.ByName["clam"]()` builds one by id; `bots.Names` has
+their names.
+
+- **Dove** (`dove.go`) never bluffs: it bets and raises in proportion to its
+  equity against a random hand, calls a fair price, folds weak hands to big
+  bets. Beats Clam (+4.3 ± 1.9 bb/100); loses to Shark (−67.4 ± 2.0),
+  Turtle (−36.1 ± 2.6) and Ox (−50.5 ± 2.2).
+- **Clam** (`clam.go`) plays premium hands only and folds to aggression.
+  Beats Turtle (+5.3 ± 0.8); loses to Ox (−49.1 ± 0.9), Shark (−16.4 ± 1.6)
+  and Dove (−4.3 ± 1.9).
+- **Shark** (`shark.go`) is tight and aggressive: a preflop chart by seat
+  (edit it hand by hand), a continuation bet on the flop, then bets only a
+  real hand. Beats Dove (+67.4 ± 2.0), Clam (+16.4 ± 1.6) and Turtle
+  (+3.7 ± 1.0); loses to Ox (−33.7 ± 1.3).
+
+(Duplicate matches: 200,000 hands against Ox, 400,000 against Turtle over two
+seeds; between the starters, enough hands for an SE of 2 or less.)
+
+Your own earlier versions are the other opponent worth having: keep them,
+and `Match` each change against the last.
 
 ## Play your table
 
@@ -235,7 +246,7 @@ bot's files; see its package comment), where it starts a session.
 
 ## If you have house-bot files
 
-The league's trained bots run here too, if their files are on your disk (a
+The league's trained bots, Turtle and Ox, run here too, if their files are on your disk (a
 bucket file and a blueprint, hundreds of MB each; not in the repository,
 and nothing here downloads them):
 
@@ -250,7 +261,7 @@ the menu sizes around them.
 | file | what |
 |---|---|
 | `bot.go` | `Bot`, `State`, `Legal`, `Action`, `Event`, the helpers, `Random` |
-| `cards.go` | `Card`, ranks, `Category`, `Made`, `Strength` |
+| `cards.go` | `Card`, ranks, `Category`, `Made`, `Strength`, `Equity` |
 | `match.go` | `Match`, `Result` |
 | `house.go` | `House`, `LoadHouse` |
 | `table.go` | `Table`, the table client |
