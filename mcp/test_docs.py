@@ -26,6 +26,8 @@ FILES["/docs/PRIVACY.md"] = os.path.join(REPO, "docs", "PRIVACY.md")
 FILES["/docs/TERMS.md"] = os.path.join(REPO, "docs", "TERMS.md")
 FILES["/docs/SDK.md"] = os.path.join(REPO, "docs", "SDK.md")
 # The legal pages: URL path -> (a heading the page must show, the markdown file's name).
+# Each legal page's stated date, as its file has it: a change to the text changes it.
+UPDATED = {"/docs/privacy": "November 26, 2026", "/docs/terms": "November 22, 2026"}
 LEGAL = {
     "/docs/privacy": ("Privacy (interim)", "/docs/PRIVACY.md"),
     "/docs/terms": ("Terms of Service (interim)", "/docs/TERMS.md"),
@@ -116,7 +118,7 @@ def test_legal_pages_carry_no_drafting_markers(base, path):
     for text in (_get(base + path)[2].decode(), _get(base + LEGAL[path][1])[2].decode()):
         for marker in ("[CHECK", "DRAFT", "PLACEHOLDER", "[EFFECTIVE DATE]"):
             assert marker not in text, (path, marker)
-        assert "Last updated: November 22, 2026" in text
+        assert f"Last updated: {UPDATED[path]}" in text
 
 
 def test_unknown_doc_is_404(base):
