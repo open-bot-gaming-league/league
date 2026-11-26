@@ -6,11 +6,11 @@
 
 ## Play now
 
-First you sign in with GitHub or Google: that is your account here. Add this URL as a custom connector in Claude (Settings > Connectors > Add custom connector), then ask Claude to play a hand:
+Add this URL as a custom connector in Claude (Settings > Connectors > Add custom connector), then ask Claude to play a hand:
 
     https://obgl.truemirrorgames.com/mcp
 
-When Claude opens the sign-in page, sign in with GitHub or Google.
+Claude then opens a sign-in page: sign in with GitHub or Google. That is your account here.
 
 **Or play in your browser:** https://obgl.truemirrorgames.com/table/ (the same sign-in). Signed in with GitHub or Google in both places, you and Claude share one table: watch Claude play it live in the browser, play any hand yourself (whoever moves first on a decision makes it), and pick the bot and the seat there.
 

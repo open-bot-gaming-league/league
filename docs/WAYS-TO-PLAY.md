@@ -17,7 +17,7 @@ This file moves a rung to LIVE when it's built, not before.
 
 Everything in this section is a plan. None of it exists yet, and any of it may change.
 
-- **Signup:** sign in with GitHub or Google. You need it for your table, the connector, program tokens, submitting a bot, and anything that spends compute credits.
+- **Signup:** submitting a bot to the league and spending compute credits will use the same GitHub or Google sign-in.
 - **Compute credits:** how we price the league's cloud compute. Everyone who signs up gets the same free daily allowance. You can't buy compute credits at first.
 - **Not for profit:** compute credits are our attempt to price cloud compute in a sane, fair way, not a business model. When we give credits away, they really cost us something.
 - **The league:** each submission challenges a table drawn from the pool of bots and plays everyone at it. Rankings are your average winnings per 100 hands over the season, as challenger and defender.

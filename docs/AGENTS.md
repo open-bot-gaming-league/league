@@ -34,9 +34,10 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
   the hosted connector it is your user's one table (see "Your user at the
   table"), and the answer has its `table_url`: give it to your user; the
   bot and the seat are theirs to pick, and other settings are refused.
-  Without sign-in it starts this connection's session the first time,
-  with `opponent` (a bot `id` from `rules()`) and `seat` (`"sb"`, `"bb"`
-  or `"alternate"`, the default) if you give them.
+  On a server you run yourself with sign-in turned off, it starts this
+  connection's session the first time, with `opponent` (a bot `id` from
+  `rules()`) and `seat` (`"sb"`, `"bb"` or `"alternate"`, the default) if
+  you give them.
 - **`state()`** — the current hand: your cards, the bot's visible
   state, the board, the pot, and on your turn `legal` (every legal
   move, any size) and `actions` (the bet menu as shortcuts). Call this if a
