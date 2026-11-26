@@ -9,7 +9,6 @@ import (
 	"os"
 	"runtime"
 	"sync"
-	"syscall"
 	"unsafe"
 )
 
@@ -222,9 +221,9 @@ func OpenTableAbstraction(path string) (*TableAbstraction, error) {
 	if info.Size() < 16 {
 		return nil, fmt.Errorf("%s: too short to be a bucket file", path)
 	}
-	mapped, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	mapped, err := mapFile(f, info.Size())
 	if err != nil {
-		return nil, fmt.Errorf("%s: mmap: %w", path, err)
+		return nil, fmt.Errorf("%s: map: %w", path, err)
 	}
 	t := &TableAbstraction{mapped: mapped}
 	fail := func(format string, args ...any) (*TableAbstraction, error) {
@@ -261,7 +260,7 @@ func (t *TableAbstraction) Close() error {
 	if t.mapped == nil {
 		return nil
 	}
-	err := syscall.Munmap(t.mapped)
+	err := unmapFile(t.mapped)
 	t.mapped = nil
 	t.table = [MaxRounds][]uint16{}
 	return err

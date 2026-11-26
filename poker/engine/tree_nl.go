@@ -1,6 +1,7 @@
 package engine
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -33,20 +34,41 @@ type NLConfig struct {
 }
 
 func LoadNLConfig(path string) (NLConfig, error) {
-	var cfg NLConfig
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg, err
+		return NLConfig{}, err
 	}
+	return parseNLConfig(data, path)
+}
+
+func parseNLConfig(data []byte, name string) (NLConfig, error) {
+	var cfg NLConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, fmt.Errorf("%s: %w", path, err)
+		return cfg, fmt.Errorf("%s: %w", name, err)
 	}
 	if cfg.SB <= 0 || cfg.BB < cfg.SB || cfg.StackBB <= 0 {
-		return cfg, fmt.Errorf("%s: need 0 < sb <= bb and stack_bb > 0", path)
+		return cfg, fmt.Errorf("%s: need 0 < sb <= bb and stack_bb > 0", name)
 	}
 	return cfg, nil
 }
 
+// tableConfigJSON is the betting config the league's table serves
+// (deploy/cloudrun/Dockerfile copies this same file into the image).
+//
+//go:embed configs/table_50bb.json
+var tableConfigJSON []byte
+
+// TableConfig is the league table's betting config, configs/table_50bb.json:
+// blinds 50/100, 50 bb stacks, and the bet menu the house bots train on.
+// Code that plays the league's game (the SDK) takes the rules from here
+// rather than restating them.
+func TableConfig() NLConfig {
+	cfg, err := parseNLConfig(tableConfigJSON, "configs/table_50bb.json")
+	if err != nil {
+		panic(err) // embedded at build time; TestTableConfig reads it
+	}
+	return cfg
+}
 func (c *NLConfig) menu(wager int) []float64 {
 	switch wager {
 	case 1:

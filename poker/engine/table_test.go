@@ -3,6 +3,7 @@ package engine
 import (
 	"math"
 	"math/rand/v2"
+	"reflect"
 	"testing"
 )
 
@@ -584,4 +585,57 @@ func TestBotNeverPlaysIllegallyAgainstAnySize(t *testing.T) {
 		}
 	}
 	t.Logf("%d hands, %d showdowns, %d went on past the end of the tree's line", hands, showdowns, offTree)
+}
+
+// TableConfig is the config file the table is served with, byte for byte.
+func TestTableConfig(t *testing.T) {
+	want, err := LoadNLConfig("configs/table_50bb.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := TableConfig(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("TableConfig() = %+v, the file has %+v", got, want)
+	}
+}
+
+// ParseCard reads back every card's name; Rank and Suit take it apart.
+func TestParseCard(t *testing.T) {
+	for c := Card(0); c < maxDeck; c++ {
+		got, err := ParseCard(c.String())
+		if err != nil || got != c {
+			t.Fatalf("ParseCard(%q) = %v, %v", c.String(), got, err)
+		}
+		if name := c.String(); cardRanks[c.Rank()] != name[0] || cardSuits[c.Suit()] != name[1] {
+			t.Fatalf("%s: rank %d, suit %d", name, c.Rank(), c.Suit())
+		}
+	}
+	for _, bad := range []string{"", "A", "1s", "Ax", "AsK", "as"} {
+		if _, err := ParseCard(bad); err == nil {
+			t.Errorf("ParseCard(%q): no error", bad)
+		}
+	}
+}
+
+func TestHandCategory(t *testing.T) {
+	r := HoldemRules(13)
+	cards := func(names ...string) []Card {
+		out := make([]Card, len(names))
+		for i, n := range names {
+			out[i], _ = ParseCard(n)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		hole, board []Card
+		want        string
+	}{
+		{cards("As", "Kd"), cards("2c", "7h", "9s", "Jd", "3c"), "high card"},
+		{cards("As", "Ad"), cards("2c", "7h", "9s", "Jd", "3c"), "a pair"},
+		{cards("As", "Kd"), cards("Ac", "Kh", "9s", "Jd", "3c"), "two pair"},
+		{cards("9h", "Th"), cards("Jh", "Qh", "Kh", "2d", "3c"), "a straight flush"},
+	} {
+		if got := CategoryName(HandCategory(r.Strength(tc.hole, tc.board))); got != tc.want {
+			t.Errorf("%v %v: %s, want %s", tc.hole, tc.board, got, tc.want)
+		}
+	}
 }

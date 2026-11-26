@@ -76,20 +76,27 @@ func OpenGame(name, configPath, absPath string) (*Game, func() error, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		if absPath == "category" {
-			g, err := NewHoldem(cfg, CategoryAbstraction{Ranks: 13})
-			return g, noop, err
-		}
-		abs, err := OpenTableAbstraction(absPath)
-		if err != nil {
-			return nil, nil, err
-		}
-		g, err := NewHoldem(cfg, abs)
-		if err != nil {
-			abs.Close()
-			return nil, nil, err
-		}
-		return g, abs.Close, nil
+		return OpenHoldem(cfg, absPath)
 	}
 	return nil, nil, fmt.Errorf("engine: unknown game %q (kuhn, leduc, holdem)", name)
+}
+
+// OpenHoldem is NewHoldem with the card abstraction named as OpenGame
+// names it: a bucket file, or "category". Call the returned function
+// when done.
+func OpenHoldem(cfg NLConfig, absPath string) (*Game, func() error, error) {
+	if absPath == "category" {
+		g, err := NewHoldem(cfg, CategoryAbstraction{Ranks: 13})
+		return g, func() error { return nil }, err
+	}
+	abs, err := OpenTableAbstraction(absPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	g, err := NewHoldem(cfg, abs)
+	if err != nil {
+		abs.Close()
+		return nil, nil, err
+	}
+	return g, abs.Close, nil
 }

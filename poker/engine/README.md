@@ -25,8 +25,10 @@ of code.
 | responders | `responder.go` | real-card players that exploit a blueprint by play, a lower bound that works on any tree: local best response (one-step lookahead) and a rollout responder |
 | head-to-head | `match.go` | two blueprints on the same tree, every deal in both seatings |
 | table | `table.go`, `translate.go`, `cmd/table` | a person against a blueprint in the browser: one hand at a time, integer chips, any legal bet size; the blueprint plays its own tree's menu through pseudo-harmonic action translation; session score and hand history (`cmd/table/API.md`) |
+| bot SDK | `sdk/` | write a bot (`Act(State) Action`, real chips, the table's rules through `TableHand`), measure it against another locally (duplicate deals, bb/100 with its standard error), play it at a table over the HTTP API; three starter bots (`sdk/README.md`) |
 
-Go standard library only. Linux only (mmap through `syscall`).
+Go standard library only. Builds wherever Go does: bucket files and blueprints are mmapped on Unix
+and read into memory elsewhere (`mapfile_*.go`).
 
 ## Build and test
 

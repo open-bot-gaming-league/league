@@ -1,0 +1,185 @@
+package sdk
+
+import (
+	"strings"
+	"testing"
+)
+
+// caller checks or calls, always: no randomness.
+type caller struct{}
+
+func (caller) Act(s State) Action { return s.CheckOrCall() }
+
+// tight raises the pot with a pair and folds to any bet otherwise: no
+// randomness.
+type tight struct{}
+
+func (tight) Act(s State) Action {
+	if s.Made() >= Pair {
+		return s.RaisePot(1)
+	}
+	return s.CheckOrFold()
+}
+
+func TestMatchIsDeterministic(t *testing.T) {
+	a, err := Match(Random{}, caller{}, 400, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := Match(Random{}, caller{}, 400, 5)
+	c, _ := Match(Random{}, caller{}, 400, 6)
+	if a != b {
+		t.Fatalf("seed 5 twice: %v, then %v", a, b)
+	}
+	if a == c {
+		t.Fatalf("seeds 5 and 6 played the same match: %v", a)
+	}
+	if a.Hands != 400 || a.SE <= 0 {
+		t.Fatalf("%+v", a)
+	}
+}
+
+// Duplicate deals: two bots without randomness get the same cards from
+// both seats, so a bot against itself breaks exactly even, and swapping
+// the two bots negates the result.
+func TestDuplicateDeals(t *testing.T) {
+	self, err := Match(tight{}, tight{}, 1000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if self.Net != 0 || self.BBPer100 != 0 {
+		t.Fatalf("a bot against itself: %v (%d chips)", self, self.Net)
+	}
+	ab, _ := Match(tight{}, caller{}, 1000, 1)
+	ba, _ := Match(caller{}, tight{}, 1000, 1)
+	if ab.Net == 0 || ab.Net != -ba.Net || ab.SE != ba.SE {
+		t.Fatalf("tight vs caller %+v, caller vs tight %+v", ab, ba)
+	}
+	if odd, _ := Match(tight{}, caller{}, 7, 1); odd.Hands != 8 {
+		t.Fatalf("7 hands played as %d", odd.Hands)
+	}
+}
+
+// watcher checks every State it is shown, then plays Random.
+type watcher struct {
+	t     *testing.T
+	seen  int
+	kinds map[Kind]int
+}
+
+func (w *watcher) Act(s State) Action {
+	w.t.Helper()
+	w.seen++
+	const start = 5000
+	if s.Stack+s.OppStack+s.Pot != 2*start || s.Stack < 0 || s.OppStack < 0 || s.BigBlind != 100 {
+		w.t.Fatalf("chips do not add up: %+v", s)
+	}
+	if call := s.OppInRound - s.InRound; call != s.Legal.Call || (call > 0) != s.Legal.Fold || (call == 0) != s.Legal.Check {
+		w.t.Fatalf("legal %+v with %d in against %d", s.Legal, s.InRound, s.OppInRound)
+	}
+	if s.Legal.CanRaise() && (s.Legal.MinTo <= s.OppInRound || s.Legal.MaxTo != s.InRound+s.Stack) {
+		w.t.Fatalf("raise range %+v with %d in, %d behind", s.Legal, s.InRound, s.Stack)
+	}
+	if want := []int{0, 3, 4, 5}[s.Round]; len(s.Board) != want {
+		w.t.Fatalf("%s with %d board cards", s.Round, len(s.Board))
+	}
+	if len(s.History) == 0 && (s.Seat != SmallBlind || s.Round != Preflop) {
+		w.t.Fatalf("first to act: seat %d in the %s", s.Seat, s.Round)
+	}
+	if n := len(s.History); n > 0 && s.History[n-1].Seat == s.Seat && s.History[n-1].Round == s.Round {
+		w.t.Fatalf("acting twice in a row: %+v", s.History)
+	}
+	a := Random{}.Act(s)
+	w.kinds[a.Kind]++
+	return a
+}
+
+// Every State a bot sees is consistent, and the helpers' moves are all
+// legal (the engine refuses anything else, which would fail the match).
+func TestStatesAndHelpers(t *testing.T) {
+	w := &watcher{t: t, kinds: map[Kind]int{}}
+	if _, err := Match(w, Random{}, 2000, 3); err != nil {
+		t.Fatal(err)
+	}
+	for k := Fold; k <= Raise; k++ {
+		if w.kinds[k] == 0 {
+			t.Errorf("no %s seen in %d decisions", k, w.seen)
+		}
+	}
+}
+
+type badBot struct{ a Action }
+
+func (b badBot) Act(State) Action { return b.a }
+
+type panicBot struct{}
+
+func (panicBot) Act(s State) Action { return Action{To: s.Board[4].Rank()} }
+
+func TestBadBotsAreErrors(t *testing.T) {
+	for _, tc := range []struct {
+		bot  Bot
+		want string
+	}{
+		{badBot{Action{Kind: Raise, To: 1}}, "raise to 1"},
+		{badBot{Action{Kind: Check}}, "no check here"},
+		{badBot{Action{Kind: 9}}, "no move kind 9"},
+		{panicBot{}, "panicked"},
+	} {
+		_, err := Match(tc.bot, caller{}, 10, 1)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "hand 1") {
+			t.Errorf("%T %v: %v, want an error with %q and the hand", tc.bot, tc.bot, err, tc.want)
+		}
+	}
+}
+
+func TestFacing(t *testing.T) {
+	s := State{Seat: BigBlind, Round: Flop, History: []Event{
+		{Seat: SmallBlind, Round: Preflop, Kind: Call},
+		{Seat: BigBlind, Round: Preflop, Kind: Check},
+		{Seat: BigBlind, Round: Flop, Kind: Check},
+		{Seat: SmallBlind, Round: Flop, Kind: Raise},
+	}}
+	if !s.Facing() {
+		t.Error("a bet after our check: not facing it")
+	}
+	s.History = s.History[:3]
+	if s.Facing() {
+		t.Error("our own check: facing")
+	}
+	s.History = append(s.History[:2], Event{Seat: SmallBlind, Round: Preflop, Kind: Raise})
+	if s.Facing() {
+		t.Error("last round's raise counted in this round")
+	}
+}
+
+func TestMade(t *testing.T) {
+	cards := func(names ...string) []Card {
+		out := make([]Card, len(names))
+		for i, n := range names {
+			c, err := ParseCard(n)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[i] = c
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		hole, board []Card
+		want        Category
+	}{
+		{cards("As", "Ad"), nil, Pair},
+		{cards("As", "Kd"), nil, HighCard},
+		{cards("As", "Kd"), cards("Ac", "Kh", "2s"), TwoPair},
+		{cards("9h", "Th"), cards("Jh", "Qh", "Kh", "2d"), StraightFlush},
+	} {
+		s := State{Hole: [2]Card(tc.hole), Board: tc.board}
+		if got := s.Made(); got != tc.want {
+			t.Errorf("%v on %v: %v, want %v", tc.hole, tc.board, got, tc.want)
+		}
+	}
+	if StraightFlush.String() != "a straight flush" || HighCard.String() != "high card" {
+		t.Error("category names out of step with the engine's")
+	}
+}

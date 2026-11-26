@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"syscall"
 )
 
 // A blueprint is the strategy as it is served: one byte per (infoset,
@@ -47,7 +46,7 @@ type BlueprintHeader struct {
 type Blueprint struct {
 	Header BlueprintHeader
 	probs  []uint8
-	mapped []byte // the whole mmap, when the blueprint came from OpenBlueprint
+	mapped []byte // the whole file, mapped (mapFile), when the blueprint came from OpenBlueprint
 }
 
 func gameHeader(g *Game) BlueprintHeader {
@@ -177,9 +176,9 @@ func OpenBlueprint(path string, g *Game) (*Blueprint, error) {
 	if info.Size() < 16 {
 		return nil, fmt.Errorf("%s: too short to be a blueprint", path)
 	}
-	mapped, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED)
+	mapped, err := mapFile(f, info.Size())
 	if err != nil {
-		return nil, fmt.Errorf("%s: mmap: %w", path, err)
+		return nil, fmt.Errorf("%s: map: %w", path, err)
 	}
 	b := &Blueprint{mapped: mapped}
 	fail := func(format string, args ...any) (*Blueprint, error) {
@@ -217,7 +216,7 @@ func (b *Blueprint) Close() error {
 	if b.mapped == nil {
 		return nil
 	}
-	err := syscall.Munmap(b.mapped)
+	err := unmapFile(b.mapped)
 	b.mapped, b.probs = nil, nil
 	return err
 }

@@ -1,6 +1,9 @@
 package engine
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // A hand at a table: heads-up no-limit hold'em with real cards, whole
 // chips and any legal bet size. The rules (blinds, stacks, the min-raise,
@@ -24,8 +27,33 @@ func (c Card) String() string {
 	return string([]byte{cardRanks[c>>2], cardSuits[c&3]})
 }
 
+// ParseCard reads a card's two-character name, as String writes it.
+func ParseCard(s string) (Card, error) {
+	if len(s) == 2 {
+		r, u := strings.IndexByte(cardRanks, s[0]), strings.IndexByte(cardSuits, s[1])
+		if r >= 0 && u >= 0 {
+			return Card(r<<2 | u), nil
+		}
+	}
+	return 0, fmt.Errorf("engine: %q is not a card (rank 23456789TJQKA, then suit cdhs)", s)
+}
+
+// Rank is a hold'em card's rank, 0 (the deuce) to 12 (the ace).
+func (c Card) Rank() int { return int(c >> 2) }
+
+// Suit is a card's suit, 0 to 3: clubs, diamonds, hearts, spades.
+func (c Card) Suit() int { return int(c & 3) }
+
 var categoryNames = [...]string{"high card", "a pair", "two pair", "three of a kind", "a straight",
 	"a flush", "a full house", "four of a kind", "a straight flush"}
+
+// HandCategory is the category of a hold'em showdown strength (what
+// Rules.Strength returns): 0, high card, to 8, a straight flush, in the
+// order of CategoryName.
+func HandCategory(strength uint32) int { return int(strength >> catShift) }
+
+// CategoryName is a hand category in words: "two pair", "a flush".
+func CategoryName(category int) string { return categoryNames[category] }
 
 // TableCards is the number of cards a hand needs: two hole cards each and
 // a five-card board.
@@ -296,7 +324,7 @@ func (h *TableHand) strength(seat int) uint32 { return h.g.Rules.Strength(h.Hole
 
 // HandName is what a seat holds with the full board: "two pair", "a
 // flush".
-func (h *TableHand) HandName(seat int) string { return categoryNames[h.strength(seat)>>catShift] }
+func (h *TableHand) HandName(seat int) string { return CategoryName(HandCategory(h.strength(seat))) }
 
 // Bucket is the card-abstraction bucket of a seat's cards in the current
 // round: with a TreeView's node, the infoset a blueprint is asked about.
