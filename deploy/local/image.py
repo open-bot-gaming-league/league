@@ -7,7 +7,8 @@ instructions against directories instead of layers, so a change to the
 image (a new COPY, a new ENV) shows up locally without anyone editing a
 second script. It understands only the instructions the Dockerfile uses
 today -- FROM, ARG, ENV, WORKDIR, COPY (incl. --from=<stage>), ENTRYPOINT,
-and RUN for exactly three commands (go build [-buildmode=...], pip install -r, chmod) -- and
+and RUN for exactly four commands (go build [-buildmode=...], pip install -r, chmod, and a
+program of the image's own tree, ./...) -- and
 FAILS on anything else rather than guess. When the Dockerfile grows
 something new, extend this file (and deploy/local/README.md).
 
@@ -173,6 +174,15 @@ class Image:
             for p in toks[2:]:
                 host = st.path(p)
                 os.chmod(host, os.stat(host).st_mode | 0o111)
+        elif toks[0].startswith("./"):
+            # A program of the image's own tree, run from WORKDIR with the
+            # stage's ENV: the image's check that its binaries start.
+            # Absolute paths would name this box's files, not the image's.
+            if any(t.startswith("/") and t != "/dev/null" for t in toks[1:]):
+                die(f"unsupported RUN of an image program with an absolute path: {rest!r}")
+            env = dict(os.environ)
+            env.update(st.env)
+            self.sh([st.path(toks[0]), *toks[1:]], cwd=st.path("."), env=env)
         else:
             die(f"unsupported RUN (extend image.py): {rest!r}")
 

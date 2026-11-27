@@ -97,6 +97,12 @@ COPY deploy/cloudrun/data/ ./table/data/
 
 COPY deploy/cloudrun/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh ./table/bin/table ./arena/bin/botcheck ./arena/bin/rankedtable
+# Run the arena's two programs once, here, so a bad cgo link of wasmtime
+# against this image's libraries (or a guest that does not load) fails the
+# build instead of the first submission: botcheck on the house guest, and a
+# tiny all-wasm table of the starters (a few seconds).
+RUN ./arena/bin/botcheck ./arena/guests/house.wasm
+RUN ./arena/bin/rankedtable play -challenger dove -wasm-pool -guests ./arena/guests -pool clam,shark -seats 2 -hands 200 -out /dev/null
 
 # Cloud Run sets $PORT and expects the container to listen on it;
 # entrypoint.sh reads it for the MCP server and sets OBGL_TRANSPORT=http
