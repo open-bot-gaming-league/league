@@ -2,7 +2,6 @@ package arena
 
 import (
 	"fmt"
-	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -63,14 +62,13 @@ func benchProgram(b *testing.B, name, mode string) (*Program, Config) {
 	if name != "turtle" && name != "ox" {
 		return guest(b, name), Config{}
 	}
-	dir, err := sdk.HouseCacheDir()
+	data, err := HouseData(name)
 	if err != nil {
 		b.Fatal(err)
 	}
-	hb := sdk.Houses().Bots[name]
-	cfg := Config{Data: Files{"buckets.bin": filepath.Join(dir, hb.Buckets), "blueprint.bp": filepath.Join(dir, hb.Blueprint)}}
+	cfg := Config{Data: data}
 	if mode == "wasm-inmemory" {
-		return guest(b, "house", "-buildmode=c-shared", "-tags=tables_in_memory"), cfg
+		return guest(b, "house", "-tags=tables_in_memory"), cfg
 	}
 	return guest(b, "house"), cfg
 }

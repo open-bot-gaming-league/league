@@ -1,6 +1,8 @@
 package arena
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -48,7 +50,11 @@ func ticks(d time.Duration) uint64 { return uint64((d+tick-1)/tick) + 1 }
 // starts any number of Bots, concurrently.
 type Program struct {
 	module *wasmtime.Module
+	sha256 string
 }
+
+// SHA256 is the module's sha256, in hex: what plays, for a record.
+func (p *Program) SHA256() string { return p.sha256 }
 
 // Compile checks and compiles a bot module. It is rejected if it is not
 // valid wasm, imports anything but the WASI preview 1 functions, or does
@@ -109,7 +115,8 @@ func Compile(wasm []byte) (*Program, error) {
 		}
 		return nil, fmt.Errorf("arena: the module does not export %s%s", strings.Join(missing, ", "), hint)
 	}
-	return &Program{module: m}, nil
+	sum := sha256.Sum256(wasm)
+	return &Program{module: m, sha256: hex.EncodeToString(sum[:])}, nil
 }
 
 // externSig is an export's type as "memory" or "(i32, i64) -> (i64)".

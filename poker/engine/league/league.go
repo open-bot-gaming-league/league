@@ -62,11 +62,25 @@ type Meter interface {
 	Usage() Usage
 }
 
-// Usage is what one bot used in one pair.
+// Usage is what one bot used in one pair, and how its sandbox ruled.
 type Usage struct {
 	Fuel       int64 // the runtime's fuel units burned
 	BytesRead  int64 // bytes of the bot's data read
 	MemoryPeak int64 // the bot's peak memory, bytes
+	// Forfeited is the decisions its sandbox played for it (check, else
+	// fold): moves that were illegal or errors, and every decision after a
+	// Fault.
+	Forfeited int64
+	Fault     *Fault // what stopped the bot in this pair; nil if nothing did
+}
+
+// Fault is what stopped a sandboxed bot: from Decision on (counted from 1
+// in the pair; 0 is its load) the sandbox played for it.
+type Fault struct {
+	Kind     string `json:"kind"`
+	Decision int    `json:"decision"`
+	Hand     int    `json:"hand"`
+	Detail   string `json:"detail"`
 }
 
 // Config is a table's settings. The zero value of each field is the usual

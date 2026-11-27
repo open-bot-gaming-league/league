@@ -3,7 +3,6 @@ package arena
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -21,11 +20,6 @@ func TestHouseBotsPlayAsNative(t *testing.T) {
 	if testing.Short() {
 		t.Skip("plays 10 matches")
 	}
-	dir, err := sdk.HouseCacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := sdk.Houses()
 	native := map[string]func() (sdk.Bot, func()){}
 	wasm := map[string]func() (*Program, Config){}
 	for _, name := range []string{"dove", "clam", "shark"} {
@@ -33,9 +27,9 @@ func TestHouseBotsPlayAsNative(t *testing.T) {
 		wasm[name] = func() (*Program, Config) { return guest(t, name), Config{} }
 	}
 	for _, id := range []string{"turtle", "ox"} {
-		hb := m.Bots[id]
-		if _, err := os.Stat(filepath.Join(dir, hb.Buckets)); err != nil {
-			t.Skipf("%s is not downloaded (%v)", hb.Name, err)
+		data, err := HouseData(id)
+		if err != nil {
+			t.Skip(err)
 		}
 		native[id] = func() (sdk.Bot, func()) {
 			h, err := sdk.LoadHouseByID(id)
@@ -44,7 +38,6 @@ func TestHouseBotsPlayAsNative(t *testing.T) {
 			}
 			return h, func() { h.Close() }
 		}
-		data := Files{"buckets.bin": filepath.Join(dir, hb.Buckets), "blueprint.bp": filepath.Join(dir, hb.Blueprint)}
 		wasm[id] = func() (*Program, Config) { return guest(t, "house"), Config{Data: data} }
 	}
 	hands := 10_000

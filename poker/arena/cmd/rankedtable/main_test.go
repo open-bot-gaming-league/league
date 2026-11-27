@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/open-bot-gaming-league/league/poker/arena"
 	"github.com/open-bot-gaming-league/league/poker/engine/league"
 )
 
@@ -51,6 +53,52 @@ func TestPlayAndCost(t *testing.T) {
 	}
 }
 
+// TestWasmTable: every seat as a wasm bot plays the native table's
+// results, places and chips, and reports what each seat used.
+func TestWasmTable(t *testing.T) {
+	dir := t.TempDir()
+	wasm, err := arena.Build("../../guests/shark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shark.wasm"), wasm, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	common := []string{"-pool", "dove,clam", "-seats", "3", "-hands", "400", "-seed", "5"}
+	var native, sandboxed, stderr bytes.Buffer
+	if err := play(append([]string{"-challenger", "shark"}, common...), &native, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if err := play(append([]string{"-challenger-wasm", filepath.Join(dir, "shark.wasm"), "-challenger-data", dir,
+		"-wasm-pool", "-guests", "../../guests"}, common...), &sandboxed, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	n, err := league.ReadRecord(native.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := league.ReadRecord(sandboxed.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range n.Places {
+		n.Places[i].Name, w.Places[i].Name = "", ""
+	}
+	a, _ := json.Marshal([]any{n.Pairs, n.Places})
+	b, _ := json.Marshal([]any{w.Pairs, w.Places})
+	if !bytes.Equal(a, b) {
+		t.Fatalf("native and wasm tables differ:\n%s\n%s", a, b)
+	}
+	for _, u := range w.Usage {
+		if u.Fuel == nil || *u.Fuel == 0 || u.MemoryPeak == nil || u.Forfeited == nil || *u.Forfeited != 0 || u.Faults != nil {
+			t.Errorf("seat %d usage %+v", u.Seat, u)
+		}
+	}
+	if !strings.Contains(w.Seats[0].Version, "wasm sha256:") || !strings.HasSuffix(w.Seats[0].Version, "data "+filepath.Base(dir)) {
+		t.Errorf("challenger version %q", w.Seats[0].Version)
+	}
+}
+
 func TestPlayErrors(t *testing.T) {
 	t.Setenv("OBGL_HOUSE_CACHE", t.TempDir()) // nothing downloaded
 	var w bytes.Buffer
@@ -58,7 +106,8 @@ func TestPlayErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{nil, "-challenger is required"},
+		{nil, "one of -challenger and -challenger-wasm is required"},
+		{[]string{"-challenger", "dove", "-challenger-wasm", "x.wasm"}, "one of -challenger and -challenger-wasm is required"},
 		{[]string{"-challenger", "walrus", "-pool", "dove"}, `no house bot "walrus"`},
 		{[]string{"-challenger", "dove", "-pool", "clam,turtle"}, "Turtle is not downloaded"},
 		{[]string{"-challenger", "dove", "-pool", ""}, "empty pool"},

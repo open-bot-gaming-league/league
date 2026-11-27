@@ -3,6 +3,7 @@ package arena
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -269,8 +270,17 @@ func TestEscapeIsDeterministic(t *testing.T) {
 // TestExeBuildIsRejected: a bot built as a command, not a reactor, is
 // refused with the build flag it needs.
 func TestExeBuildIsRejected(t *testing.T) {
-	_, err := Compile(buildGuest(t, "dove", "-ldflags=-s"))
-	if err == nil || !strings.Contains(err.Error(), "-buildmode=c-shared") {
+	out := filepath.Join(t.TempDir(), "dove.wasm")
+	cmd := exec.Command("go", "build", "-o", out, "./guests/dove")
+	cmd.Env = append(os.Environ(), "GOOS=wasip1", "GOARCH=wasm")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, b)
+	}
+	wasm, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Compile(wasm); err == nil || !strings.Contains(err.Error(), "-buildmode=c-shared") {
 		t.Fatalf("Compile: %v", err)
 	}
 }

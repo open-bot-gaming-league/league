@@ -26,7 +26,7 @@ of code.
 | head-to-head | `match.go` | two blueprints on the same tree, every deal in both seatings |
 | table | `table.go`, `translate.go`, `cmd/table` | a person against a blueprint in the browser: one hand at a time, integer chips, any legal bet size; the blueprint plays its own tree's menu through pseudo-harmonic action translation; session score and hand history (`cmd/table/API.md`) |
 | bot SDK | `sdk/` | write a bot (`Act(State) Action`, real chips, the table's rules through `TableHand`), measure it against another locally (duplicate deals, bb/100 with its standard error), play it at a table over the HTTP API; three starter bots (`sdk/README.md`) |
-| ranked table | `league/`, `cmd/rankedtable` | one ranked table: a challenger and seats drawn from a pool, every pair on the same duplicate deals, places by total won; a JSON record reproducible from its seed, per-seat use (decisions, and fuel, bytes read and memory for a sandboxed bot), and its cost at Cloud Run job prices |
+| ranked table | `league/` (the command: `poker/arena/cmd/rankedtable`) | one ranked table: a challenger and seats drawn from a pool, every pair on the same duplicate deals, places by total won; a JSON record reproducible from its seed, per-seat use (decisions, and fuel, bytes read and memory for a sandboxed bot), and its cost at Cloud Run job prices |
 
 Go standard library only. Builds wherever Go does: bucket files and blueprints are mmapped on Unix
 and read into memory elsewhere (`mapfile_*.go`).

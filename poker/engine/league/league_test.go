@@ -155,7 +155,13 @@ type metered struct {
 }
 
 func (m *metered) Act(s sdk.State) sdk.Action { m.n++; return s.CheckOrCall() }
-func (m *metered) Usage() Usage               { return Usage{Fuel: m.n, BytesRead: m.n / 2, MemoryPeak: m.peak} }
+func (m *metered) Usage() Usage {
+	u := Usage{Fuel: m.n, BytesRead: m.n / 2, MemoryPeak: m.peak, Forfeited: 1}
+	if m.peak%2 == 0 {
+		u.Fault = &Fault{Kind: "trap", Decision: 3, Hand: 2, Detail: "even"}
+	}
+	return u
+}
 
 type closer struct {
 	sdk.Bot
@@ -194,8 +200,12 @@ func TestMeterAndClose(t *testing.T) {
 	if *u.MemoryPeak != 100+peak.Load() {
 		t.Errorf("memory peak %d, want the most of any pair, %d", *u.MemoryPeak, 100+peak.Load())
 	}
-	if rec.Usage[1].Fuel != nil {
+	if rec.Usage[1].Fuel != nil || rec.Usage[1].Forfeited != nil || rec.Usage[1].Faults != nil {
 		t.Errorf("Dove is not a Meter but reported %+v", rec.Usage[1])
+	}
+	// One forfeit a pair; a fault in each pair whose bot had an even peak.
+	if *u.Forfeited != 3 || len(u.Faults) == 0 || len(u.Faults) > 2 || u.Faults[0].Kind != "trap" || u.Faults[0].Opponent == 0 {
+		t.Errorf("forfeits %d, faults %+v", *u.Forfeited, u.Faults)
 	}
 }
 

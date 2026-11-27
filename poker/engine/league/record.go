@@ -68,6 +68,16 @@ type SeatUsage struct {
 	Fuel       *int64 `json:"fuel"`
 	BytesRead  *int64 `json:"bytes_read"`
 	MemoryPeak *int64 `json:"memory_peak_bytes"` // the most in any one pair
+	// For a Meter: the decisions its sandbox played for it, and what
+	// stopped it in each pair where something did. Absent for other bots.
+	Forfeited *int64      `json:"forfeited,omitempty"`
+	Faults    []PairFault `json:"faults,omitempty"`
+}
+
+// PairFault is a Fault in the pair against Opponent.
+type PairFault struct {
+	Opponent int `json:"opponent"`
+	Fault
 }
 
 // Measured is how this run of the table went: wall-clock and process
@@ -127,6 +137,10 @@ func (r *Record) addPair(a, b int, p played) {
 			if u.MemoryPeak == nil || s.usage.MemoryPeak > *u.MemoryPeak {
 				m := s.usage.MemoryPeak
 				u.MemoryPeak = &m
+			}
+			u.Forfeited = add(u.Forfeited, s.usage.Forfeited)
+			if f := s.usage.Fault; f != nil {
+				u.Faults = append(u.Faults, PairFault{Opponent: [2]int{b, a}[k], Fault: *f})
 			}
 		}
 	}

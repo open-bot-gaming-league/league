@@ -47,12 +47,22 @@ func Pool(ids ...string) (pool []Entrant, close func() error, err error) {
 			return nil, nil, err
 		}
 		loaded = append(loaded, h)
-		version := fmt.Sprintf("%s %s@sha256:%s %s@sha256:%s", m.Tag,
-			bot.Blueprint, m.Files[bot.Blueprint].SHA256, bot.Buckets, m.Files[bot.Buckets].SHA256)
-		pool = append(pool, Entrant{ID: id, Name: bot.Name, Version: version,
+		pool = append(pool, Entrant{ID: id, Name: bot.Name, Version: HouseVersion(id),
 			New: func() (sdk.Bot, error) { return h.Clone(), nil }})
 	}
 	return pool, close, nil
+}
+
+// HouseVersion is a trained house bot's version: the release and its
+// files' sha256. "" for an id that is not one.
+func HouseVersion(id string) string {
+	m := sdk.Houses()
+	bot, ok := m.Bots[id]
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s %s@sha256:%s %s@sha256:%s", m.Tag,
+		bot.Blueprint, m.Files[bot.Blueprint].SHA256, bot.Buckets, m.Files[bot.Buckets].SHA256)
 }
 
 // RunnerVersion is this binary's source revision, from the build's VCS
