@@ -3,10 +3,12 @@
 // the house bots, if downloaded), and prints its row of the matrix and
 // what the sandbox saw: faults, forfeits, fuel, memory, reads, output.
 //
-//	go run ./cmd/try mybot.wasm
-//	go run ./cmd/try mybot.wasm -vs dove,clam,shark,turtle,ox -hands 20000 -data ./mydata
+//	GOTOOLCHAIN=go1.27.3 go run ./cmd/try mybot.wasm
+//	GOTOOLCHAIN=go1.27.3 go run ./cmd/try mybot.wasm -vs dove,clam,shark,turtle,ox -hands 20000 -data ./mydata
 //
-// Build the bot first (see package wasmbot):
+// The arena's wasm runtime (wasmtime-go) does not link under Go 1.27.4 yet
+// (golang/go#83126); GOTOOLCHAIN=go1.27.3 makes go download and use 1.27.3.
+// Build the bot first, with any Go (see package wasmbot):
 //
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o mybot.wasm .
 //

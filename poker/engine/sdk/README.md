@@ -300,12 +300,14 @@ Try it the way the league runs it, in the sandbox with the ranked table's
 limits, against the starter bots (and the house bots, if downloaded):
 
     cd ../arena
-    go run ./cmd/try ../engine/mybot.wasm
-    go run ./cmd/try ../engine/mybot.wasm -vs dove,clam,shark,turtle,ox -hands 20000 -data ./mydata
+    GOTOOLCHAIN=go1.27.3 go run ./cmd/try ../engine/mybot.wasm
+    GOTOOLCHAIN=go1.27.3 go run ./cmd/try ../engine/mybot.wasm -vs dove,clam,shark,turtle,ox -hands 20000 -data ./mydata
 
 It prints your bot's row of the matrix and what the sandbox saw: faults,
 forfeits, fuel, memory, data read, output. `poker/arena` builds with cgo
-(wasmtime), so it needs a C compiler.
+(wasmtime), so it needs a C compiler. Its wasm runtime does not link under
+Go 1.27.4 yet (golang/go#83126); `GOTOOLCHAIN=go1.27.3` makes `go`
+download and use Go 1.27.3 for it. Building your bot (above) uses any Go.
 
 ## Submit your bot
 
