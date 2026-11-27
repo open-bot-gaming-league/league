@@ -71,10 +71,43 @@ const UploadChunk = 8 << 20
 // retryWait is how long to wait before the nth retry of an upload.
 var retryWait = func(n int) time.Duration { return time.Duration(1<<n) * time.Second }
 
-// submission is the league's answer about a submission.
+// checkWait is how long to wait before the nth look at a submission
+// being checked.
+var checkWait = func(n int) time.Duration { return min(time.Duration(n+1), 5) * time.Second }
+
+// Submission is a submission as the league has it.
+type Submission struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	State       string      `json:"state"`        // open, checking, then finalized or rejected
+	RequestedAt int64       `json:"requested_at"` // when it was finalized (asked to be checked), unix seconds
+	Problems    []string    `json:"problems"`     // rejected: why
+	Bot         *BotVersion `json:"bot"`          // finalized: the version
+	Table       *struct {
+		ID       string `json:"id"`
+		State    string `json:"state"`
+		Position int    `json:"position"`
+	} `json:"table"` // finalized: the version's ranked table
+}
+
+// RefusedNote is what a refusal adds: the hourly limit counts each
+// submission when it is finalized.
+const RefusedNote = "a refused submission counts toward the hourly limit"
+
+// CheckFor is how long SubmitBot waits for the league's check before it
+// returns, leaving the check to go on (Table.Submission says where it stands).
+var CheckFor = 15 * time.Minute
+
+// Submission is one of your submissions, now.
+func (t *Table) Submission(ctx context.Context, id string) (Submission, error) {
+	var s Submission
+	err := t.call(ctx, "GET", "api/bots/submissions/"+id, nil, &s)
+	return s, err
+}
+
+// submission is the league's answer about a submission, with its uploads.
 type submission struct {
-	ID      string `json:"id"`
-	State   string `json:"state"`
+	Submission
 	Uploads []struct {
 		SHA256  string `json:"sha256"`
 		Size    int64  `json:"size"`
@@ -92,8 +125,10 @@ type dataFile struct {
 // SubmitBot submits a bot: it hashes the files, declares them, uploads
 // each one the league does not already have for your account (so a new
 // version with the same data sends only its module), and asks the league
-// to check and keep it. Run it again after a failure: a submission of the
-// same files picks up where the last one stopped.
+// to check and keep it, and waits for its answer: the version, or why it
+// was refused. Run it again after a failure: a submission of the same
+// files picks up where the last one stopped (or, if the league is checking
+// it, waits for that).
 func (t *Table) SubmitBot(ctx context.Context, opt SubmitOptions) (BotVersion, error) {
 	say := opt.Log
 	if say == nil {
@@ -134,8 +169,7 @@ func (t *Table) SubmitBot(ctx context.Context, opt SubmitOptions) (BotVersion, e
 
 	api := *t
 	if api.HTTP == nil {
-		// Finalizing reads every new file back: minutes for many GB.
-		api.HTTP = &http.Client{Timeout: 30 * time.Minute}
+		api.HTTP = &http.Client{Timeout: 2 * time.Minute}
 	}
 	if data == nil {
 		data = []dataFile{}
@@ -143,6 +177,10 @@ func (t *Table) SubmitBot(ctx context.Context, opt SubmitOptions) (BotVersion, e
 	var sub submission
 	if err := api.call(ctx, "POST", "api/bots/submissions", map[string]any{"name": opt.Name, "wasm": wasmHash, "data": data}, &sub); err != nil {
 		return BotVersion{}, err
+	}
+	if sub.State == "checking" {
+		say(fmt.Sprintf("submission %s: uploaded before; the league is checking it", sub.ID))
+		return answer(ctx, &api, sub, say)
 	}
 	var todo, sending int64
 	for _, u := range sub.Uploads {
@@ -173,21 +211,62 @@ func (t *Table) SubmitBot(ctx context.Context, opt SubmitOptions) (BotVersion, e
 		say(fmt.Sprintf("uploaded %s in %.1f s (%s/s)", local[u.SHA256], secs, Bytes(int64(float64(u.Size)/max(secs, 1e-3)))))
 	}
 
-	say("finalize: the league checks every file and the module")
-	var done struct {
-		Bot   BotVersion `json:"bot"`
-		Table *struct {
-			ID       string `json:"id"`
-			Position int    `json:"position"`
-		} `json:"table"` // the version's ranked table, queued
-	}
-	if err := api.call(ctx, "POST", "api/bots/submissions/"+sub.ID+"/finalize", nil, &done); err != nil {
+	if err := api.call(ctx, "POST", "api/bots/submissions/"+sub.ID+"/finalize", nil, &sub); err != nil {
 		return BotVersion{}, err
 	}
-	if t := done.Table; t != nil {
-		say(fmt.Sprintf("ranked table %s queued (number %d): ten seats from the house bots; where it placed is in your agent's table_results, and on your table's page once it has played", t.ID, t.Position))
+	return answer(ctx, &api, sub, say)
+}
+
+// answer waits while the league checks a submission (it reads every file
+// back and checks the module): the version it files, or why it refused.
+func answer(ctx context.Context, api *Table, sub submission, say func(string)) (BotVersion, error) {
+	// sub's uploads are not looked at again: only its Submission is renewed.
+	begun := time.Now()
+	if sub.State == "checking" {
+		say("checking: the league reads every file back and checks the module")
 	}
-	return done.Bot, nil
+	next := 30 * time.Second
+	for n := 0; sub.State == "checking"; n++ {
+		if time.Since(begun) >= CheckFor {
+			return BotVersion{}, fmt.Errorf("Still checking. See where it stands with: go run ./sdk/cmd/bot status %s", sub.ID)
+		}
+		select {
+		case <-time.After(checkWait(n)):
+		case <-ctx.Done():
+			return BotVersion{}, ctx.Err()
+		}
+		s, err := api.Submission(ctx, sub.ID)
+		if err != nil {
+			return BotVersion{}, err
+		}
+		sub.Submission = s
+		if since := time.Since(begun); sub.State == "checking" && since >= next {
+			say(fmt.Sprintf("  still checking (%.0f s)", since.Seconds()))
+			next += 30 * time.Second
+		}
+	}
+	switch {
+	case sub.State == "rejected":
+		return BotVersion{}, fmt.Errorf("the league refused the submission: %s (%s)", strings.Join(sub.Problems, "; "), RefusedNote)
+	case sub.State != "finalized" || sub.Bot == nil:
+		return BotVersion{}, fmt.Errorf("sdk: submission %s is %s", sub.ID, sub.State)
+	}
+	say(fmt.Sprintf("accepted in %.1f s", time.Since(begun).Seconds()))
+	if t := sub.Table; t != nil {
+		where := "queued"
+		switch {
+		case t.State == "running":
+			where = "playing now"
+		case t.State == "done":
+			where = "played already"
+		case t.State == "failed":
+			where = "did not finish"
+		case t.Position > 0:
+			where = fmt.Sprintf("queued (number %d)", t.Position)
+		}
+		say(fmt.Sprintf("ranked table %s %s: ten seats from the house bots; where it placed is in your agent's table_results, and on your table's page once it has played", t.ID, where))
+	}
+	return *sub.Bot, nil
 }
 
 // Bots lists your account's submitted bots, every version, by name.

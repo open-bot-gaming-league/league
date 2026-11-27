@@ -8,7 +8,7 @@
 apiVersion: run.googleapis.com/v1
 kind: Job
 metadata:
-  name: tmg-obgl-ranked
+  name: obgl-ranked
   annotations:
     run.googleapis.com/launch-stage: GA
 spec:
@@ -33,7 +33,7 @@ spec:
           # rankedtable's own limit is OBGL_RANKED_TIMEOUT (4 h, the table's
           # wall); the task's must be longer, for a queue of several.
           timeoutSeconds: 86400
-          serviceAccountName: tmg-obgl-ranked@PROJECT.iam.gserviceaccount.com
+          serviceAccountName: obgl-ranked@PROJECT.iam.gserviceaccount.com
           containers:
             - image: IMAGE
               command: ["python", "./mcp/ranked.py", "run"]

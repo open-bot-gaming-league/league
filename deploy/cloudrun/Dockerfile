@@ -73,11 +73,13 @@ COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/markdown_
 # Submitted bots (mcp/bots.py; BOT-STORAGE.md): off until OBGL_BOT_STORE is set.
 COPY mcp/bots.py mcp/bot_web.py mcp/bot_files.py mcp/bot_files_gcs.py ./mcp/
 COPY --from=arenabuilder /out/botcheck ./arena/bin/botcheck
-# Ranked tables (mcp/ranked.py; RANKED-TABLES.md): the service queues them
-# and starts the job (mcp/ranked_job.py); the same image, run as the Cloud
-# Run job `python ./mcp/ranked.py run`, plays them with rankedtable, the
-# guests, and the house bots' data below.
-COPY mcp/ranked.py mcp/ranked_job.py mcp/badges.py ./mcp/
+# Checking submissions (mcp/finalize.py): the same image, run as the Cloud
+# Run job `python ./mcp/finalize.py run`, which the service starts
+# (mcp/jobs.py). Ranked tables (mcp/ranked.py; RANKED-TABLES.md): queued
+# when a version is filed; the same image, run as the Cloud Run job
+# `python ./mcp/ranked.py run`, plays them with rankedtable, the guests,
+# and the house bots' data below.
+COPY mcp/finalize.py mcp/jobs.py mcp/ranked.py mcp/badges.py ./mcp/
 COPY --from=arenabuilder /out/rankedtable ./arena/bin/rankedtable
 COPY --from=guestbuilder /out/guests/ ./arena/guests/
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).

@@ -8,7 +8,7 @@ import re
 
 MCP = os.path.dirname(os.path.abspath(__file__))
 DOCKERFILE = os.path.join(MCP, "..", "deploy", "cloudrun", "Dockerfile")
-ENTRY = ("server", "ranked")  # the service's command, and the job's (ranked-job.yaml)
+ENTRY = ("server", "ranked", "finalize")  # the service's command, and the jobs' (ranked-job.yaml, finalize-job.yaml)
 
 
 def _local_imports(name):

@@ -15,7 +15,8 @@ import pytest
 
 from bot_files import UPLOAD_PATH, LocalFiles, bot_key
 from bot_web import bots_from_env
-from bots import DAY, HOUR, Bots, Limits, Refused
+from bots import BUSY_CHECKING, DAY, HOUR, Bots, Limits, Refused
+from finalize import Finalizer
 from oauth.store import MemoryStore
 
 ALICE, BOB = "github:1001", "github:2002"
@@ -73,10 +74,24 @@ def by_sha(*blobs: bytes) -> dict[str, bytes]:
     return {hashlib.sha256(b).hexdigest(): b for b in blobs}
 
 
+async def checked(bots: Bots, account: str, sid: str) -> dict:
+    """Finalize, and the check it queues done (finalize.py's runner, here):
+    the submission as it ends, or Refused(422) with why it was rejected."""
+    asked = await bots.finalize(account, sid)
+    assert asked["state"] == "checking" and await bots.queue.submissions() == [sid]
+    await Finalizer(bots).drain()
+    assert await bots.queue.submissions() == []
+    done = await bots.status(account, sid)
+    if done["state"] == "rejected":
+        raise Refused(422, done["problems"])
+    assert done["state"] == "finalized", done
+    return done
+
+
 async def submit(bots: Bots, account: str, wasm=WASM, data=None, name="mybot") -> dict:
     sub = await bots.create(account, manifest(name, wasm, data))
     upload_all(bots, sub, by_sha(wasm, *(data or {}).values()))
-    return await bots.finalize(account, sub["id"])
+    return await checked(bots, account, sub["id"])
 
 
 @pytest.mark.asyncio
@@ -88,7 +103,7 @@ async def test_a_submission_becomes_a_version_and_its_files_are_kept_by_sha256(e
     assert {u["sha256"] for u in sub["uploads"]} == set(by_sha(WASM, *data.values())) and not any(u["done"] for u in sub["uploads"])
     upload_all(bots, sub, by_sha(WASM, *data.values()))
     assert all(u["done"] and "session" not in u for u in (await bots.status(ALICE, sub["id"]))["uploads"])
-    bot = (await bots.finalize(ALICE, sub["id"]))["bot"]
+    bot = (await checked(bots, ALICE, sub["id"]))["bot"]
     assert (bot["name"], bot["version"], bot["data_files"], bot["data_bytes"]) == ("mybot", 1, 2, 39)
     assert bot["wasm"] == entry(WASM)
     for blob in by_sha(WASM, *data.values()):
@@ -113,7 +128,7 @@ async def test_the_next_version_uploads_only_what_the_account_does_not_have(env)
     sub = await bots.create(ALICE, manifest(wasm=wasm2, data=data))
     assert [u["sha256"] for u in sub["uploads"]] == [entry(wasm2)["sha256"]]
     upload_all(bots, sub, by_sha(wasm2))
-    assert (await bots.finalize(ALICE, sub["id"]))["bot"]["version"] == 2
+    assert (await checked(bots, ALICE, sub["id"]))["bot"]["version"] == 2
     # Bob's identical data is his to upload: no account sees another's files.
     sub = await bots.create(BOB, manifest(data=data))
     assert len(sub["uploads"]) == 2
@@ -127,7 +142,7 @@ async def test_finalize_refuses_a_file_whose_bytes_are_not_the_ones_declared(env
     for u in sub["uploads"]:
         upload(bots.files, u["session"], bad if u["sha256"] == entry(good)["sha256"] else WASM)
     with pytest.raises(Refused) as e:
-        await bots.finalize(ALICE, sub["id"])
+        await checked(bots, ALICE, sub["id"])
     assert e.value.status == 422 and e.value.problems == [
         "data file 'd.bin': its sha256 is not the one declared (the file changed, or the upload was damaged)"]
     assert (await bots.status(ALICE, sub["id"]))["state"] == "rejected"
@@ -148,15 +163,16 @@ async def test_finalize_names_what_is_missing_or_short(env):
     half = session_id(sessions[entry(data["a.bin"])["sha256"]])
     assert bots.files.put(half, "bytes 0-9/20", iter([b"a" * 10]))[:2] == (308, {"Range": "bytes=0-9"})
     with pytest.raises(Refused) as e:
-        await bots.finalize(ALICE, sub["id"])
+        await checked(bots, ALICE, sub["id"])
     assert e.value.problems == ["data file 'a.bin': not uploaded", "data file 'b.bin': not uploaded"]
 
 
 @pytest.mark.asyncio
 async def test_finalize_refuses_what_is_not_a_bot_module(env):
-    bots, _ = env
+    bots, clock = env
     for wasm, problem in ((b"MZ\x90\0 a program for another machine", "wasm: not a WebAssembly module (it does not start with \\0asm)"),
                           (WASM + b"\0\x07refuse", "wasm: it exports no bot (a test module)")):
+        clock.t += HOUR  # each a new hour: a refused one counts
         with pytest.raises(Refused) as e:
             await submit(bots, ALICE, wasm=wasm)
         assert e.value.status == 422 and e.value.problems == [problem]
@@ -202,7 +218,7 @@ async def test_a_filed_version_is_handed_on(env):
 
     bots.on_finalized = queue
     done = await submit(bots, ALICE)
-    assert done["table"] == {"id": "t1", "state": "queued"} and handed == [(ALICE, "mybot", 1)]
+    assert done["table"] == "t1" and handed == [(ALICE, "mybot", 1)]
 
 
 @pytest.mark.asyncio
@@ -212,13 +228,26 @@ async def test_one_version_an_hour_per_account(env):
     clock.t += HOUR - 60
     with pytest.raises(Refused) as e:
         await bots.create(ALICE, manifest(name="other"))
-    assert e.value.status == 429 and e.value.problems == ["You can submit one bot an hour: try again at 09:00 UTC"]
+    assert e.value.status == 429 and e.value.problems == ["You can submit one bot an hour, refused ones included: try again at 09:00 UTC"]
     assert e.value.extra == {"retry_at": int(clock.t + 60)}
     await submit(bots, BOB)  # the limit is per account
     clock.t += 60
     sub = await bots.create(ALICE, manifest(name="other"))
     upload_all(bots, sub, by_sha(WASM))
-    assert (await bots.finalize(ALICE, sub["id"]))["bot"]["name"] == "other"
+    assert (await checked(bots, ALICE, sub["id"]))["bot"]["name"] == "other"
+
+
+@pytest.mark.asyncio
+async def test_a_submission_the_check_refuses_still_counts_for_the_hour(env):
+    bots, clock = env
+    with pytest.raises(Refused):
+        await submit(bots, ALICE, wasm=WASM + b"\0\x07refuse")
+    await bots.create(BOB, manifest())  # Bob's hour is his own
+    with pytest.raises(Refused) as e:
+        await bots.create(ALICE, manifest())
+    assert e.value.status == 429 and "refused ones included" in e.value.problems[0]
+    clock.t += HOUR
+    assert (await submit(bots, ALICE))["bot"]["version"] == 1
 
 
 @pytest.mark.asyncio
@@ -228,13 +257,14 @@ async def test_a_refused_finalize_over_the_limit_leaves_the_submission_open(env,
     sub = await bots.create(ALICE, manifest())
     upload_all(bots, sub, by_sha(WASM))
     await bots.store.put("account-bots", ALICE, {**await bots.store.get("account-bots", ALICE),
-                                                "versions": [{"name": "x", "version": 1, "created_at": int(clock.t)}]})
+                                                "asked": [int(clock.t)]})
     with pytest.raises(Refused) as e:
         await bots.finalize(ALICE, sub["id"])
     assert e.value.status == 429
     assert (await bots.status(ALICE, sub["id"]))["state"] == "open"
+    assert await bots.queue.submissions() == []  # refused before it was queued
     unlimited = Bots(bots.store, bots.files, accept, Limits(per_hour=0), clock)
-    assert (await unlimited.finalize(ALICE, sub["id"]))["bot"]["version"] == 1
+    assert (await checked(unlimited, ALICE, sub["id"]))["bot"]["version"] == 1
 
 
 @pytest.mark.asyncio
@@ -291,34 +321,49 @@ def test_local_upload_sessions_resume_and_keep_to_their_size(tmp_path):
     assert os.listdir(os.path.join(files.root, ".sessions")) == []
 
 
+class Racing(MemoryStore):
+    """A store that runs `before` (once) just before its next account-bots update."""
+
+    before = None
+
+    async def update(self, kind, key, change):
+        if kind == "account-bots" and self.before is not None:
+            before, self.before = self.before, None
+            await before()
+        return await super().update(kind, key, change)
+
+
 @pytest.mark.asyncio
-async def test_the_hourly_limit_holds_across_servers_and_is_worded_for_its_number(tmp_path):
-    clock, store = Clock(), MemoryStore()
+async def test_the_hourly_limit_is_counted_when_finalize_is_asked_on_any_server(tmp_path):
+    clock, store = Clock(), Racing()
     files = LocalFiles(str(tmp_path / "bots"), "http://league.test")
-    checking, go_on = threading.Event(), threading.Event()
+    one, two = (Bots(store, files, accept, Limits(per_hour=3), clock) for _ in "12")  # two servers, one store
+    await submit(one, ALICE)
+    b = await one.create(ALICE, manifest(name="b"))
+    upload_all(one, b, by_sha(WASM))
+    assert (await one.finalize(ALICE, b["id"]))["state"] == "checking"
+    c = await two.create(ALICE, manifest(name="c"))
+    upload_all(two, c, by_sha(WASM))
+    with pytest.raises(Refused) as e:
+        await two.finalize(ALICE, c["id"])  # one at a time per account
+    assert e.value.status == 409 and e.value.problems == [BUSY_CHECKING]
+    await Finalizer(one).drain()
+    assert (await checked(two, ALICE, c["id"]))["bot"]["name"] == "c"
+    with pytest.raises(Refused) as e:
+        await one.create(ALICE, manifest(name="e"))  # three asked this hour, on either server
+    assert e.value.status == 429 and e.value.problems == ["You can submit 3 bots an hour, refused ones included: try again at 09:00 UTC"]
+    assert await two.queue.submissions() == []
 
-    def slow(wasm):  # server one's check: waits while server two finalizes
-        checking.set()
-        go_on.wait(10)
-        return None
+    # Two servers asking at once: the store's conditional write lets one in.
+    clock.t += HOUR
+    d = await one.create(ALICE, manifest(name="d"))
+    upload_all(one, d, by_sha(WASM))
+    store.before = lambda: two.finalize(ALICE, d["id"])  # server two asks between one's look and its write
+    with pytest.raises(Refused) as e:
+        await one.finalize(ALICE, d["id"])
+    assert e.value.status == 409 and e.value.problems == [BUSY_CHECKING]
+    assert await one.queue.submissions() == [d["id"]]  # queued once, by server two
 
-    one = Bots(store, files, slow, Limits(per_hour=2), clock)
-    two = Bots(store, files, accept, Limits(per_hour=2), clock)  # another server, the same store
-    await submit(two, ALICE)
-    second = await one.create(ALICE, manifest(name="b"))
-    upload_all(one, second, by_sha(WASM))
-    async with anyio.create_task_group() as tg:
-        async def first():
-            with pytest.raises(Refused) as e:
-                await one.finalize(ALICE, second["id"])  # past its own look at the limit, then over it
-            assert e.value.status == 429 and e.value.problems == ["You can submit 2 bots an hour: try again at 09:00 UTC"]
-        tg.start_soon(first)
-        await anyio.to_thread.run_sync(checking.wait, 10)
-        await store.update("account-bots", ALICE, lambda i: {**i, "open": None})  # server two's own submission
-        await submit(two, ALICE, name="c")
-        go_on.set()
-    assert [v["name"] for v in (await two.list(ALICE))["bots"]] == ["c", "mybot"]
-    assert (await one.status(ALICE, second["id"]))["state"] == "open"  # refused, kept
 
 def test_the_hourly_limit_comes_from_the_environment(tmp_path):
     base = {"OBGL_BOT_STORE": f"local:{tmp_path}", "OBGL_BOTCHECK": "/bin/false"}

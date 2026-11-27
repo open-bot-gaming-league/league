@@ -20,13 +20,15 @@ under the table's id, which is also its results' id: /table/results/<id>.
 The record names the bot's owner (league.Owner): the account, the bot, the
 version and the submission.
 
-Who writes what. The server, on finalize, files the table (queued), then
-appends it to the queue and to the account's list. From then on only the
-runner writes the table, and one runner plays at a time: the server's own
-(OBGL_RANKED_RUNNER=in-process, the local stack) or the Cloud Run job's
-(`python ranked.py run`, deploy/cloudrun/RANKED-TABLES.md), which the
-server starts when it queues a table and no runner holds the queue's head
-(OBGL_RANKED_JOB, ranked_job.py). The runner takes the queue's head, marks
+Who writes what. Whoever checks submissions (finalize.py: the server, or
+the finalize job), on filing a version, files the table (queued; its id
+comes from the submission's, so a filing done again files no second
+table), then appends it to the queue and to the account's list. From
+then on only the runner writes the table, and one runner plays at a time:
+the server's own (OBGL_RANKED_RUNNER=in-process, the local stack) or the
+Cloud Run job's (`python ranked.py run`, deploy/cloudrun/RANKED-TABLES.md),
+which is started when a table is queued and no runner holds the queue's
+head (OBGL_RANKED_JOB, jobs.py). The runner takes the queue's head, marks
 it running under a lease it renews while the table plays, plays it
 (`rankedtable play`, a subprocess), files the record, marks the table
 done or failed, and only then takes it off the queue. A runner
@@ -52,7 +54,6 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Mapping
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -62,7 +63,7 @@ import anyio.to_thread
 from badges import Badges, BadgeSettings, settings_from_env as badge_settings_from_env
 from bot_files import bot_key
 from oauth.store import AuthStore
-from ranked_job import JobStarter
+from jobs import JobStarter, kick, taken
 
 log = logging.getLogger("obgl.ranked")
 
@@ -110,47 +111,54 @@ class RankedTables:
     def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time,
                  badges: BadgeSettings = BadgeSettings(), starter: JobStarter | None = None) -> None:
         """starter: started when a table is queued and no runner holds the
-        queue's head (ranked_job.py: the Cloud Run job); None: none is."""
+        queue's head (jobs.py: the Cloud Run job); None: none is."""
         self.store, self.clock, self.starter = store, clock, starter
         self.badges = Badges(store, badges, clock)
         self._woken: list[anyio.Event] = []
 
     async def enqueue(self, account: str, version: Mapping) -> dict:
-        """A ranked table for a version bots.py just filed: its view."""
-        tid = secrets.token_hex(16)
-        table = {"account": account, "bot": version["name"], "version": version["version"],
-                 "submission": version["submission"], "seed": secrets.randbits(63),
-                 "state": "queued", "queued_at": int(self.clock()), "attempts": 0}
-        await self.store.put("ranked-tables", tid, table)
-        await self.store.update("ranked-queue", QUEUE, lambda q: {"tables": [*(q or {"tables": []})["tables"], tid]})
-        await self.store.update("account-ranked", account, lambda a: {"tables": [*(a or {"tables": []})["tables"], tid]})
+        """The ranked table for a version bots.py just filed: its view. A
+        version has one table (its id comes from the submission's), so a
+        filing done again (a runner stopped part way) queues nothing new."""
+        tid = table_id(version["submission"])
+        new = {"account": account, "bot": version["name"], "version": version["version"],
+               "submission": version["submission"], "seed": secrets.randbits(63),
+               "state": "queued", "queued_at": int(self.clock()), "attempts": 0}
+        kept = {}
+
+        def file(t):
+            kept["table"] = t if t is not None else new
+            return None if t is not None else new
+
+        await self.store.update("ranked-tables", tid, file)
+        table = kept["table"]
+        if table["state"] == "queued":
+            await self.store.update("ranked-queue", QUEUE, lambda q: _with(q, tid))
+        await self.store.update("account-ranked", account, lambda a: _with(a, tid))
         for event in self._woken:
             event.set()
-        if self.starter is not None:
-            await self._start_runner(tid)
+        await self.kick()
         return await self._view(tid, table)
 
-    async def _start_runner(self, tid: str) -> None:
-        """Start a runner for the queue, unless one holds its head: that one
-        plays on to the end of the queue, this table included (it was queued
-        before the look). A start that fails is logged; the table stays
-        queued for the next start (the next table queued, or one by hand)."""
-        try:
-            queue = await self.queue()
-            head = await self.store.get("ranked-tables", queue[0]) if queue else None
-            if head is not None and head["state"] == "running" and head["lease_until"] > self.clock():
-                return
-            started = await anyio.to_thread.run_sync(self.starter.start)
-        except Exception:
-            log.exception("ranked: table %s is queued, but its runner did not start", tid)
-            return
-        log.info("ranked: table %s is queued; started its runner: %s", tid, started)
+    async def view(self, tid: str) -> dict | None:
+        """A table as its account's list shows it, or None."""
+        table = await self.store.get("ranked-tables", tid)
+        return None if table is None else await self._view(tid, table)
+
+    async def kick(self) -> None:
+        """Start the job if the queue needs a runner (jobs.kick): when a
+        table is queued, and when a coach asks after their tables."""
+        if self.starter is not None:
+            await kick(self.store, ("ranked-queue", QUEUE), "tables", "ranked-tables", self.starter, self.clock, log,
+                       "ranked: a table is queued")
 
     async def list(self, account: str) -> dict:
         """The account's tables, newest first; a done one with the names
         of the badges it earned."""
         index = await self.store.get("account-ranked", account) or {"tables": []}
         queue = await self.queue()
+        if any(tid in queue for tid in index["tables"]):
+            await self.kick()  # one of theirs waits: make up a start that failed, or a runner that died
         earned: dict[str, list[str]] = {}
         for b in await self.badges.all(account):
             earned.setdefault(b["table"], []).append(self.badges.name(b))
@@ -259,6 +267,7 @@ class Runner:
         table = await self.store.update("ranked-tables", tid, claim)
         if table is None:
             return True  # it changed under us: look again
+        await taken(self.store, ("ranked-queue", QUEUE))
         log.info("ranked: table %s (%s v%s of %s): start %d", tid, table["bot"], table["version"], table["account"], table["attempts"])
         try:
             record, reason = await self._play(tid, table)
@@ -350,7 +359,7 @@ class Runner:
         def change(q):
             if q is None or tid not in q["tables"]:
                 return None
-            return {"tables": [t for t in q["tables"] if t != tid]}
+            return {**q, "tables": [t for t in q["tables"] if t != tid]}
         await self.store.update("ranked-queue", QUEUE, change)
 
     async def _challenger(self, table: dict) -> tuple[dict | None, str | None]:
@@ -435,23 +444,15 @@ class Runner:
                     await proc.wait()
 
 
-def with_runner(app, runner: Runner):
-    """app (a Starlette app: the server's) with the runner playing tables
-    for as long as the app serves."""
-    inner = app.router.lifespan_context
+def table_id(submission: str) -> str:
+    """The ranked table's id for a finalized submission's version."""
+    return hashlib.sha256(f"ranked table {submission}".encode()).hexdigest()[:32]
 
-    @asynccontextmanager
-    async def lifespan(a):
-        async with inner(a) as state:
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(runner.serve)
-                try:
-                    yield state
-                finally:
-                    tg.cancel_scope.cancel()
 
-    app.router.lifespan_context = lifespan
-    return app
+def _with(record: dict | None, tid: str) -> dict | None:
+    """A {"tables": [...]} record with tid at the end (None: it has it already)."""
+    tables = (record or {"tables": []})["tables"]
+    return None if tid in tables else {**(record or {}), "tables": [*tables, tid]}
 
 
 def _placing(record: bytes) -> tuple[int, int]:

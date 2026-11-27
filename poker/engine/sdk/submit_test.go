@@ -33,7 +33,9 @@ type fakeLeague struct {
 	down    bool  // after the cut, every PUT is a 503
 	got     int64 // body bytes received by PUTs
 	sizes   map[string]int64
-	started int // upload sessions
+	started int    // upload sessions
+	state   string // the submission's: open, then checking
+	looks   int    // GETs of it while checking: the second answers
 }
 
 func (f *fakeLeague) handler(srv **httptest.Server) http.Handler {
@@ -68,20 +70,32 @@ func (f *fakeLeague) handler(srv **httptest.Server) http.Handler {
 			ups = append(ups, map[string]any{"sha256": h.SHA256, "size": h.Size, "done": int64(len(f.have[h.SHA256])) == h.Size,
 				"session": (*srv).URL + "/s/" + h.SHA256})
 		}
+		state := f.state
 		f.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": "open", "uploads": ups})
+		json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": state, "uploads": ups})
 	})
 	mux.HandleFunc("POST /table/api/bots/submissions/s1/finalize", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		f.state = "checking"
+		json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": "checking"})
+	})
+	mux.HandleFunc("GET /table/api/bots/submissions/s1", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.looks++; f.looks < 2 {
+			json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": "checking"})
+			return
+		}
 		for sha, b := range f.have {
 			sum := sha256.Sum256(b)
 			if hex.EncodeToString(sum[:]) != sha {
-				http.Error(w, `{"error":"bad bytes for `+sha+`"}`, 422)
+				json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": "rejected", "problems": []string{"bad bytes for " + sha}})
 				return
 			}
 		}
-		json.NewEncoder(w).Encode(map[string]any{"bot": BotVersion{Name: "mybot", Version: 1, CreatedAt: 1800000000}})
+		json.NewEncoder(w).Encode(map[string]any{"id": "s1", "state": "finalized",
+			"bot": BotVersion{Name: "mybot", Version: 1, CreatedAt: 1800000000}, "table": map[string]any{"id": "t1", "position": 2}})
 	})
 	rng := regexp.MustCompile(`^bytes (?:(\d+)-(\d+)|\*)/(\d+)$`)
 	mux.HandleFunc("PUT /s/{sha}", func(w http.ResponseWriter, r *http.Request) {
@@ -139,10 +153,11 @@ func (f *fakeLeague) handler(srv **httptest.Server) http.Handler {
 }
 
 func newFake(t *testing.T) (*fakeLeague, *Table) {
-	wait := retryWait
+	wait, check := retryWait, checkWait
 	retryWait = func(int) time.Duration { return time.Millisecond }
-	t.Cleanup(func() { retryWait = wait })
-	f := &fakeLeague{t: t, have: map[string][]byte{}, known: map[string]bool{}, sizes: map[string]int64{}}
+	checkWait = func(int) time.Duration { return time.Millisecond }
+	t.Cleanup(func() { retryWait, checkWait = wait, check })
+	f := &fakeLeague{t: t, have: map[string][]byte{}, known: map[string]bool{}, sizes: map[string]int64{}, state: "open"}
 	var srv *httptest.Server
 	srv = httptest.NewServer(f.handler(&srv))
 	t.Cleanup(srv.Close)
@@ -261,6 +276,52 @@ func TestSubmitBotRefusesDataTheLeagueWouldNot(t *testing.T) {
 	os.Remove(filepath.Join(dir, "data", "link.bin"))
 	_, err = table.SubmitBot(context.Background(), SubmitOptions{Name: "mybot", Wasm: filepath.Join(dir, "bot.wasm")})
 	if err == nil || !strings.Contains(err.Error(), "401") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSubmitBotWaitsForTheCheckAndSaysWhatItAnswered(t *testing.T) {
+	f, table := newFake(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bot.wasm"), []byte("\x00asm\x01\x00\x00\x00"))
+	var log []string
+	opt := SubmitOptions{Name: "mybot", Wasm: filepath.Join(dir, "bot.wasm"), Log: func(s string) { log = append(log, s) }}
+	v, err := table.SubmitBot(context.Background(), opt)
+	if err != nil || v.Version != 1 || f.looks != 2 {
+		t.Fatalf("%+v %v after %d looks", v, err, f.looks)
+	}
+	text := strings.Join(log, "\n")
+	for _, want := range []string{"checking: the league reads every file back and checks the module", "accepted in ",
+		"ranked table t1 queued (number 2)"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("no %q in\n%s", want, text)
+		}
+	}
+	// Run again while the league checks it: no upload, no finalize; it waits.
+	f.looks, f.got, log = 0, 0, nil
+	if v, err := table.SubmitBot(context.Background(), opt); err != nil || v.Version != 1 || f.got != 0 {
+		t.Fatalf("%+v %v, %d bytes sent", v, err, f.got)
+	}
+	if !strings.Contains(strings.Join(log, "\n"), "uploaded before; the league is checking it") {
+		t.Errorf("%s", strings.Join(log, "\n"))
+	}
+	// Waiting is bounded: past CheckFor it says how to look later.
+	f.looks = 0
+	defer func(d time.Duration) { CheckFor = d }(CheckFor)
+	CheckFor = 0
+	if _, err := table.SubmitBot(context.Background(), opt); err == nil || err.Error() != "Still checking. See where it stands with: go run ./sdk/cmd/bot status s1" {
+		t.Fatalf("%v", err)
+	}
+	if s, err := table.Submission(context.Background(), "s1"); err != nil || s.State != "checking" {
+		t.Fatalf("%+v %v", s, err)
+	}
+	CheckFor = time.Minute
+	// A refusal is the error, in the league's words.
+	f.state, f.looks = "open", 0
+	f.have[hex.EncodeToString(func() []byte { s := sha256.Sum256([]byte("\x00asm\x01\x00\x00\x00")); return s[:] }())] = []byte("changed")
+	f.known = map[string]bool{}
+	if _, err := table.SubmitBot(context.Background(), opt); err == nil || !strings.Contains(err.Error(), "the league refused the submission: bad bytes for ") ||
+		!strings.HasSuffix(err.Error(), "("+RefusedNote+")") {
 		t.Fatalf("%v", err)
 	}
 }

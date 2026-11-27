@@ -103,8 +103,9 @@ from table_web import TableWeb, register_table_routes  # noqa: E402
 from bot_web import bots_from_env, register_bot_routes  # noqa: E402
 from bots import Bots  # noqa: E402
 from badges import settings_from_env as badge_settings_from_env  # noqa: E402
-from ranked import RankedTables, runner_from_env, with_runner  # noqa: E402
-from ranked_job import starter_from_env  # noqa: E402
+from finalize import Finalizer  # noqa: E402
+from jobs import starter_from_env, with_runner  # noqa: E402
+from ranked import RankedTables, runner_from_env  # noqa: E402
 from programs import ProgramTokens  # noqa: E402
 from tables import Party, Tables  # noqa: E402
 
@@ -683,11 +684,13 @@ def main() -> None:
         # client is whoever launched the process).
         oauth = OAuthConfig.from_env(os.environ, MCP_PATH)
         # Every finalized bot version queues a ranked table (ranked.py).
-        # Who plays them: this process with OBGL_RANKED_RUNNER=in-process
-        # (the local stack), else a runner of its own: the Cloud Run job,
-        # which this process starts when it queues a table (OBGL_RANKED_JOB,
-        # ranked_job.py), or which is started by hand.
-        starter = starter_from_env(os.environ)
+        # A finalize queues the submission to be checked (finalize.py): by
+        # this process, or by the Cloud Run job this process starts
+        # (OBGL_FINALIZE_JOB). Who plays the tables: this process with
+        # OBGL_RANKED_RUNNER=in-process (the local stack), else the Cloud
+        # Run job, which is started when a table is queued (OBGL_RANKED_JOB,
+        # jobs.py) or by hand.
+        starter = starter_from_env(os.environ, "OBGL_RANKED_JOB")
         ranked = RankedTables(oauth.store, badges=badge_settings_from_env(os.environ), starter=starter) if oauth else None
         bots = bots_from_env(os.environ, oauth.store, oauth.public_url, ranked) if oauth else None
         if bots is None:
@@ -701,16 +704,20 @@ def main() -> None:
         if starter is not None and (ranked is None or runner is not None):
             raise ValueError("OBGL_RANKED_JOB needs sign-in (OBGL_PUBLIC_URL) and bot submissions (OBGL_BOT_STORE), "
                              "and no OBGL_RANKED_RUNNER: the job is the runner")
+        if os.environ.get("OBGL_FINALIZE_JOB") and bots is None:
+            raise ValueError("OBGL_FINALIZE_JOB needs sign-in (OBGL_PUBLIC_URL) and bot submissions (OBGL_BOT_STORE)")
         server = build_server(base_url, oauth, bots, ranked)
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8080"))
         app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
         if runner is not None:
             with_runner(app, runner)
-            handler = logging.StreamHandler()
-            handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
-            logging.getLogger("obgl.ranked").addHandler(handler)
-            logging.getLogger("obgl.ranked").setLevel(logging.INFO)
+        if bots is not None and bots.queue.starter is None:
+            with_runner(app, Finalizer(bots))
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+        logging.getLogger("obgl").addHandler(handler)  # obgl.bots, .finalize, .ranked: the queues and their jobs
+        logging.getLogger("obgl").setLevel(logging.INFO)
         # What server.run("streamable-http") does, with the app in hand.
         import uvicorn
 

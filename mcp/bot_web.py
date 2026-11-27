@@ -6,7 +6,11 @@ the storage and, for a local store, the upload routes.
     POST /table/api/bots/submissions               {name, wasm: {size, sha256}, data: [{path, size, sha256}]}
                                                    -> a submission: {id, state, uploads: [{sha256, size, done, session?}], ...}
     GET  /table/api/bots/submissions/<id>          the same, now
-    POST /table/api/bots/submissions/<id>/finalize -> {bot: {name, version, ...}}; 422 {error, problems}
+    POST /table/api/bots/submissions/<id>/finalize -> the submission, state checking: queued to be checked
+                                                   (finalize.py); 429 over the hourly limit
+    GET  /table/api/bots/submissions/<id>          while checking: state checking; then finalized, with
+                                                   bot: {name, version, ...} and table: its ranked table,
+                                                   or rejected, with problems
     GET  /table/api/bots                           -> {bots: [the account's versions], open}
     GET  /table/api/tables                         -> {tables: [the account's ranked tables, newest first:
                                                    {id, bot, version, state, queued_at, position?, started_at?,
@@ -16,8 +20,8 @@ the storage and, for a local store, the upload routes.
                                                    season's), seasons: {season: points}, counts: {badge: n},
                                                    badges: [newest first], summary (the page's line)}
 
-Finalize files the version and queues its ranked table (ranked.py): the
-answer's `table` is the table as the list shows it. A done table's `result`
+A finalized submission's version has a ranked table (ranked.py): the
+submission's `table` is the table as the list shows it. A done table's `result`
 is its results' id, `url` the page (/table/results/<id>), and table_results
 (server.py) reads it aloud.
 
@@ -26,6 +30,8 @@ Configuration (environment):
     OBGL_BOT_STORE            local:<dir> | gcs:<bucket>; unset: no bot submissions (the routes answer 503)
     OBGL_BOTCHECK             the botcheck binary (poker/arena/cmd/botcheck); required with a store
     OBGL_BOT_SUBMITS_PER_HOUR finalized submissions an account may make in an hour (default 1; 0: no limit)
+    OBGL_FINALIZE_JOB         the Cloud Run job that checks submissions (jobs.py); unset: this process checks
+                              them (local runs only: in production the job does)
 """
 
 from __future__ import annotations
@@ -37,7 +43,8 @@ from mcp.server.mcpserver import MCPServer
 from starlette.requests import Request
 
 from bot_files import LocalFiles, register_upload_routes
-from bots import Bots, GoBotCheck, Limits, Refused
+from bots import Bots, FinalizeQueue, GoBotCheck, Limits, Refused
+from jobs import starter_from_env
 from oauth.store import AuthStore
 from ranked import RankedTables
 from table_web import COOKIE_PATH, ApiError, TableWeb
@@ -65,7 +72,8 @@ def bots_from_env(env: Mapping[str, str], store: AuthStore, public_url: str,
     limits = Limits()
     if env.get("OBGL_BOT_SUBMITS_PER_HOUR"):
         limits = replace(limits, per_hour=int(env["OBGL_BOT_SUBMITS_PER_HOUR"]))
-    return Bots(store, files, GoBotCheck(command), limits, on_finalized=ranked.enqueue if ranked else None)
+    queue = FinalizeQueue(store, starter=starter_from_env(env, "OBGL_FINALIZE_JOB"))
+    return Bots(store, files, GoBotCheck(command), limits, on_finalized=ranked.enqueue if ranked else None, queue=queue)
 
 
 def with_url(table: dict) -> dict:
@@ -87,14 +95,21 @@ def register_bot_routes(server: MCPServer, web: TableWeb, bots: Bots | None, ran
         return web.api(handler)
 
     async def create(request: Request, account: str) -> dict:
-        return await bots.create(account, await web.json_body(request))
+        return await shown(await bots.create(account, await web.json_body(request)))
+
+    async def shown(sub: dict) -> dict:
+        """A submission as the API shows it: a finalized one's table as the list does."""
+        if "table" in sub:
+            table = await ranked.view(sub["table"]) if ranked else None
+            sub = {**sub, "table": with_url(table) if table else {"id": sub["table"]}}
+        return sub
 
     async def status(request: Request, account: str) -> dict:
-        return await bots.status(account, request.path_params["id"])
+        return await shown(await bots.status(account, request.path_params["id"]))
 
     async def finalize(request: Request, account: str) -> dict:
         web.check_origin(request)
-        return await bots.finalize(account, request.path_params["id"])
+        return await shown(await bots.finalize(account, request.path_params["id"]))
 
     async def listing(request: Request, account: str) -> dict:  # noqa: ARG001
         return await bots.list(account)

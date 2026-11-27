@@ -21,8 +21,9 @@ with a durable backend, across restarts) is a JSON object filed under a
     program-usage     when a program token was last used, by token id
     (the last three belong to mcp/programs.py)
     bot-submissions   a bot submission: its files, its state, by submission id
-    account-bots      an account's bot versions and its open submission, by account id
-    (the last two belong to mcp/bots.py)
+    account-bots      an account's bot versions, its open submission and the one being checked, by account id
+    finalize-queue    the submissions waiting to be checked, in order (one record, key "queue")
+    (the last three belong to mcp/bots.py)
     ranked-tables     a ranked table of a submitted bot: its state, its result, by table id
     account-ranked    an account's ranked tables, by account id
     ranked-queue      the tables waiting or playing, in order (one record, key "queue")
@@ -61,7 +62,7 @@ KINDS = (
     "clients", "pending", "codes", "access", "refresh", "accounts",
     "table-sessions", "watch-tokens", "account-tables",
     "program-tokens", "account-programs", "program-usage",
-    "bot-submissions", "account-bots",
+    "bot-submissions", "account-bots", "finalize-queue",
     "ranked-tables", "account-ranked", "ranked-queue",
     "account-badges",
 )

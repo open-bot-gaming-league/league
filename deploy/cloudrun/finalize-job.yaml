@@ -1,0 +1,57 @@
+# finalize-job.yaml: the Cloud Run job that checks submitted bots
+# (mcp/finalize.py), from the service's own image. BOT-STORAGE.md says how
+# to create it and how the service starts it. Not deployed.
+#
+#   gcloud run jobs replace deploy/cloudrun/finalize-job.yaml --project PROJECT --region REGION
+#
+# Fill in IMAGE (the service's image, the same tag), PROJECT and REGION.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: obgl-finalize
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    spec:
+      # One task: a runner checks the queue one submission at a time and
+      # exits when it is empty. A second execution started while one runs
+      # finds the queue's head under its lease and exits.
+      taskCount: 1
+      parallelism: 1
+      template:
+        spec:
+          # A task that dies is not retried by Cloud Run: the submission stays
+          # at the queue's head with its lease running out, and the next
+          # execution (the service starts one when the coach's program asks
+          # after it) checks it again, up to finalize.py's MAX_STARTS starts.
+          maxRetries: 0
+          # The longest check: 16 GB read back at 100 MB/s (160 s), the module
+          # check (botcheck: 17 s for a 64 MB module on one vCPU; its own
+          # limit is 120 s) and the promotion, about 5 minutes; 10 with
+          # margin. The runner takes no new submission after
+          # OBGL_FINALIZE_STOP_AFTER (the timeout less those 10 minutes); one
+          # left queued is started by the next ask after it.
+          timeoutSeconds: 3600
+          serviceAccountName: obgl-finalize@PROJECT.iam.gserviceaccount.com
+          containers:
+            - image: IMAGE
+              command: ["python", "./mcp/finalize.py", "run"]
+              resources:
+                limits:
+                  # botcheck peaks near 1 GB on a 64 MB module; the runner
+                  # holds the module twice while it reads it.
+                  cpu: "1"
+                  memory: 2Gi
+              env:
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: PROJECT
+                - name: OBGL_AUTH_STORE
+                  value: firestore
+                - name: OBGL_BOT_STORE
+                  value: gcs:tmg-obgl-bots
+                - name: OBGL_RANKED_JOB
+                  value: projects/PROJECT/locations/REGION/jobs/obgl-ranked
+                - name: OBGL_FINALIZE_STOP_AFTER
+                  value: "3000"
+                # OBGL_BOTCHECK is the image's (Dockerfile).

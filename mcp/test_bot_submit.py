@@ -12,6 +12,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import anyio
 import anyio.to_thread
 import httpx2
 import pytest
@@ -51,12 +52,22 @@ def wasm(tmp_path_factory):
     return out.read_bytes()
 
 
-@pytest.fixture
-def league(bot_site, tools, tmp_path):
+def _league(bot_site, tools, tmp_path, per_hour):
     def bots(base, store):
         return Bots(store, LocalFiles(str(tmp_path / "store"), base), GoBotCheck(tools["botcheck"]),
-                    Limits(wasm_bytes=32 << 20, data_bytes=8 << 20))
-    with bot_site(bots) as site:
+                    Limits(wasm_bytes=32 << 20, data_bytes=8 << 20, per_hour=per_hour))
+    return bot_site(bots)
+
+
+@pytest.fixture
+def league(bot_site, tools, tmp_path):
+    with _league(bot_site, tools, tmp_path, per_hour=4) as site:  # the API test's four, refused ones included
+        yield site
+
+
+@pytest.fixture
+def league_of_one(bot_site, tools, tmp_path):
+    with _league(bot_site, tools, tmp_path, per_hour=1) as site:
         yield site
 
 
@@ -67,6 +78,18 @@ async def _token(site, user=USER_A) -> str:
 
 def _entry(data: bytes) -> dict:
     return {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+
+
+async def _checked(http, auth, sid: str) -> dict:
+    """Finalize, then ask after it until the server has checked it: the submission."""
+    r = await http.post(f"/table/api/bots/submissions/{sid}/finalize", headers=auth)
+    assert r.status_code == 200 and r.json()["state"] == "checking", r.text
+    with anyio.fail_after(120):
+        while r.json()["state"] == "checking":
+            await anyio.sleep(0.1)
+            r = await http.get(f"/table/api/bots/submissions/{sid}", headers=auth)
+            assert r.status_code == 200, r.text
+    return r.json()
 
 
 async def _upload(http, session: str, data: bytes) -> None:
@@ -91,24 +114,24 @@ async def test_the_api_takes_a_bot_and_refuses_what_it_should(league, wasm):
         sub = r.json()
         for u in sub["uploads"]:
             await _upload(http, u["session"], wasm if u["sha256"] == _entry(wasm)["sha256"] else b"uploaded")
-        r = await http.post(f"/table/api/bots/submissions/{sub['id']}/finalize", headers=auth)
-        assert r.status_code == 422 and r.json()["problems"] == [
-            "data file 'd.bin': its sha256 is not the one declared (the file changed, or the upload was damaged)"], r.text
+        done = await _checked(http, auth, sub["id"])
+        assert done["state"] == "rejected" and done["problems"] == [
+            "data file 'd.bin': its sha256 is not the one declared (the file changed, or the upload was damaged)"], done
         # Not a module botcheck can compile, and a module that is not a bot.
         for refused, reason in [(EMPTY + b"\x01\xff", "wasm: not a valid WebAssembly module"),
                                 (EMPTY, "wasm: the module does not export _initialize")]:
             r = await http.post("/table/api/bots/submissions", headers=auth, json={"name": "mybot", "wasm": _entry(refused)})
             sub = r.json()
             await _upload(http, sub["uploads"][0]["session"], refused)
-            r = await http.post(f"/table/api/bots/submissions/{sub['id']}/finalize", headers=auth)
-            assert r.status_code == 422 and r.json()["problems"][0].startswith(reason), r.text
+            done = await _checked(http, auth, sub["id"])
+            assert done["state"] == "rejected" and done["problems"][0].startswith(reason), done
         # A good one.
         r = await http.post("/table/api/bots/submissions", headers=auth, json={"name": "mybot", "wasm": _entry(wasm)})
         sub = r.json()
         await _upload(http, sub["uploads"][0]["session"], wasm)
         assert (await http.get(f"/table/api/bots/submissions/{sub['id']}", headers=auth)).json()["uploads"][0]["done"]
-        r = await http.post(f"/table/api/bots/submissions/{sub['id']}/finalize", headers=auth)
-        assert r.status_code == 200 and r.json()["bot"]["version"] == 1, r.text
+        done = await _checked(http, auth, sub["id"])
+        assert done["state"] == "finalized" and done["bot"]["version"] == 1, done
         # The hour's one is used.
         r = await http.post("/table/api/bots/submissions", headers=auth, json={"name": "mybot", "wasm": _entry(wasm)})
         assert r.status_code == 429 and "an hour" in r.json()["error"] and "retry_at" in r.json()
@@ -128,7 +151,8 @@ async def test_the_api_takes_a_bot_and_refuses_what_it_should(league, wasm):
 
 
 @pytest.mark.asyncio
-async def test_the_sdk_submits_and_lists(league, tools, wasm, tmp_path):
+async def test_the_sdk_submits_and_lists(league_of_one, tools, wasm, tmp_path):
+    league = league_of_one
     token = await _token(league)
     work = tmp_path / "work"
     (work / "data" / "tables").mkdir(parents=True)
@@ -148,10 +172,15 @@ async def test_the_sdk_submits_and_lists(league, tools, wasm, tmp_path):
     assert re.fullmatch(r"bot mybot: wasm bot\.wasm [\d.]+ MB; data 2 files 3\.1 MB", lines[0]), lines
     assert any(re.search(r"3 files to upload, [\d.]+ MB$", line) for line in lines), lines
     assert lines[-1].startswith("submitted: mybot v1  ") and lines[-1].endswith("data 2 files 3.1 MB"), lines
+    assert "checking: the league reads every file back and checks the module" in lines and \
+        any(line.startswith("accepted in ") for line in lines), lines
+    sid = next(re.match(r"submission ([0-9a-f]{32}):", line) for line in lines if line.startswith("submission ")).group(1)
+    done = await anyio.to_thread.run_sync(lambda: bot("status", sid))
+    assert done.returncode == 0 and done.stdout.startswith(f"submission {sid}: accepted: mybot v1  "), done.stdout + done.stderr
     done = await anyio.to_thread.run_sync(lambda: bot("list"))
     assert done.returncode == 0 and done.stdout.splitlines() == [lines[-1].removeprefix("submitted: ")], done.stdout
     done = await anyio.to_thread.run_sync(lambda: bot("submit", "-name", "mybot", "-wasm", "bot.wasm", "-data", "data"))
-    assert done.returncode == 1 and "429" in done.stderr and "You can submit one bot an hour" in done.stderr, done.stdout + done.stderr
+    assert done.returncode == 1 and "429" in done.stderr and "You can submit one bot an hour, refused ones included" in done.stderr, done.stdout + done.stderr
     del env["OBGL_TOKEN"]
     done = await anyio.to_thread.run_sync(lambda: bot("list"))
     assert done.returncode == 1 and "no program token" in done.stderr, done.stderr

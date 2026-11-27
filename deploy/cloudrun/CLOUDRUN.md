@@ -303,7 +303,7 @@ document fields `record` and, on some, `expires_at`):
 | `oauth_bot-submissions` | the submission id | scan for `record.account` equal to the account id |
 | `oauth_access`, `oauth_refresh`, `oauth_codes` | sha256 of the token (not reversible) | scan each for `record.subject` equal to the account id |
 
-`oauth_clients` and `oauth_pending` hold no account id and are left alone.
+`oauth_clients`, `oauth_pending` and `oauth_finalize-queue` hold no account id and are left alone.
 
 `deploy/cloudrun/delete_account.py` does the scans and the deletes (it
 needs `google-cloud-firestore`, as in `mcp/requirements.txt`, and

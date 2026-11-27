@@ -2,10 +2,12 @@
 // submitted. A submitted bot is a WebAssembly module (your bot built with
 // GOOS=wasip1) and, if it reads any, a folder of data files: at most 64 MB
 // of module and 16 GB of data. The league checks the module and keeps it
-// as the next version of the bot by that name. One submission an hour.
+// as the next version of the bot by that name; submit waits for that
+// answer. One submission an hour.
 //
 //	go run ./sdk/cmd/bot submit -name mybot -wasm bot.wasm [-data dir]
 //	go run ./sdk/cmd/bot list
+//	go run ./sdk/cmd/bot status SUBMISSION   # where a submission stands
 //
 // It builds nothing: it uploads what you give it. The program token comes
 // from OBGL_TOKEN or obgl-token.txt (as for playing your table); OBGL_TABLE
@@ -22,6 +24,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
+	"time"
 
 	"github.com/open-bot-gaming-league/league/poker/engine/sdk"
 )
@@ -38,6 +42,8 @@ func main() {
 		err = submit(ctx, os.Args[2:])
 	case "list":
 		err = list(ctx, os.Args[2:])
+	case "status":
+		err = status(ctx, os.Args[2:])
 	default:
 		usage()
 	}
@@ -48,7 +54,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bot submit -name NAME -wasm FILE [-data DIR]\n       bot list")
+	fmt.Fprintln(os.Stderr, "usage: bot submit -name NAME -wasm FILE [-data DIR]\n       bot list\n       bot status SUBMISSION")
 	os.Exit(2)
 }
 
@@ -102,6 +108,36 @@ func list(ctx context.Context, args []string) error {
 	}
 	for _, v := range bots {
 		fmt.Println(v)
+	}
+	return nil
+}
+
+func status(ctx context.Context, args []string) error {
+	if len(args) != 1 {
+		usage()
+	}
+	t, err := league()
+	if err != nil {
+		return err
+	}
+	s, err := t.Submission(ctx, args[0])
+	if err != nil {
+		return err
+	}
+	switch s.State {
+	case "checking":
+		fmt.Printf("submission %s (%s): checking, since %s\n", s.ID, s.Name, time.Unix(s.RequestedAt, 0).UTC().Format("2006-01-02 15:04 UTC"))
+	case "finalized":
+		fmt.Printf("submission %s: accepted: %v\n", s.ID, s.Bot)
+		if s.Table != nil {
+			fmt.Printf("ranked table %s: %s\n", s.Table.ID, s.Table.State)
+		}
+	case "rejected":
+		fmt.Printf("submission %s (%s): refused: %s (%s)\n", s.ID, s.Name, strings.Join(s.Problems, "; "), sdk.RefusedNote)
+	case "open":
+		fmt.Printf("submission %s (%s): open: not finalized yet (run the same submit again)\n", s.ID, s.Name)
+	default:
+		fmt.Printf("submission %s (%s): %s\n", s.ID, s.Name, s.State)
 	}
 	return nil
 }

@@ -25,7 +25,8 @@ import server as server_module  # noqa: E402
 from oauth import OAuthConfig  # noqa: E402
 from oauth.idp import github  # noqa: E402
 from oauth.store import FirestoreStore, MemoryStore  # noqa: E402
-from ranked import with_runner  # noqa: E402
+from finalize import Finalizer  # noqa: E402
+from jobs import with_runner  # noqa: E402
 
 USER_A = {"id": 1001, "login": "alice"}  # GitHub users for the fake IdP (the `site` fixture)
 USER_B = {"id": 2002, "login": "bob"}
@@ -152,7 +153,7 @@ class Site:
 class Wiring:
     """What a test's `bots(base, store)` maker may give the server: its
     bot submissions, and the ranked tables they queue, with the runner
-    that plays them in the server (ranked.with_runner) if any."""
+    that plays them in the server (jobs.with_runner) if any."""
 
     bots: object
     ranked: object = None
@@ -178,6 +179,8 @@ def league_app(base, idp_base, store, bots=None, table_url=None):
     app = server_module.build_server(table_url, config, wiring.bots, wiring.ranked).streamable_http_app()
     if wiring.runner is not None:
         with_runner(app, wiring.runner)
+    if wiring.bots is not None and wiring.bots.queue.starter is None:
+        with_runner(app, Finalizer(wiring.bots))  # as server.main: submissions checked in the server
     return app
 
 

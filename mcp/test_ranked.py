@@ -10,6 +10,7 @@ Skips without `go` on PATH."""
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -28,6 +29,7 @@ import oauth_testing as ot
 from bot_files import LocalFiles
 from bots import Bots, GoBotCheck, Limits
 from conftest import USER_A, USER_B, Wiring
+from finalize import Finalizer
 from oauth.store import FileStore
 from badges import earned
 from ranked import MAX_STARTS, QUEUE, RankedTables, RecordDir, Runner, TableSettings, runner_from_env
@@ -138,7 +140,12 @@ async def _submit(http, auth, name, wasm):
         r = await http.put(u["session"], content=wasm, headers={"Content-Range": f"bytes 0-{len(wasm) - 1}/{len(wasm)}"})
         assert r.status_code == 200, r.text
     r = await http.post(f"/table/api/bots/submissions/{sub['id']}/finalize", headers=auth)
-    assert r.status_code == 200, r.text
+    assert r.status_code == 200 and r.json()["state"] == "checking", r.text
+    with anyio.fail_after(120):  # checked in the server (finalize.py's runner)
+        while r.json()["state"] == "checking":
+            await anyio.sleep(0.2)
+            r = await http.get(f"/table/api/bots/submissions/{sub['id']}", headers=auth)
+    assert r.json()["state"] == "finalized", r.text
     return r.json()
 
 
@@ -172,7 +179,8 @@ async def test_submit_queue_play_list_and_read(bot_site, built, go_table, tmp_pa
             cwd=work, env=env, capture_output=True, text=True, timeout=120))
         assert done.returncode == 0, done.stdout + done.stderr
         queued = [line for line in done.stdout.splitlines() if line.startswith("ranked table ")]
-        assert len(queued) == 1 and " queued (number 1)" in queued[0], done.stdout
+        # The table as the check left it: the runner in the server may have taken it already.
+        assert len(queued) == 1 and re.search(r" (queued \(number 1\)|playing now|played already): ", queued[0]), done.stdout
         table_id = queued[0].split()[2]
 
         async with httpx2.AsyncClient(base_url=site.base, timeout=60) as http:
@@ -253,7 +261,9 @@ async def _version(bots, account, wasm):
         sid = u["session"].rsplit("/", 1)[1]
         status, _, error = bots.files.put(sid, f"bytes 0-{len(wasm) - 1}/{len(wasm)}", iter([wasm]))
         assert status == 200, error
-    return (await bots.finalize(account, sub["id"]))["table"]["id"]
+    await bots.finalize(account, sub["id"])
+    await Finalizer(bots).drain()
+    return (await bots.status(account, sub["id"]))["table"]
 
 
 @pytest.mark.asyncio

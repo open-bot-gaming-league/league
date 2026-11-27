@@ -1,4 +1,4 @@
-"""Starting the ranked-table job (ranked_job.py) when a table is queued
+"""Starting the ranked-table job (jobs.py) when a table is queued
 (RankedTables.enqueue): once per table queued while no runner holds the
 queue's head, never while one does, and a start that fails leaves the table
 queued for the next. A fake starter and a fake HTTP session: no GCP."""
@@ -13,10 +13,10 @@ import pytest
 
 from oauth.store import MemoryStore
 from ranked import QUEUE, RankedTables
-from ranked_job import CloudRunJob, starter_from_env
+from jobs import START_GRACE, CloudRunJob, starter_from_env
 
 ME = "github:1001"
-JOB = "projects/p/locations/us-west1/jobs/tmg-obgl-ranked"
+JOB = "projects/p/locations/us-west1/jobs/obgl-ranked"
 
 
 class Clock:
@@ -80,7 +80,7 @@ async def test_no_start_while_a_runner_holds_the_head():
 @pytest.mark.asyncio
 async def test_a_failed_start_keeps_the_table_queued_and_the_next_start_takes_both(caplog):
     starter = Starter(fail=True)
-    tables, _ = _tables(starter)
+    tables, clock = _tables(starter)
     with caplog.at_level(logging.ERROR, logger="obgl.ranked"):
         first = await _enqueue(tables)
     assert first["state"] == "queued" and first["position"] == 1
@@ -89,8 +89,13 @@ async def test_a_failed_start_keeps_the_table_queued_and_the_next_start_takes_bo
     assert "HTTP 403" in caplog.text  # the error itself is in the log
     starter.fail = False
     second = await _enqueue(tables, 2)
+    assert starter.starts == 0  # tried a moment ago: the next try waits START_GRACE
+    clock.t += START_GRACE + 1
+    await tables.list(ME)  # the coach looks at their tables: the start is made up
     assert starter.starts == 1
     assert (await tables.store.get("ranked-queue", QUEUE))["tables"] == [first["id"], second["id"]]
+    await tables.list(ME)
+    assert starter.starts == 1  # started: not again until the grace is over
 
 
 @pytest.mark.asyncio
@@ -101,14 +106,14 @@ async def test_without_a_starter_nothing_is_started():
 
 
 def test_the_job_comes_from_the_environment():
-    assert starter_from_env({}) is None
-    assert starter_from_env({"OBGL_RANKED_JOB": ""}) is None
-    job = starter_from_env({"OBGL_RANKED_JOB": JOB})
+    assert starter_from_env({}, "OBGL_RANKED_JOB") is None
+    assert starter_from_env({"OBGL_RANKED_JOB": ""}, "OBGL_RANKED_JOB") is None
+    job = starter_from_env({"OBGL_RANKED_JOB": JOB}, "OBGL_RANKED_JOB")
     assert isinstance(job, CloudRunJob) and job.name == JOB
-    for bad in ("tmg-obgl-ranked", "projects/p/locations/us-west1/jobs/", "projects/p/jobs/tmg-obgl-ranked",
+    for bad in ("obgl-ranked", "projects/p/locations/us-west1/jobs/", "projects/p/jobs/obgl-ranked",
                 f"https://run.googleapis.com/v2/{JOB}"):
-        with pytest.raises(ValueError, match="projects/<project>/locations/<region>/jobs/<name>"):
-            starter_from_env({"OBGL_RANKED_JOB": bad})
+        with pytest.raises(ValueError, match="OBGL_RANKED_JOB: .*projects/<project>/locations/<region>/jobs/<name>"):
+            starter_from_env({"OBGL_RANKED_JOB": bad}, "OBGL_RANKED_JOB")
 
 
 class Response:
