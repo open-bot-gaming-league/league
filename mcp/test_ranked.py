@@ -29,6 +29,7 @@ from bot_files import LocalFiles
 from bots import Bots, GoBotCheck, Limits
 from conftest import USER_A, USER_B, Wiring
 from oauth.store import FileStore
+from badges import earned
 from ranked import MAX_STARTS, QUEUE, RankedTables, RecordDir, Runner, TableSettings, runner_from_env
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -181,6 +182,12 @@ async def test_submit_queue_play_list_and_read(bot_site, built, go_table, tmp_pa
             assert t["id"] == table_id and t["state"] == "done", t
             assert (t["bot"], t["version"], t["result"], t["url"]) == ("mybot", 1, table_id, f"/table/results/{table_id}")
             assert t["players"] == 4 and 1 <= t["place"] <= 4 and t["started_at"] <= t["finished_at"]
+            # Its badges: as many as its place reached (at four players, a win and a top 3).
+            names = [r.name for r in earned(t["place"], t["players"])]
+            assert t["badges"] == names
+            badges = (await http.get("/table/api/badges", headers=auth)).json()
+            assert [b["name"] for b in badges["badges"]] == names and {b["table"] for b in badges["badges"]} <= {table_id}
+            assert badges["points"] == sum(r.points for r in earned(t["place"], t["players"]))
             # Only the account's own: another sees none.
             other = {"Authorization": f"Bearer {await _token(site, USER_B)}"}
             assert (await http.get("/table/api/tables", headers=other)).json() == {"tables": []}
@@ -202,7 +209,8 @@ async def test_submit_queue_play_list_and_read(bot_site, built, go_table, tmp_pa
             assert not result.is_error, result.content
             text = result.content[0].text
             assert text.startswith(f"Your newest ranked table: mybot v1 (table {table_id}).\n\nmybot v1 placed "), text
-            assert text.endswith(f"/table/results/{table_id}\n")
+            report = text[:text.index(f"/table/results/{table_id}\n")]
+            assert ("Badges from this table: " in text) == bool(names) and "Badges" not in report
         async with ot.mcp_client(f"{site.base}/mcp", await site.agent_token(USER_B)) as mcp:
             text = (await mcp.call_tool("table_results", {})).content[0].text
             assert text.startswith("You have no ranked tables yet."), text

@@ -689,21 +689,23 @@ function copyText(btn, code) {
 $('token-make').onclick = makeToken;
 $('token-copy').onclick = () => copyText($('token-copy'), $('token-value'));
 $('programs').addEventListener('toggle', () => { if ($('programs').open) showToken().catch(err => { $('token-error').textContent = err.message; }); });
-// Ranked tables: the account's submitted bots' tables, newest first, each done one linked to its results.
+// Ranked tables: the account's badges and season points (the server's line), then its submitted bots'
+// tables, newest first, each done one linked to its results with the badges it earned.
 // Only where the server keeps them (league.ranked).
 async function showRanked() {
-  let tables;
-  try { ({ tables } = await call('GET', 'api/tables')); }
+  let tables, badges;
+  try { [{ tables }, badges] = await Promise.all([call('GET', 'api/tables'), call('GET', 'api/badges')]); }
   catch (err) { $('ranked-error').textContent = err.message; return; }
   $('ranked-error').textContent = '';
   $('ranked').hidden = false;
+  $('ranked-badges').textContent = badges.summary;
   const when = s => new Date(s * 1000).toLocaleString();
   const rows = tables.map(t => {
     const li = document.createElement('li');
     const name = `${t.bot} v${t.version}`;
     if (t.state === 'done') {
       const a = Object.assign(document.createElement('a'), { href: t.url, textContent: name });
-      li.append(a, ` placed ${t.place} of ${t.players} \u00b7 ${when(t.finished_at)}`);
+      li.append(a, ` placed ${t.place} of ${t.players}${t.badges.length ? ': ' + t.badges.join(', ') : ''} \u00b7 ${when(t.finished_at)}`);
     } else if (t.state === 'queued') li.textContent = `${name}: queued${t.position ? ', number ' + t.position : ''}`;
     else if (t.state === 'running') li.textContent = `${name}: playing since ${when(t.started_at)}`;
     else li.textContent = `${name}: did not finish: ${t.reason}`;

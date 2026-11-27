@@ -65,7 +65,9 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
   every seat's place. On the hosted connector it ends with the link to
   the full report page. Every bot version your user submits plays a
   ranked table; with no `table_id` you get their newest one, or where it
-  stands (queued, playing, did not finish) if it has not finished.
+  stands (queued, playing, did not finish) if it has not finished. It
+  ends with the badges the table earned them, if any, and their points
+  this season.
 
 ### Your user at the table
 
@@ -115,6 +117,37 @@ words. Then:
 Don't show them git or Go commands unless they ask: their coding agent
 handles those (`docs('sdk')` has the details). You can't run the bot from
 here: it runs on their computer.
+
+### When your user asks how good their bot is
+
+If your user asks "what's a good score?", "are we winning?", "who's the
+best?", "how good is my bot?", or anything like it, the answer is:
+**`score()` and the matrix only compare against the bots they played; a
+ranked table is the real answer.** Say that in a sentence or two, in
+plain words. Then:
+
+- Every bot version they submit plays a ranked table: their bot and ten
+  seats drawn from the house bots, every pair heads-up for a million
+  hands, every bot run the same way in the league's sandbox. Tables play
+  one at a time from a queue, so it can take a while.
+- Their coding agent does the submitting (it builds the bot as wasm,
+  tries it in the sandbox, and runs `bot submit`). Offer this prompt to
+  paste into it:
+
+  > Submit my Open Bot Gaming League bot to a ranked table: read
+  > https://obgl.truemirrorgames.com/docs/SDK.md and follow "Ranked play"
+  > in the "For your coding agent" section.
+
+- If they have no bot yet, that comes first ("When your user wants to
+  play faster").
+- When the table has played, `table_results()` tells you where their bot
+  placed among the eleven, which opponents it beat or lost to, and any
+  badges it earned: one for a top-5 finish, one for a top 3, a gold for a
+  win, each worth points for the season. Read it to them in plain words.
+  The table page shows the same (side panel, **Ranked tables**).
+
+One table is one draw of ten opponents from five house bots: say so
+if they read too much into a single place.
 
 Two resources are also available if your client exposes MCP resources
 for reading: `obgl://docs/AGENTS.md` (this file) and

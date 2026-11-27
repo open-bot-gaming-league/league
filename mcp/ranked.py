@@ -12,6 +12,8 @@ results (the table's results/<id> page; the table_results tool).
                     only way to an account's tables (none is ever looked up by guess)
     ranked-queue    "queue" -> {tables: [table id, ...]}: the tables not yet
                     finished, in the order they were queued
+    account-badges  the badges each account's tables earned (badges.py): the
+                    runner awards a table's before it marks the table done
 
 A finished table's record (package league's JSON) is kept in a RecordStore
 under the table's id, which is also its results' id: /table/results/<id>.
@@ -55,6 +57,7 @@ from typing import Protocol
 import anyio
 import anyio.to_thread
 
+from badges import Badges, BadgeSettings, settings_from_env as badge_settings_from_env
 from bot_files import bot_key
 from oauth.store import AuthStore
 
@@ -98,10 +101,13 @@ class RecordDir:
 
 
 class RankedTables:
-    """The queue and each account's list of tables, in the auth store."""
+    """The queue, each account's list of tables and the badges they earned
+    (badges.py), in the auth store."""
 
-    def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time) -> None:
+    def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time,
+                 badges: BadgeSettings = BadgeSettings()) -> None:
         self.store, self.clock = store, clock
+        self.badges = Badges(store, badges, clock)
         self._woken: list[anyio.Event] = []
 
     async def enqueue(self, account: str, version: Mapping) -> dict:
@@ -118,14 +124,20 @@ class RankedTables:
         return await self._view(tid, table)
 
     async def list(self, account: str) -> dict:
-        """The account's tables, newest first."""
+        """The account's tables, newest first; a done one with the names
+        of the badges it earned."""
         index = await self.store.get("account-ranked", account) or {"tables": []}
         queue = await self.queue()
+        earned: dict[str, list[str]] = {}
+        for b in await self.badges.all(account):
+            earned.setdefault(b["table"], []).append(self.badges.name(b))
         out = []
         for tid in reversed(index["tables"]):
             table = await self.store.get("ranked-tables", tid)
             if table is not None and table["account"] == account:
                 out.append(self._show(tid, table, queue))
+                if table["state"] == "done":
+                    out[-1]["badges"] = earned.get(tid, [])
         return {"tables": out}
 
     async def newest(self, account: str) -> dict | None:
@@ -252,7 +264,12 @@ class Runner:
             await self._dequeue(tid)  # deleted while it played: keep nothing of it
             return True
         await anyio.to_thread.run_sync(lambda: self.records.put(tid, record))
+        # Before the table is done: a runner stopped between the two plays
+        # it again, and the award is once per table.
+        badges = await self.tables.badges.award(tid, {**table, "place": place, "players": players})
         await self._finish(tid, table, "done", place=place, players=players)
+        if badges:
+            log.info("ranked: table %s earned %s", tid, ", ".join(b["badge"] for b in badges))
         return True
 
     async def drain(self) -> None:
@@ -477,7 +494,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     from oauth.store import store_from_env
 
-    runner = runner_from_env(os.environ, RankedTables(store_from_env(os.environ)))
+    tables = RankedTables(store_from_env(os.environ), badges=badge_settings_from_env(os.environ))
+    runner = runner_from_env(os.environ, tables)
     anyio.run(runner.drain)
 
 

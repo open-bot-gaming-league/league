@@ -76,7 +76,7 @@ COPY --from=arenabuilder /out/botcheck ./arena/bin/botcheck
 # Ranked tables (mcp/ranked.py; RANKED-TABLES.md): the service queues them;
 # the same image, run as the Cloud Run job `python ./mcp/ranked.py run`,
 # plays them with rankedtable, the guests, and the house bots' data below.
-COPY mcp/ranked.py ./mcp/
+COPY mcp/ranked.py mcp/badges.py ./mcp/
 COPY --from=arenabuilder /out/rankedtable ./arena/bin/rankedtable
 COPY --from=guestbuilder /out/guests/ ./arena/guests/
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).

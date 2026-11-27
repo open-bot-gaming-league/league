@@ -69,6 +69,17 @@ not syntax. Before anything else, add `obgl-token.txt` to the workspace's
    under). `go run ./sdk/example -matrix -house turtle,ox` plays
    every pair, their bot included, and prints the table; tell your user
    what it says in plain words.
+7. **Ranked play.** When your user asks how good the bot is ("what's a good
+   score?", "are we winning?", "who's the best?"), the matrix only answers
+   for the bots on this computer; a ranked table is the league's answer.
+   Build the bot as wasm, try it in the sandbox, and submit it, as
+   `sdk/README.md` says ("Build your bot as wasm and try it", "Submit your
+   bot"): one submission a day. Each version plays a ranked table from the
+   queue: their bot and ten seats drawn from the house bots, a million
+   hands a pair. Tell your user it is queued; the agent at their table
+   reads the result (`table_results`), and the table page shows it under
+   **Ranked tables**: where it placed among the eleven, what it beat and
+   lost to, and its badges (top 5, top 3, gold for a win) and season points.
 
 The SDK is Go. `examples/` has a call-every-bet bot in Python, JavaScript and
 TypeScript (Python 3.9+, or Node 22.18+), for a first look only; if your user
@@ -84,3 +95,11 @@ for them; they only describe how it should play. Give them the prompt from
 a token file from the table page (side panel, Programs) and save it in that
 agent's workspace folder, not paste it into a chat. You can't run it from here: the bot runs on their computer. Show
 commands only if they ask.
+
+When your user asks "what's a good score?", "are we winning?" or "who's the
+best?", tell them `score()` and the matrix only compare against the bots
+they played, and a ranked table is the real answer: their coding agent
+builds the bot as wasm and submits it (step 7 above), the league plays it
+at an eleven-player table, and `table_results` reads them where it placed
+and the badges it earned. AGENTS.md ("When your user asks how good their
+bot is") has the prompt to offer.

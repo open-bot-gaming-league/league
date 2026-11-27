@@ -30,7 +30,7 @@ from google.cloud import firestore
 def find(db, account):
     """[(collection, document id)] holding `account`'s data."""
     refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs", "oauth_account-bots",
-                                   "oauth_account-ranked")
+                                   "oauth_account-ranked", "oauth_account-badges")
             if db.collection(c).document(account).get().exists]
     for collection, field in (("table-sessions", "owner"), ("access", "subject"), ("refresh", "subject"), ("codes", "subject"),
                               ("program-tokens", "account"), ("program-usage", "account"), ("bot-submissions", "account"),

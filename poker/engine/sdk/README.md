@@ -324,6 +324,14 @@ sizes first. A file the league already has for your account (the same
 data as your last version) is not sent again, and a stopped upload resumes:
 run the same submit again. In code: `Table.SubmitBot` and `Table.Bots`.
 
+Each version plays a ranked table from the league's queue: your bot and
+ten seats drawn from the house bots, every pair heads-up on a million
+duplicate deals. This is the answer to "how good is it?": the matrix only
+compares the bots on your computer. The table page (Ranked tables) and
+the connector's `table_results` show where it placed among the eleven and
+what it beat and lost to. A top-5 finish, a top 3 and a win each earn a
+badge, worth points for the season; badges are kept across seasons.
+
 ## Files
 
 | file | what |

@@ -10,7 +10,11 @@ the storage and, for a local store, the upload routes.
     GET  /table/api/bots                           -> {bots: [the account's versions], open}
     GET  /table/api/tables                         -> {tables: [the account's ranked tables, newest first:
                                                    {id, bot, version, state, queued_at, position?, started_at?,
-                                                   finished_at?, reason?, place?, players?, result?, url?}]}
+                                                   finished_at?, reason?, place?, players?, result?, url?,
+                                                   badges?: [the names of the badges a done one earned]}]}
+    GET  /table/api/badges                         -> the account's badges (badges.py): {season, points (this
+                                                   season's), seasons: {season: points}, counts: {badge: n},
+                                                   badges: [newest first], summary (the page's line)}
 
 Finalize files the version and queues its ranked table (ranked.py): the
 answer's `table` is the table as the list shows it. A done table's `result`
@@ -100,11 +104,19 @@ def register_bot_routes(server: MCPServer, web: TableWeb, bots: Bots | None, ran
             raise ApiError(503, "ranked tables are not set up on this server")
         return {"tables": [with_url(t) for t in (await ranked.list(account))["tables"]]}
 
+    async def badges(request: Request, account: str, party) -> dict:  # noqa: ARG001
+        if ranked is None:
+            raise ApiError(503, "ranked tables are not set up on this server")
+        view = await ranked.badges.view(account)
+        view["badges"] = [{**b, "url": f"{COOKIE_PATH}/results/{b['table']}"} for b in view["badges"]]
+        return view
+
     api = f"{COOKIE_PATH}/api/bots"
     server.custom_route(f"{api}/submissions", methods=["POST"])(run(create))
     server.custom_route(api + "/submissions/{id}", methods=["GET"])(run(status))
     server.custom_route(api + "/submissions/{id}/finalize", methods=["POST"])(run(finalize))
     server.custom_route(api, methods=["GET"])(run(listing))
     server.custom_route(f"{COOKIE_PATH}/api/tables", methods=["GET"])(web.api(tables))
+    server.custom_route(f"{COOKIE_PATH}/api/badges", methods=["GET"])(web.api(badges))
     if bots is not None and isinstance(bots.files, LocalFiles):
         register_upload_routes(server, bots.files)

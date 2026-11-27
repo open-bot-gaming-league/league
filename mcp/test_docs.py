@@ -180,3 +180,31 @@ async def test_instructions_say_to_call_docs_agents_first(base):
     async with Client(f"{base}/mcp") as client:
         instructions = client.instructions
     assert instructions and "docs('agents')" in instructions
+
+
+def test_the_agent_is_told_where_the_real_answer_to_how_good_is():
+    """Asked 'what's a good score?' / 'are we winning?' / 'who's the
+    best?', the agent points to ranked play: build as wasm, bot submit,
+    the queue's table, table_results with its badges."""
+    with open(FILES["/docs/AGENTS.md"], encoding="utf-8") as f:
+        agents = f.read()
+    section = agents[agents.index("### When your user asks how good their bot is"):]
+    section = section[:section.index("\n#", 1)]
+    for phrase in ("what's a good score?", "are we winning?", "who's the", "ranked table", "wasm", "`bot submit`",
+                   "`table_results()`", "badges", "follow \"Ranked play\""):
+        assert phrase in section, phrase
+    with open(os.path.join(REPO, "docs", "SDK.md"), encoding="utf-8") as f:
+        sdk = f.read()
+    assert "7. **Ranked play.**" in sdk and "Submit your\n   bot" in sdk and "badges" in sdk
+    assert "When your user asks \"what's a good score?\"" in sdk
+
+
+@pytest.mark.asyncio
+async def test_instructions_point_how_good_questions_to_ranked_play(base):
+    from mcp import Client
+
+    async with Client(f"{base}/mcp") as client:
+        instructions = client.instructions
+    for phrase in ("what a good score is", "whether they are winning", "who is the best", "a ranked table is the real answer",
+                   "bot submit", "table_results()", "badges", "'When your user asks how good their bot is'"):
+        assert phrase in instructions, phrase

@@ -102,6 +102,7 @@ from table_client import TableClient, TableError  # noqa: E402
 from table_web import TableWeb, register_table_routes  # noqa: E402
 from bot_web import bots_from_env, register_bot_routes  # noqa: E402
 from bots import Bots  # noqa: E402
+from badges import settings_from_env as badge_settings_from_env  # noqa: E402
 from ranked import RankedTables, runner_from_env, with_runner  # noqa: E402
 from programs import ProgramTokens  # noqa: E402
 from tables import Party, Tables  # noqa: E402
@@ -167,7 +168,7 @@ _DOC_LINKS = """<ul>
 <li><a href="/docs/README.md">README.md</a>: what this is and how to play</li>
 <li><a href="/docs/AGENTS.md">AGENTS.md</a>: the agent's entry point: tools, rules, notation</li>
 <li><a href="/docs/WAYS-TO-PLAY.md">WAYS-TO-PLAY.md</a>: the ladder of ways to play</li>
-<li><a href="/docs/SDK.md">SDK.md</a>: play faster: your own bot, set up by your coding agent, playing your table</li>
+<li><a href="/docs/SDK.md">SDK.md</a>: play faster: your own bot, set up by your coding agent, playing your table, and ranked play: how good it is</li>
 </ul>
 <p>Legal:</p>
 <ul>
@@ -347,7 +348,14 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
             "play), and offer the prompt from docs('agents') ('When your user wants to play "
             "faster') to paste into it. They download a program token file from the table "
             "page (Programs) and save it in that agent's workspace folder, never in a chat. "
-            "No git or Go commands unless they ask."
+            "No git or Go commands unless they ask. "
+            "If your user asks what a good score is, whether they are winning, who is the best, "
+            "or how good their bot is, say that score() and the matrix only compare against the "
+            "bots they played and a ranked table is the real answer: their coding agent builds "
+            "the bot as wasm and submits it (bot submit), the league plays it at an eleven-player "
+            "table from the queue, and table_results() reads them where it placed and any badges "
+            "it earned. Offer the prompt from docs('agents') ('When your user asks how good their "
+            "bot is')."
             + (
                 " table() is your user's one table, and returns its table_url: give it to "
                 "the user, who sees it in the browser (signed in as the same account) and "
@@ -422,7 +430,8 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
         """A document as text. name: 'agents' (the entry point: read this
         first), 'readme', 'ways-to-play', 'sdk' (when your user wants to
         play faster or spend fewer tokens: a bot of their own, set up by
-        their coding agent), 'privacy', 'terms', or 'rules' (the static
+        their coding agent; and ranked play, when they ask how good it
+        is), 'privacy', 'terms', or 'rules' (the static
         rules text; rules() adds the live bet menu and opponents)."""
         try:
             return read_doc(name)
@@ -628,6 +637,8 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
         text = heading + answer["text"]
         if oauth is not None:
             text += f"\nThe full report, with every pair: {oauth.public_url.rstrip('/')}/table/results/{quote(table_id, safe='')}\n"
+        if ranked is not None and oauth is not None:
+            text += await _badges_line(ranked, _account(), table_id)
         return text
 
     @server.custom_route("/version", methods=["GET"])
@@ -639,6 +650,17 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
         return JSONResponse({"sha": os.environ.get("OBGL_GIT_SHA") or "unknown"})
 
     return server
+
+
+async def _badges_line(ranked: RankedTables, account: str | None, table_id: str) -> str:
+    """The badges the signed-in account's table earned, if any, as
+    table_results ends with them."""
+    if account is None:
+        return ""
+    earned = await ranked.badges.for_table(account, table_id)
+    if not earned:
+        return ""
+    return "\n" + ranked.badges.table_line(earned, (await ranked.badges.view(account))["points"])
 
 
 def _ranked_status(name: str, table: dict) -> str:
@@ -662,7 +684,7 @@ def main() -> None:
         # Every finalized bot version queues a ranked table (ranked.py).
         # Who plays them: this process with OBGL_RANKED_RUNNER=in-process
         # (the local stack), else a runner of its own (the Cloud Run job).
-        ranked = RankedTables(oauth.store) if oauth else None
+        ranked = RankedTables(oauth.store, badges=badge_settings_from_env(os.environ)) if oauth else None
         bots = bots_from_env(os.environ, oauth.store, oauth.public_url, ranked) if oauth else None
         if bots is None:
             ranked = None  # no submissions, no tables: the tables route answers 503

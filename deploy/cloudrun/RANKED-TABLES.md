@@ -30,6 +30,20 @@ interrupted (so a bot that kills the runner cannot hold the queue). Each
 write that two processes could make at once (the queue, the account's
 list) is a conditional write that retries (`AuthStore.update`).
 
+## Badges
+
+A finished table earns its coach badges by the bot's place among the
+eleven: a top 5, a top 3, and a gold for a win (a win earns all three).
+Each is worth points (by default 1, 3 and 10); points are summed per
+season, and badges are kept across seasons. The job awards a table's
+badges, once, before it marks the table done (`oauth_account-badges`, by
+account: `mcp/badges.py`); the service shows them (`GET /table/api/badges`,
+the table page's Ranked tables, the end of `table_results`). The season and
+the points are settings, the same on both: `OBGL_SEASON` (default
+`2026-S1`) and `OBGL_BADGE_POINTS` (`win=10,top-3=3,top-5=1`). A badge keeps
+the points and season it was awarded with: a new value counts from the next
+table. There is no leaderboard.
+
 ## Buckets
 
 - **Bots** (BOT-STORAGE.md's): the job mounts it read-only at `/bots`
@@ -90,8 +104,8 @@ the other house bots' time a decision).
 
 ## Deleting an account
 
-`delete_account.py` deletes the account's tables (`oauth_ranked-tables`)
-and its list (`oauth_account-ranked`), and prints the command that removes
-their records: a record names its owner's account
-(`seats[0].owner.account`). The runner skips a deleted table left in the
-queue. The results page does not show the account.
+`delete_account.py` deletes the account's tables (`oauth_ranked-tables`),
+its list (`oauth_account-ranked`) and its badges (`oauth_account-badges`),
+and prints the command that removes their records: a record names its
+owner's account (`seats[0].owner.account`). The runner skips a deleted
+table left in the queue. The results page does not show the account.

@@ -61,6 +61,8 @@ spec:
                 # OBGL_RANKEDTABLE, OBGL_RANKED_GUESTS and OBGL_HOUSE_CACHE are
                 # the image's (Dockerfile); OBGL_RANKED_HANDS, _SEATS, _POOL and
                 # _DRAW default to the ranked table (ranked.py TableSettings).
+                # OBGL_SEASON and OBGL_BADGE_POINTS (badges.py) must be the
+                # service's: unset on both, both use the defaults.
               volumeMounts:
                 - name: bots
                   mountPath: /bots

@@ -27,6 +27,7 @@ with a durable backend, across restarts) is a JSON object filed under a
     account-ranked    an account's ranked tables, by account id
     ranked-queue      the tables waiting or playing, in order (one record, key "queue")
     (the last three belong to mcp/ranked.py)
+    account-badges    the badges an account's ranked tables earned, by account id (mcp/badges.py)
 
 Bearer secrets (codes, tokens) are filed by their sha256, never in the
 clear, so a copy of the store is not a copy of anyone's tokens. (Registered
@@ -62,6 +63,7 @@ KINDS = (
     "program-tokens", "account-programs", "program-usage",
     "bot-submissions", "account-bots",
     "ranked-tables", "account-ranked", "ranked-queue",
+    "account-badges",
 )
 
 Record = dict[str, Any]
