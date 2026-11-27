@@ -57,6 +57,10 @@ type TableAbstraction struct {
 	boards [MaxRounds]*boardIndex // rounds 1-3
 	table  [MaxRounds][]uint16    // rounds 1-3
 	mapped []byte
+	// Read on demand (readTablesOnDemand): the open file, and where in it
+	// each round's table starts.
+	file   *os.File
+	offset [MaxRounds]int64
 }
 
 func (t *TableAbstraction) ID() string {
@@ -69,6 +73,9 @@ func (t *TableAbstraction) NumBuckets(round int) int { return t.Header.Buckets[r
 func (t *TableAbstraction) Bucket(round int, hole, board []Card) int {
 	if round == 0 {
 		return preflopClass(13, hole[0], hole[1])
+	}
+	if t.file != nil {
+		return t.readBucket(round, t.boards[round].slot(hole, board))
 	}
 	return int(t.table[round][t.boards[round].slot(hole, board)])
 }
@@ -195,7 +202,10 @@ func (t *TableAbstraction) WriteFile(path string) error {
 	}
 	_, err = f.Write(head)
 	for round := 1; round < MaxRounds && err == nil; round++ {
-		_, err = f.Write(tableBytes(t.table[round]))
+		var tbl []uint16
+		if tbl, err = t.roundTable(round); err == nil {
+			_, err = f.Write(tableBytes(tbl))
+		}
 	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
@@ -203,8 +213,18 @@ func (t *TableAbstraction) WriteFile(path string) error {
 	return err
 }
 
+// readTablesOnDemand opens bucket files without loading their tables:
+// each Bucket lookup reads its two bytes from the file. It is how bucket
+// files are read in wasm (GOOS=wasip1), where there is no mmap and memory
+// is capped: a copy of the tables would take 400 MB of it, where reading
+// on demand takes the header and leaves the file in the host's page cache,
+// shared. The build tags tables_on_demand and tables_in_memory choose
+// either way on any platform (for benchmarks); tests flip it natively.
+var readTablesOnDemand = tablesOnDemand
+
 // OpenTableAbstraction maps a bucket file read-only. The tables stay in
-// the page cache, shared by every process that opens the file.
+// the page cache, shared by every process that opens the file. In wasm
+// they are read from the file lookup by lookup instead (readTablesOnDemand).
 func OpenTableAbstraction(path string) (*TableAbstraction, error) {
 	if !nativeLittleEndian() {
 		return nil, errBigEndian
@@ -213,50 +233,96 @@ func OpenTableAbstraction(path string) (*TableAbstraction, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	t, err := openTable(f)
+	if t == nil || t.file == nil {
+		f.Close()
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return t, nil
+}
+
+// openTable reads f's header and then either maps its tables or, reading
+// them on demand, keeps f (t.file).
+func openTable(f *os.File) (*TableAbstraction, error) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
 	if info.Size() < 16 {
-		return nil, fmt.Errorf("%s: too short to be a bucket file", path)
+		return nil, errors.New("too short to be a bucket file")
 	}
-	mapped, err := mapFile(f, info.Size())
-	if err != nil {
-		return nil, fmt.Errorf("%s: map: %w", path, err)
+	var head [16]byte
+	if _, err := f.ReadAt(head[:], 0); err != nil {
+		return nil, err
 	}
-	t := &TableAbstraction{mapped: mapped}
-	fail := func(format string, args ...any) (*TableAbstraction, error) {
-		t.Close()
-		return nil, fmt.Errorf("%s: "+format, append([]any{path}, args...)...)
+	if string(head[:8]) != tableMagic {
+		return nil, errors.New("not a bucket file")
 	}
-	if string(mapped[:8]) != tableMagic {
-		return fail("not a bucket file")
-	}
-	hlen := int64(binary.LittleEndian.Uint64(mapped[8:]))
+	hlen := int64(binary.LittleEndian.Uint64(head[8:]))
 	if hlen <= 0 || 16+hlen > info.Size() {
-		return fail("corrupt header length")
+		return nil, errors.New("corrupt header length")
 	}
-	if err := json.Unmarshal(mapped[16:16+hlen], &t.Header); err != nil {
-		return fail("header: %v", err)
+	hb := make([]byte, hlen)
+	if _, err := f.ReadAt(hb, 16); err != nil {
+		return nil, fmt.Errorf("header: %w", err)
+	}
+	t := &TableAbstraction{}
+	if err := json.Unmarshal(hb, &t.Header); err != nil {
+		return nil, fmt.Errorf("header: %v", err)
 	}
 	t.attachBoards()
 	at := (16 + hlen + blueprintAlign - 1) / blueprintAlign * blueprintAlign
 	for round := 1; round < MaxRounds; round++ {
-		entries := int64(len(t.boards[round].reps)) * holeSlots
-		if at+entries*2 > info.Size() {
-			return fail("truncated")
-		}
-		t.table[round] = unsafe.Slice((*uint16)(unsafe.Pointer(&mapped[at])), entries)
-		at += entries * 2
+		t.offset[round] = at
+		at += int64(len(t.boards[round].reps)) * holeSlots * 2
 	}
 	if at != info.Size() {
-		return fail("size %d, want %d", info.Size(), at)
+		return nil, fmt.Errorf("size %d, want %d", info.Size(), at)
+	}
+	if readTablesOnDemand {
+		t.file = f
+		return t, nil
+	}
+	if t.mapped, err = mapFile(f, info.Size()); err != nil {
+		return nil, fmt.Errorf("map: %w", err)
+	}
+	for round := 1; round < MaxRounds; round++ {
+		entries := len(t.boards[round].reps) * holeSlots
+		t.table[round] = unsafe.Slice((*uint16)(unsafe.Pointer(&t.mapped[t.offset[round]])), entries)
 	}
 	return t, nil
 }
 
+// readBucket is a Bucket lookup in a table read on demand.
+func (t *TableAbstraction) readBucket(round, slot int) int {
+	var b [2]byte
+	if _, err := t.file.ReadAt(b[:], t.offset[round]+2*int64(slot)); err != nil {
+		panic(fmt.Sprintf("engine: bucket file read: %v", err)) // Bucket has no error; the file was checked at open
+	}
+	return int(binary.LittleEndian.Uint16(b[:]))
+}
+
+// roundTable is round's whole table: read from the file when the tables
+// are read on demand.
+func (t *TableAbstraction) roundTable(round int) ([]uint16, error) {
+	if t.file == nil {
+		return t.table[round], nil
+	}
+	tbl := make([]uint16, len(t.boards[round].reps)*holeSlots)
+	if _, err := t.file.ReadAt(tableBytes(tbl), t.offset[round]); err != nil {
+		return nil, err
+	}
+	return tbl, nil
+}
+
 func (t *TableAbstraction) Close() error {
+	if t.file != nil {
+		err := t.file.Close()
+		t.file = nil
+		return err
+	}
 	if t.mapped == nil {
 		return nil
 	}

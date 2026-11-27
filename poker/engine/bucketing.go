@@ -115,7 +115,11 @@ func BuildTableAbstraction(cfg BucketConfig, logf func(format string, args ...an
 				cfg.ReuseFlopTurn, src.Header.Buckets[1], src.Header.Buckets[2], cfg.Flop, cfg.Turn)
 		}
 		for round := 1; round <= 2; round++ {
-			t.table[round] = slices.Clone(src.table[round])
+			tbl, err := src.roundTable(round)
+			if err != nil {
+				return nil, fmt.Errorf("engine: %s: %w", cfg.ReuseFlopTurn, err)
+			}
+			t.table[round] = slices.Clone(tbl)
 		}
 		t.Header.FlopTurnFrom = src.ID()
 		logf("flop and turn tables copied from %s", src.ID())

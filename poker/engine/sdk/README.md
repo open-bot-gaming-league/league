@@ -274,6 +274,23 @@ plays one load in several matches at once). `sdk.LoadHouse(buckets,
 blueprint)` opens files by path. A house bot plays as at the table: its
 menu's bet sizes, reading other sizes as the menu sizes around them.
 
+## Build it as WebAssembly
+
+A bot plays in the league's own runs as a WebAssembly module, so that
+every bot gets the same sandbox and the same limits. Register your bot
+with `wasmbot` in an init function of its main package, and build a WASI
+reactor:
+
+    func init() { wasmbot.Register(func() (sdk.Bot, error) { return MyBot{}, nil }) }
+    func main() {}
+
+    GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o bot.wasm .
+
+The same code still runs natively, in `Match` and your tests. In wasm the
+bot's data files are read-only under `/data`, there is no network or
+environment, and its clock counts its own work, not the wall: see the
+`wasmbot` package comment. `poker/arena` is the runner, with the limits.
+
 ## Files
 
 | file | what |
@@ -287,6 +304,7 @@ menu's bet sizes, reading other sizes as the menu sizes around them.
 | `cmd/house/` | the download command |
 | `table.go` | `Table`, the table client |
 | `bots/` | the starter bots |
+| `wasmbot/` | `Register`: your bot as a WebAssembly module; `wasmbot/abi`, the wire format |
 | `example/` | a bot to start from, and the command that runs it |
 | `cmd/matrix/` | the matrix command: who beats whom |
 

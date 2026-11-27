@@ -98,6 +98,23 @@ type Legal struct {
 // CanRaise reports whether a bet or raise is possible.
 func (l Legal) CanRaise() bool { return l.MaxTo > 0 }
 
+// Allows reports whether a is one of the moves open: the check the
+// engine makes before it plays a move, for a referee that would rather
+// replace a bad move than stop the game.
+func (l Legal) Allows(a Action) bool {
+	switch a.Kind {
+	case Fold:
+		return l.Fold
+	case Check:
+		return l.Check
+	case Call:
+		return l.Call > 0
+	case Raise:
+		return l.CanRaise() && a.To >= l.MinTo && a.To <= l.MaxTo
+	}
+	return false
+}
+
 // Kind is the kind of a move. Raise is a bet or a raise: the same move,
 // named by whether the other seat has chips in this round.
 type Kind int
