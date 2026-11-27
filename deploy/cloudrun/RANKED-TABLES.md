@@ -11,11 +11,11 @@ tables), and reads the result at `/table/results/<id>` or from the MCP tool
 
 ## How it is split
 
-- **The service** (obgl-bot-poker) only queues: finalize writes the table
-  to Firestore (`oauth_ranked-tables`), appends it to the queue
+- **The service** (obgl-bot-poker) queues: finalize writes the table to
+  Firestore (`oauth_ranked-tables`), appends it to the queue
   (`oauth_ranked-queue/queue`) and to the account's list
-  (`oauth_account-ranked`). It serves the results from the records bucket,
-  mounted read-only: `OBGL_RECORDS=/records` makes the table server read
+  (`oauth_account-ranked`), and starts the job (Running it). It serves the
+  results from the records bucket, mounted read-only: `OBGL_RECORDS=/records` makes the table server read
   `/records/<id>.json` (entrypoint.sh's `-records`).
 - **The job** (`ranked-job.yaml`, obgl-ranked) plays: the same image, run as
   `python ./mcp/ranked.py run`. It plays the queue's head under a lease it
@@ -67,7 +67,11 @@ A dedicated service account for the job, `RANKED_SERVICE_ACCOUNT`:
   a temporary object and renamed: create and delete).
 
 The service's account gets `roles/storage.objectViewer` on the records
-bucket.
+bucket and, to start the job (Running it), `roles/run.invoker` on the job
+only:
+
+    gcloud run jobs add-iam-policy-binding obgl-ranked --project PROJECT --region REGION \
+        --member serviceAccount:SERVICE_ACCOUNT --role roles/run.invoker
 
 ## Create it
 
@@ -78,22 +82,36 @@ the service's must agree on the queue), and the service deployed with
 
     --add-volume name=records,type=cloud-storage,bucket=RECORDS_BUCKET,readonly=true
     --add-volume-mount volume=records,mount-path=/records
-    --set-env-vars OBGL_RECORDS=/records
+    --set-env-vars OBGL_RECORDS=/records,OBGL_RANKED_JOB=projects/PROJECT/locations/REGION/jobs/obgl-ranked
 
 (Cloud Storage volumes need `--execution-environment gen2` on the
 service too.)
 
 ## Running it
 
-The job is started by hand. A table waits in the queue (the coach sees it
-queued, with its place in line) until an execution runs:
+The service starts the job. With `OBGL_RANKED_JOB` set on the service
+(`projects/PROJECT/locations/REGION/jobs/obgl-ranked`), each table it
+queues starts an execution (the Run Admin API's `jobs.run`, as the
+service's account), unless a runner holds the queue's head under a live
+lease: that runner plays on to the end of the queue, the new table
+included. A start that fails is logged (`ranked: table <id> is queued, but
+its runner did not start`, with the API's answer) and the table stays
+queued: the next table queued starts a runner that plays both, or start
+one by hand. Without `OBGL_RANKED_JOB` nothing starts the job and every
+start is by hand. The service refuses to start with `OBGL_RANKED_JOB` but
+no bot submissions, or with `OBGL_RANKED_RUNNER` (the job is the runner).
+
+By hand:
 
     gcloud run jobs execute obgl-ranked --project PROJECT --region REGION
 
 An execution started while another runs sees the head's live lease and
-exits; the running one plays the rest of the queue. An execution that
-starts within 2 minutes of one that died finds the dead one's lease still
-live and exits; the table plays at the next start.
+exits; the running one plays the rest of the queue. So does the second of
+two tables queued before the first's execution has claimed the head: it
+starts an execution that finds the lease and exits. A runner that dies
+leaves its lease live for 2 minutes: a table queued in that time starts
+nothing, and the queue waits for the next table queued or a start by hand,
+which plays the dead runner's table again.
 
 ## Cost
 

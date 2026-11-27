@@ -24,10 +24,12 @@ Who writes what. The server, on finalize, files the table (queued), then
 appends it to the queue and to the account's list. From then on only the
 runner writes the table, and one runner plays at a time: the server's own
 (OBGL_RANKED_RUNNER=in-process, the local stack) or the Cloud Run job's
-(`python ranked.py run`, deploy/cloudrun/RANKED-TABLES.md). The runner takes
-the queue's head, marks it running under a lease it renews while the table
-plays, plays it (`rankedtable play`, a subprocess), files the record, marks
-the table done or failed, and only then takes it off the queue. A runner
+(`python ranked.py run`, deploy/cloudrun/RANKED-TABLES.md), which the
+server starts when it queues a table and no runner holds the queue's head
+(OBGL_RANKED_JOB, ranked_job.py). The runner takes the queue's head, marks
+it running under a lease it renews while the table plays, plays it
+(`rankedtable play`, a subprocess), files the record, marks the table
+done or failed, and only then takes it off the queue. A runner
 stopped anywhere in that loses nothing: the next one finds the head running
 with its lease run out and plays it again (the same seed: the same table),
 up to MAX_STARTS starts, after which the table fails as interrupted. A head
@@ -60,6 +62,7 @@ import anyio.to_thread
 from badges import Badges, BadgeSettings, settings_from_env as badge_settings_from_env
 from bot_files import bot_key
 from oauth.store import AuthStore
+from ranked_job import JobStarter
 
 log = logging.getLogger("obgl.ranked")
 
@@ -105,8 +108,10 @@ class RankedTables:
     (badges.py), in the auth store."""
 
     def __init__(self, store: AuthStore, clock: Callable[[], float] = time.time,
-                 badges: BadgeSettings = BadgeSettings()) -> None:
-        self.store, self.clock = store, clock
+                 badges: BadgeSettings = BadgeSettings(), starter: JobStarter | None = None) -> None:
+        """starter: started when a table is queued and no runner holds the
+        queue's head (ranked_job.py: the Cloud Run job); None: none is."""
+        self.store, self.clock, self.starter = store, clock, starter
         self.badges = Badges(store, badges, clock)
         self._woken: list[anyio.Event] = []
 
@@ -121,7 +126,25 @@ class RankedTables:
         await self.store.update("account-ranked", account, lambda a: {"tables": [*(a or {"tables": []})["tables"], tid]})
         for event in self._woken:
             event.set()
+        if self.starter is not None:
+            await self._start_runner(tid)
         return await self._view(tid, table)
+
+    async def _start_runner(self, tid: str) -> None:
+        """Start a runner for the queue, unless one holds its head: that one
+        plays on to the end of the queue, this table included (it was queued
+        before the look). A start that fails is logged; the table stays
+        queued for the next start (the next table queued, or one by hand)."""
+        try:
+            queue = await self.queue()
+            head = await self.store.get("ranked-tables", queue[0]) if queue else None
+            if head is not None and head["state"] == "running" and head["lease_until"] > self.clock():
+                return
+            started = await anyio.to_thread.run_sync(self.starter.start)
+        except Exception:
+            log.exception("ranked: table %s is queued, but its runner did not start", tid)
+            return
+        log.info("ranked: table %s is queued; started its runner: %s", tid, started)
 
     async def list(self, account: str) -> dict:
         """The account's tables, newest first; a done one with the names

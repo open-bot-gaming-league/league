@@ -104,6 +104,7 @@ from bot_web import bots_from_env, register_bot_routes  # noqa: E402
 from bots import Bots  # noqa: E402
 from badges import settings_from_env as badge_settings_from_env  # noqa: E402
 from ranked import RankedTables, runner_from_env, with_runner  # noqa: E402
+from ranked_job import starter_from_env  # noqa: E402
 from programs import ProgramTokens  # noqa: E402
 from tables import Party, Tables  # noqa: E402
 
@@ -683,8 +684,11 @@ def main() -> None:
         oauth = OAuthConfig.from_env(os.environ, MCP_PATH)
         # Every finalized bot version queues a ranked table (ranked.py).
         # Who plays them: this process with OBGL_RANKED_RUNNER=in-process
-        # (the local stack), else a runner of its own (the Cloud Run job).
-        ranked = RankedTables(oauth.store, badges=badge_settings_from_env(os.environ)) if oauth else None
+        # (the local stack), else a runner of its own: the Cloud Run job,
+        # which this process starts when it queues a table (OBGL_RANKED_JOB,
+        # ranked_job.py), or which is started by hand.
+        starter = starter_from_env(os.environ)
+        ranked = RankedTables(oauth.store, badges=badge_settings_from_env(os.environ), starter=starter) if oauth else None
         bots = bots_from_env(os.environ, oauth.store, oauth.public_url, ranked) if oauth else None
         if bots is None:
             ranked = None  # no submissions, no tables: the tables route answers 503
@@ -694,6 +698,9 @@ def main() -> None:
         runner = runner_from_env(os.environ, ranked) if runner_kind and ranked and bots else None
         if runner_kind and runner is None:
             raise ValueError("OBGL_RANKED_RUNNER=in-process needs sign-in (OBGL_PUBLIC_URL) and bot submissions (OBGL_BOT_STORE)")
+        if starter is not None and (ranked is None or runner is not None):
+            raise ValueError("OBGL_RANKED_JOB needs sign-in (OBGL_PUBLIC_URL) and bot submissions (OBGL_BOT_STORE), "
+                             "and no OBGL_RANKED_RUNNER: the job is the runner")
         server = build_server(base_url, oauth, bots, ranked)
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8080"))
