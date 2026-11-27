@@ -1,0 +1,26 @@
+Example placed 10th of 10, -187.0 bb/100 summed over its 9 opponents.
+It beat 5 of 9, lost to 4, too close to call 0.
+Every pair played 1,000,000 hands heads-up on duplicate deals. Too close to call: within 2 standard errors of even.
+
+Example against each opponent, bb/100 ± standard error:
+  Clam (seat 2)     +17.3 ± 0.4  won
+  Clam (seat 8)     +17.3 ± 0.4  won
+  Turtle (seat 1)    +3.7 ± 0.8  won
+  Turtle (seat 4)    +3.7 ± 0.8  won
+  Turtle (seat 7)    +3.7 ± 0.8  won
+  Ox (seat 3)       -47.9 ± 0.9  lost
+  Ox (seat 5)       -47.9 ± 0.9  lost
+  Ox (seat 9)       -47.9 ± 0.9  lost
+  Dove              -89.0 ± 1.2  lost
+
+Places, by bb/100 summed over each seat's opponents:
+   1. Ox (seat 9)       +290.8
+   2. Ox (seat 5)       +287.9
+   3. Ox (seat 3)       +286.4
+   4. Turtle (seat 4)    -65.6
+   5. Turtle (seat 1)    -65.8
+   6. Turtle (seat 7)    -67.3
+   7. Clam (seat 2)     -158.7
+   8. Clam (seat 8)     -159.3
+   9. Dove              -161.3
+  10. Example           -187.0  <- Example

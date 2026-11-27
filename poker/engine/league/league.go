@@ -12,6 +12,12 @@
 // The bots are sdk.Bots. A bot run in a sandbox reports what it used by
 // implementing Meter (fuel, bytes of its data read, peak memory); the
 // record carries those figures and leaves them null for a bot that does not.
+//
+// A Report is what a person reads from a Record: the challenger's place, its
+// result against each opponent (beat, lost to, or too close to call: within
+// two standard errors), the places, and every pair; as text (Report.Text) and
+// as the data behind the table server's results page. A Records (RecordDir:
+// a directory of record files) looks a Record up by its table id.
 package league
 
 import (

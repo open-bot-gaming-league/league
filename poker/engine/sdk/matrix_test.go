@@ -80,6 +80,9 @@ func TestCloseCells(t *testing.T) {
 	if h.Close(1, 2) { // exactly 2 SE: not within
 		t.Error("+4 ± 2 (2 SE) called close")
 	}
+	if !(Result{}).Close() { // exactly even, as two copies of a bot that ignores its seed come out
+		t.Error("+0 ± 0 not called close")
+	}
 	text := h.String()
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
 	if !strings.Contains(lines[1], "  +10.0 ± 2.0") || !strings.Contains(lines[1], "~ -3.0 ± 2.0") {

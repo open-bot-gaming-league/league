@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"runtime"
 	"strings"
 	"sync"
@@ -89,12 +88,10 @@ func closeBot(b Bot) {
 	}
 }
 
-// Close reports whether contender i's result against j is within two
-// standard errors of even: too close to call at this many hands. (A
-// contender against itself counts as close.)
+// Close reports whether contender i's result against j is too close to
+// call (Result.Close). A contender against itself counts as close.
 func (t HeadToHead) Close(i, j int) bool {
-	r := t.Cells[i][j]
-	return i == j || math.Abs(r.BBPer100) < 2*r.SE
+	return i == j || t.Cells[i][j].Close()
 }
 
 // String is the table to print: one row per contender, its bb/100 ± SE

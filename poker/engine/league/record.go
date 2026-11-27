@@ -3,8 +3,9 @@ package league
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
+
+	"github.com/open-bot-gaming-league/league/poker/engine/sdk"
 )
 
 // Record is one table's outcome. Every field but Measured is determined by
@@ -56,8 +57,8 @@ type Placing struct {
 	Name     string  `json:"name"`
 	Total    float64 `json:"total_bb_per_100"`
 	TotalNet int64   `json:"total_net"`
-	Won      int     `json:"won"`  // opponents it beat by more than 2 SE
-	Lost     int     `json:"lost"` // opponents that beat it by more than 2 SE
+	Won      int     `json:"won"`  // opponents it beat, past too close to call (sdk.Result.Close)
+	Lost     int     `json:"lost"` // opponents that beat it, past too close to call
 }
 
 // SeatUsage is what one seat used over all its pairs. The metered fields
@@ -122,6 +123,11 @@ func newRecord(cfg Config, challenger Entrant, pool, seats []Entrant) *Record {
 
 func botOf(e Entrant) Bot { return Bot{ID: e.ID, Name: e.Name, Version: e.Version} }
 
+// Result is the pair's match as sdk.Match reported it.
+func (p Pair) Result() sdk.Result {
+	return sdk.Result{Hands: p.Hands, Net: p.Net, BBPer100: p.BBPer100, SE: p.SE}
+}
+
 // addPair adds a pair's match and what each side used.
 func (r *Record) addPair(a, b int, p played) {
 	r.Pairs = append(r.Pairs, Pair{A: a, B: b, Hands: p.result.Hands, Net: p.result.Net, BBPer100: p.result.BBPer100, SE: p.result.SE})
@@ -164,7 +170,7 @@ func (r *Record) place() {
 		totals[p.B] -= int64(p.Net)
 		bb[p.A] += p.BBPer100
 		bb[p.B] -= p.BBPer100
-		if math.Abs(p.BBPer100) > 2*p.SE {
+		if !p.Result().Close() {
 			w, l := p.A, p.B
 			if p.BBPer100 < 0 {
 				w, l = l, w

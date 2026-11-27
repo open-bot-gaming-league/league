@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Challenger.Label}} placed {{.Placed}}: a ranked table's results</title>
+<link rel="icon" href="data:,">
+<style>
+/* The table page's colours and type (table.css), on a page that scrolls. */
+:root{--bg:#1e2225;--panel:#272c30;--line:#3a4147;--txt:#d9dde1;--dim:#8b939b;--glow:#f0c75e;--pos:#7fd18b;--neg:#f08a7e}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font-family:"Liberation Sans",Arial,sans-serif;line-height:1.45}
+main{max-width:64rem;margin:0 auto;padding:1.2rem 1rem 3rem}
+a{color:var(--glow)}
+h1{font-size:1.6rem;margin:.6rem 0 .3rem;color:#fff}
+h2{font-size:1.1rem;margin:1.8rem 0 .5rem;color:#fff}
+.lead{font-size:1.15rem;margin:.2rem 0 .8rem}
+.dim{color:var(--dim)} .small{font-size:.88rem}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+table{border-collapse:collapse;background:var(--panel);border-radius:.5rem;overflow:hidden}
+th,td{padding:.35rem .75rem;text-align:left;border-bottom:1px solid var(--line)}
+tr:last-child td,tr:last-child th{border-bottom:0}
+thead th{color:var(--dim);font-weight:400;font-size:.88rem}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.you td{background:#f0c75e1a} tr.you td:first-child{box-shadow:inset 3px 0 0 var(--glow)}
+.won{color:var(--pos);font-weight:700} .lost{color:var(--neg);font-weight:700} .close{color:var(--dim)}
+details{margin-top:1.8rem} summary{cursor:pointer;font-size:1.1rem;font-weight:700;color:#fff}
+.scroll{overflow-x:auto;margin-top:.6rem}
+.grid th,.grid td{padding:.3rem .5rem;font-size:.85rem}
+.grid thead th{vertical-align:bottom;text-align:right;white-space:nowrap}
+.grid td{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.grid td.close{color:var(--dim)} .grid td.self{color:var(--line);text-align:center}
+.grid tbody th{white-space:nowrap;font-weight:400}
+</style>
+</head>
+<body>
+<main>
+<p class="dim small"><a href="../">Your table</a> &middot; ranked table {{.ID}}</p>
+<h1>{{.Challenger.Label}} placed {{.Placed}}</h1>
+<p class="lead">{{.Challenger.Label}} {{.Summary}}.</p>
+<p class="dim small">Every pair of seats played {{thousands .HandsPerPair}} hands heads-up on duplicate deals (each deal twice, the seats swapped).
+bb/100 is big blinds won per 100 hands, &plusmn; its standard error. Too close to call: within 2 standard errors of even, so more hands would be needed to tell.</p>
+
+<h2>Against each opponent</h2>
+<table id="opponents">
+<thead><tr><th>Opponent</th><th class="num">bb/100</th><th>Result</th></tr></thead>
+<tbody>
+{{- range .Opponents}}
+<tr><td>{{.Label}}</td><td class="num {{sign .Result.BBPer100}}">{{result .Result}}</td><td class="{{verdictClass .Verdict}}">{{.Verdict}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+
+<h2>Places</h2>
+<table id="places">
+<thead><tr><th class="num">Place</th><th>Bot</th><th class="num">Total bb/100</th><th class="num">Won</th><th class="num">Lost</th><th class="num">Too close</th></tr></thead>
+<tbody>
+{{- range .Places}}
+<tr{{if .IsChallenger}} class="you"{{end}}><td class="num">{{if .Tied}}={{end}}{{.Place}}</td><td>{{.Label}}{{if .IsChallenger}} <span class="dim">(your bot)</span>{{end}}</td><td class="num {{sign .Total}}">{{printf "%+.1f" .Total}}</td><td class="num">{{.Won}}</td><td class="num">{{.Lost}}</td><td class="num">{{.Close}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+<p class="dim small">Total: a seat's bb/100 summed over its {{len .Opponents}} opponents; the places go by it. Won, lost and too close count its opponents.</p>
+
+<details id="grid">
+<summary>Every pair</summary>
+<p class="dim small">Each row's bb/100 against each column, &plusmn; its standard error. Grey: too close to call.</p>
+<div class="scroll">
+<table class="grid">
+<thead><tr><th></th>{{range $j, $name := .Names}}<th>{{$name}}<br><span class="dim">seat {{$j}}</span></th>{{end}}</tr></thead>
+<tbody>
+{{- range $i, $row := .Grid}}
+<tr><th>{{index $.Labels $i}}</th>{{range $row}}{{if .Self}}<td class="self">&ndash;</td>{{else}}<td class="{{if .Result.Close}}close{{else}}{{sign .Result.BBPer100}}{{end}}">{{result .Result}}</td>{{end}}{{end}}</tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</details>
+</main>
+</body>
+</html>

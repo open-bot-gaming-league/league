@@ -6,6 +6,7 @@ their agent over MCP, or their program with a program token (programs.py).
 
     GET  /table/                     the page (sign-in first if needed)
     GET  /table/watch/<anything>     an old watch link: sent to /table/
+    GET  /table/results/<id>         a ranked table's results (no sign-in: anyone with the link)
     GET  /table/<asset>              the page's files (table.js, table.css, cardmotion.js)
     GET  /table/signin?next=<path>   sign in (GitHub or Google), then back to <path>
     GET  /table/signin/callback      where /login sends the browser back
@@ -56,7 +57,7 @@ import math
 import secrets
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import anyio.to_thread
 from mcp.server.mcpserver import MCPServer
@@ -296,6 +297,19 @@ class TableWeb:
         itself (the owner's own, after sign-in), whatever the token."""
         return RedirectResponse(COOKIE_PATH + "/", status_code=303, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
+    async def results(self, request: Request) -> Response:
+        """/table/results/<id>: a ranked table's results page, as the table
+        serves it. Open to anyone with the link, signed in or not."""
+        table_id = request.path_params["id"]
+        status, ctype, body = await anyio.to_thread.run_sync(
+            lambda: self.client.asset("results/" + quote(table_id, safe="")))
+        if status == 404:
+            return HTMLResponse(render("No such table", "<h1>No such table</h1><p>There are no results for that ranked table.</p>"),
+                                status_code=404, headers=_PAGE_HEADERS)
+        if status != 200:
+            raise TableError(status, "the table did not serve the results")
+        return Response(body, media_type=ctype, headers=_PAGE_HEADERS)
+
     async def asset(self, name: str) -> Response:
         status, ctype, body = await anyio.to_thread.run_sync(lambda: self.client.asset(name))
         return Response(body, status_code=status, media_type=ctype, headers={"Cache-Control": "no-cache"})
@@ -504,6 +518,7 @@ def register_table_routes(server: MCPServer, web: TableWeb) -> None:
     for path in (COOKIE_PATH, COOKIE_PATH + "/"):
         server.custom_route(path, methods=["GET"])(web.page)
     server.custom_route(COOKIE_PATH + "/watch/{token}", methods=["GET"])(web.old_watch_link)
+    server.custom_route(COOKIE_PATH + "/results/{id}", methods=["GET"])(web.results)
     server.custom_route(COOKIE_PATH + "/signin", methods=["GET"])(web.signin)
     server.custom_route(COOKIE_PATH + "/signin/callback", methods=["GET"])(web.callback)
 

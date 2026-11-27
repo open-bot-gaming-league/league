@@ -21,6 +21,10 @@ COPY poker/engine/*.go ./
 # The engine embeds the served config (engine.TableConfig).
 COPY poker/engine/configs/table_50bb.json ./configs/table_50bb.json
 COPY poker/engine/cmd/table ./cmd/table
+# The results pages (cmd/table/results.go) use package league, which uses
+# the sdk and its house bots.
+COPY poker/engine/sdk ./sdk
+COPY poker/engine/league ./league
 # go.mod declares zero external dependencies (stdlib only, no go.sum to
 # restore), so this build needs no network access.
 RUN go build -o /out/table ./cmd/table

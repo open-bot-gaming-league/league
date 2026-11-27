@@ -19,6 +19,12 @@ type Result struct {
 	SE float64
 }
 
+// Close reports whether the result is too close to call at this many
+// hands: within two standard errors of even, or exactly even.
+func (r Result) Close() bool {
+	return math.Abs(r.BBPer100) < 2*r.SE || r.BBPer100 == 0
+}
+
 func (r Result) String() string {
 	return fmt.Sprintf("%+.1f ± %.1f bb/100 over %d hands", r.BBPer100, r.SE, r.Hands)
 }

@@ -59,6 +59,11 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
   opponent, computed from the table's hand history on the table
   (not just this connection's local count — if the table server
   restarted, your score is still correct).
+- **`table_results(table_id)`** — a ranked table's results, as text to
+  read to your user: where their bot placed, which opponents it beat,
+  lost to, or was too close to call (each bb/100 ± standard error), and
+  every seat's place. On the hosted connector it ends with the link to
+  the full report page.
 
 ### Your user at the table
 

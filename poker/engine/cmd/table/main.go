@@ -10,7 +10,8 @@
 // each its bucket file, its blueprint, and what the page says about it
 // (its name, how it was trained, a note on its style). The page uses relative
 // URLs, so it works behind a proxy that strips a path prefix. API.md has
-// the requests.
+// the requests. With -records, it also serves each ranked table's results
+// (results.go).
 package main
 
 import (
@@ -35,6 +36,7 @@ import (
 	"time"
 
 	"github.com/open-bot-gaming-league/league/poker/engine"
+	"github.com/open-bot-gaming-league/league/poker/engine/league"
 )
 
 // The page and anything it loads: everything under static/, served from
@@ -48,6 +50,7 @@ func main() {
 	botsPath := flag.String("bots", "", "JSON file listing the bots to serve, the default first (required; see botFile)")
 	handsPath := flag.String("hands", "", "append every finished hand to this file, one JSON object per line")
 	addr := flag.String("addr", "127.0.0.1:9790", "listen address")
+	records := flag.String("records", "", "directory of ranked tables' records (<id>.json), served at results/<id>")
 	flag.Parse()
 	log.SetFlags(log.LstdFlags)
 
@@ -61,6 +64,9 @@ func main() {
 		log.Fatal(err)
 	}
 	s := newServer(bots, binary.LittleEndian.Uint64(seed[:8]), binary.LittleEndian.Uint64(seed[8:]))
+	if *records != "" {
+		s.records = league.RecordDir(*records)
+	}
 	if *handsPath != "" {
 		// Sessions come back from the hands they finished, so a restart
 		// (a new page, a new bot) does not cost anyone their score.
@@ -168,6 +174,7 @@ type server struct {
 	rnd      *rand.Rand
 	sessions map[string]*session
 	hands    *os.File
+	records  league.Records // ranked tables' records; nil: none here
 }
 
 func newServer(bots []*bot, seed1, seed2 uint64) *server {
@@ -254,6 +261,8 @@ func (s *server) handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /api/act", s.api(s.act))
 	mux.HandleFunc("POST /api/next", s.api(s.next))
+	mux.HandleFunc("GET /results/{id}", s.resultsPage)
+	mux.HandleFunc("GET /api/results/{id}", s.resultsAPI)
 	return mux
 }
 

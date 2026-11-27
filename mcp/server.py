@@ -1,6 +1,6 @@
-"""MCP server for Bot Poker: seven tools (docs, rules, table, state, act,
-next_hand, score): all but docs() wrap the live table's HTTP API, docs()
-returns the documents. With sign-in (OAuth on, below) also the browser table at
+"""MCP server for Bot Poker: eight tools (docs, rules, table, state, act,
+next_hand, score, table_results): all but docs() wrap the live table's HTTP
+API, docs() returns the documents. With sign-in (OAuth on, below) also the browser table at
 /table. See
 docs/AGENTS.md for what this is and how to read it; for the stdio
 mode, add it to your MCP client config as a stdio server (command
@@ -71,6 +71,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Callable
+from urllib.parse import quote
 
 import anyio.to_thread
 
@@ -586,6 +587,21 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
         if tables is not None:
             out.update(_table_fields())
         return out
+
+    @server.tool()
+    def table_results(table_id: str) -> str:
+        """A ranked table's results, as text to read to your user: where
+        their bot (the challenger) placed, which opponents it beat, lost
+        to, or was too close to call, each with bb/100 ± standard error,
+        and every seat's place. table_id: the ranked table's id."""
+        try:
+            answer = client.results(table_id)
+        except TableError as e:
+            raise ToolError(e.message) from e
+        text = answer["text"]
+        if oauth is not None:
+            text += f"\nThe full report, with every pair: {oauth.public_url.rstrip('/')}/table/results/{quote(table_id, safe='')}\n"
+        return text
 
     @server.custom_route("/version", methods=["GET"])
     async def version(request: Request) -> Response:  # noqa: ARG001

@@ -121,3 +121,8 @@ class TableClient:
             "api/next",
             {"session": session, "hand": hand, "seat": seat, "opponent": opponent},
         )
+
+    def results(self, table_id: str) -> dict:
+        """A ranked table's results: {id, placed, summary, text}. 404 when
+        the table keeps no results under that id."""
+        return self._get("api/results/" + urllib.request.quote(table_id, safe=""))
