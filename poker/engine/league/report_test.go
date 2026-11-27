@@ -12,7 +12,8 @@ import (
 var update = flag.Bool("update", false, "rewrite testdata/table-p8.txt from the report")
 
 // fixture is the first full-size ranked table: the SDK's example bot
-// against nine seats drawn from the house pool, 1,000,000 hands a pair.
+// against nine seats drawn from the house pool (the default was nine
+// then; it is ten now), 1,000,000 hands a pair.
 func fixture(t *testing.T) *Record {
 	t.Helper()
 	r, err := RecordDir("testdata").Record("table-p8")

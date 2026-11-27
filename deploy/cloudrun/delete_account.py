@@ -12,7 +12,9 @@ deletes them only with --delete. Exit 1 if it finds no account record.
 
 It reads whole collections (the store keeps `record` as one unindexed JSON
 string, so there is no query): fine at this scale, not a thing to run in a loop.
-It does not touch the game server's hands file (CLOUDRUN.md, "Session state").
+It does not touch the game server's hands file (CLOUDRUN.md, "Session state"),
+nor the account's submitted bots' files in Cloud Storage: it prints the
+command that removes those (BOT-STORAGE.md, "Deleting an account").
 """
 
 import argparse
@@ -25,10 +27,10 @@ from google.cloud import firestore
 
 def find(db, account):
     """[(collection, document id)] holding `account`'s data."""
-    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs")
+    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs", "oauth_account-bots")
             if db.collection(c).document(account).get().exists]
     for collection, field in (("table-sessions", "owner"), ("access", "subject"), ("refresh", "subject"), ("codes", "subject"),
-                              ("program-tokens", "account"), ("program-usage", "account")):
+                              ("program-tokens", "account"), ("program-usage", "account"), ("bot-submissions", "account")):
         for doc in db.collection(f"oauth_{collection}").stream():
             record = json.loads(doc.get("record"))
             if record.get(field) != account:
@@ -52,6 +54,9 @@ def main():
         print(f"no account record {args.account!r} in {args.project}", file=sys.stderr)
     for collection, doc_id in refs:
         print(f"{'delete' if args.delete else 'would delete'} {collection}/{doc_id}")
+    if any(c in ("oauth_account-bots", "oauth_bot-submissions") for c, _ in refs):
+        print(f"and its bots' files: gcloud storage rm -r gs://BUCKET/bots/{args.account}/ gs://BUCKET/uploads/{args.account}/",
+              file=sys.stderr)
     if args.delete:
         for collection, doc_id in refs:
             db.collection(collection).document(doc_id).delete()

@@ -69,6 +69,11 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
   image's Firestore store against a local emulator: it needs `FIRESTORE_EMULATOR_HOST` and
   `GOOGLE_CLOUD_PROJECT` (any `demo-*` id) in the environment, and refuses to start without
   the emulator host (`mcp/test_oauth_store.py` says how to start one).
+- Bot submissions are on, in the local file store `<state dir>/bots/` (fresh per run),
+  checked by the image's `botcheck`: `OBGL_BOT_STORE=local:...`. The image leaves them off
+  (no `OBGL_BOT_STORE`: the API answers 503) until a deploy names a Cloud Storage bucket
+  (`deploy/cloudrun/BOT-STORAGE.md`). Uploads go to the server itself here, at `/bots/upload/`;
+  in the image they go straight to Cloud Storage.
 - `HOST=127.0.0.1` (server.py defaults to 0.0.0.0, which is what Cloud Run gets). No
   TLS, no Cloud Run front end: no HTTPS termination or `X-Forwarded-*`, request timeout,
   concurrency limit, scale-to-zero/cold start, or instance limit.

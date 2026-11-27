@@ -274,22 +274,55 @@ plays one load in several matches at once). `sdk.LoadHouse(buckets,
 blueprint)` opens files by path. A house bot plays as at the table: its
 menu's bet sizes, reading other sizes as the menu sizes around them.
 
-## Build it as WebAssembly
+## Build your bot as wasm and try it
 
-A bot plays in the league's own runs as a WebAssembly module, so that
-every bot gets the same sandbox and the same limits. Register your bot
-with `wasmbot` in an init function of its main package, and build a WASI
-reactor:
+Ranked tables run every bot as a WebAssembly module, in one sandbox with
+one set of limits: 2 GiB of memory, data files up to 16 GB read on
+demand, and fuel (wasm instructions) for each decision. Your bot stays an
+`sdk.Bot`; one init function, in a file built only for wasm, registers it
+with `wasmbot`, as `example/wasm.go` does:
 
-    func init() { wasmbot.Register(func() (sdk.Bot, error) { return MyBot{}, nil }) }
-    func main() {}
+    //go:build wasip1
 
-    GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o bot.wasm .
+    func init() { wasmbot.Register(func() (sdk.Bot, error) { return myBot{}, nil }) }
 
-The same code still runs natively, in `Match` and your tests. In wasm the
-bot's data files are read-only under `/data`, there is no network or
-environment, and its clock counts its own work, not the wall: see the
-`wasmbot` package comment. `poker/arena` is the runner, with the limits.
+Build it, from poker/engine:
+
+    GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o mybot.wasm ./sdk/example
+
+`-buildmode=c-shared` is required: without it the module is a program, not
+a bot, and the league refuses it. The native build, `Match` and your tests
+are unchanged. In wasm the bot's data files are read-only under `/data`,
+there is no network or environment, and its clock counts its own work, not
+the wall (the `wasmbot` package comment has the rest).
+
+Try it the way the league runs it, in the sandbox with the ranked table's
+limits, against the starter bots (and the house bots, if downloaded):
+
+    cd ../arena
+    go run ./cmd/try ../engine/mybot.wasm
+    go run ./cmd/try ../engine/mybot.wasm -vs dove,clam,shark,turtle,ox -hands 20000 -data ./mydata
+
+It prints your bot's row of the matrix and what the sandbox saw: faults,
+forfeits, fuel, memory, data read, output. `poker/arena` builds with cgo
+(wasmtime), so it needs a C compiler.
+
+## Submit your bot
+
+A submitted bot is a WebAssembly module (at most 64 MB) and, if it reads
+any, a folder of data files (at most 16 GB in all). The league checks the
+module as the sandbox does (`poker/arena/cmd/botcheck`) and keeps it as
+the next version of the bot by that name: one submission per account a
+day. The program token is the table's (`OBGL_TOKEN` or `obgl-token.txt`,
+as in "Play your table").
+
+    go run ./sdk/cmd/bot submit -name mybot -wasm mybot.wasm -data ./data
+    go run ./sdk/cmd/bot list
+
+It builds nothing: it uploads what you give it, one plain line a step,
+sizes first. A file the league already has for your account (the same
+data as your last version) is not sent again, and a stopped upload resumes:
+run the same submit again. In code: `Table.SubmitBot` and `Table.Bots`.
 
 ## Files
 
@@ -303,6 +336,8 @@ environment, and its clock counts its own work, not the wall: see the
 | `house_download.go`, `house-bots.json` | `DownloadHouse`, `LoadHouseByID`: Turtle and Ox from the release, sha256-checked |
 | `cmd/house/` | the download command |
 | `table.go` | `Table`, the table client |
+| `submit.go` | `SubmitBot`, `Bots`: submitting a bot, listing yours |
+| `cmd/bot/` | the submit and list command |
 | `bots/` | the starter bots |
 | `wasmbot/` | `Register`: your bot as a WebAssembly module; `wasmbot/abi`, the wire format |
 | `example/` | a bot to start from, and the command that runs it |

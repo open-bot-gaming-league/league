@@ -66,7 +66,7 @@ func Compile(wasm []byte) (*Program, error) {
 	}
 	m, err := wasmtime.NewModule(rt.engine, wasm)
 	if err != nil {
-		return nil, fmt.Errorf("arena: not a valid module: %w", err)
+		return nil, fmt.Errorf("arena: not a valid WebAssembly module: %w", err)
 	}
 	for _, imp := range m.Imports() {
 		name := ""

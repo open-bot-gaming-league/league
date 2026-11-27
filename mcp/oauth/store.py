@@ -20,6 +20,9 @@ with a durable backend, across restarts) is a JSON object filed under a
     account-programs  an account's program tokens (ids, labels; never the tokens), by account id
     program-usage     when a program token was last used, by token id
     (the last three belong to mcp/programs.py)
+    bot-submissions   a bot submission: its files, its state, by submission id
+    account-bots      an account's bot versions and its open submission, by account id
+    (the last two belong to mcp/bots.py)
 
 Bearer secrets (codes, tokens) are filed by their sha256, never in the
 clear, so a copy of the store is not a copy of anyone's tokens. (Registered
@@ -53,6 +56,7 @@ KINDS = (
     "clients", "pending", "codes", "access", "refresh", "accounts",
     "table-sessions", "watch-tokens", "account-tables",
     "program-tokens", "account-programs", "program-usage",
+    "bot-submissions", "account-bots",
 )
 
 Record = dict[str, Any]

@@ -98,6 +98,8 @@ from session import (  # noqa: E402
 )
 from table_client import TableClient, TableError  # noqa: E402
 from table_web import TableWeb, register_table_routes  # noqa: E402
+from bot_web import bots_from_env, register_bot_routes  # noqa: E402
+from bots import Bots  # noqa: E402
 from programs import ProgramTokens  # noqa: E402
 from tables import Party, Tables  # noqa: E402
 
@@ -260,7 +262,7 @@ def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
         _legal_route(name, url_path)
 
 
-def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) -> MCPServer:
+def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, bots: Bots | None = None) -> MCPServer:
     client = TableClient(base_url)
 
     # One PokerSession per connection that has one (see _SHARED_SESSION_KEY
@@ -361,6 +363,9 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None) 
     if provider is not None:
         register_login_routes(server, provider)
         register_table_routes(server, web)
+        # Submitted bots (bots.py) on the table's API: the same program
+        # token; answered 503 when no bot store is configured.
+        register_bot_routes(server, web, bots)
 
     # mcp 2.3.0 also speaks a newer "modern" Streamable HTTP mode
     # (protocol version 2026-07-28): a self-contained POST per call, no
@@ -619,7 +624,9 @@ def main() -> None:
     if os.environ.get("OBGL_TRANSPORT", "stdio") == "http":
         # OAuth only exists over HTTP: stdio has no bearer tokens (its one
         # client is whoever launched the process).
-        server = build_server(base_url, OAuthConfig.from_env(os.environ, MCP_PATH))
+        oauth = OAuthConfig.from_env(os.environ, MCP_PATH)
+        bots = bots_from_env(os.environ, oauth.store, oauth.public_url) if oauth else None
+        server = build_server(base_url, oauth, bots)
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8080"))
         server.run("streamable-http", host=host, port=port, streamable_http_path=MCP_PATH)

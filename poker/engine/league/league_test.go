@@ -229,6 +229,15 @@ func TestBotError(t *testing.T) {
 	}
 }
 
+// The default ranked table: the challenger and ten drawn seats, eleven
+// players, so the challenger plays ten opponents a million hands each.
+func TestDefaults(t *testing.T) {
+	c := Config{}.withDefaults()
+	if c.Seats != 10 || c.Hands != 1_000_000 {
+		t.Fatalf("defaults: %+v", c)
+	}
+}
+
 func TestCost(t *testing.T) {
 	cpu, rss := 1000.0, int64(3<<30)/2 // 1.5 GiB
 	r := &Record{Measured: Measured{WallS: 200, CPUS: &cpu, PeakRSS: &rss, Parallel: 8}}

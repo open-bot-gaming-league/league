@@ -264,8 +264,9 @@ func (t *Table) call(ctx context.Context, method, path string, body, out any) er
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	res, data, err := send(client, req)
-	if err == nil && res.StatusCode == http.StatusTooManyRequests {
+	if err == nil && res.StatusCode == http.StatusTooManyRequests && res.Header.Get("Retry-After") != "" {
 		// Over the table's rate for a program: wait as long as it says, once.
+		// (A 429 with no Retry-After is a limit no short wait lifts: an error.)
 		wait, _ := strconv.Atoi(res.Header.Get("Retry-After"))
 		select {
 		case <-time.After(time.Duration(max(wait, 1)) * time.Second):

@@ -19,6 +19,8 @@ the same image tree on a machine without Docker, see
   `deploy/cloudrun/data/`, which git ignores and the build needs.
 - `delete_account.py` -- the operator's tool for deleting one account's
   Firestore records ("Deleting an account", under OAuth). Not in the image.
+- `BOT-STORAGE.md` -- submitted bots' files: why they go straight to Cloud
+  Storage, and the bucket, IAM and settings to turn submissions on.
 
 The service answers on `/mcp` (the connector), `/` and `/docs/` (see
 "Docs" below), `/version`, the OAuth routes (see "OAuth" below) and
@@ -294,6 +296,8 @@ document fields `record` and, on some, `expires_at`):
 | `oauth_account-programs` | the account id | by id |
 | `oauth_program-tokens` | sha256 of the token (not reversible) | scan for `record.account` equal to the account id |
 | `oauth_program-usage` | the token's id | scan for `record.account` equal to the account id |
+| `oauth_account-bots` | the account id | by id |
+| `oauth_bot-submissions` | the submission id | scan for `record.account` equal to the account id |
 | `oauth_access`, `oauth_refresh`, `oauth_codes` | sha256 of the token (not reversible) | scan each for `record.subject` equal to the account id |
 
 `oauth_clients` and `oauth_pending` hold no account id and are left alone.
@@ -316,6 +320,10 @@ the running server remembers for up to a minute (`mcp/programs.py`,
 `CACHE_TTL`). A running server also keeps the account's table session id
 until it restarts, so restart it after a deletion; signing in again with GitHub or Google makes a new, empty
 account under the same id.
+
+The account's submitted bots' files are in Cloud Storage, not Firestore:
+the script prints the `gcloud storage rm` that removes them
+(`BOT-STORAGE.md`, "Deleting an account"); run it too.
 
 Not covered: the hands. They are in the game server's `hands.jsonl` on
 the container's disk (Session state, above), which nothing prunes by

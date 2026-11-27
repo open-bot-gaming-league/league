@@ -29,6 +29,19 @@ COPY poker/engine/league ./league
 # restore), so this build needs no network access.
 RUN go build -o /out/table ./cmd/table
 
+# ---- stage 1b: build botcheck, the check of a submitted bot's module ------
+# (mcp/bots.py runs it on every submission: arena.Compile, the arena's own
+# check against the guest ABI.) The arena module needs the engine's (a
+# replace directive: ../engine), and downloads wasmtime-go, checked against
+# go.sum; wasmtime-go links its bundled wasmtime library with cgo (the
+# golang image has gcc).
+FROM golang:1.27 AS arenabuilder
+WORKDIR /src
+COPY poker/engine/ ./engine/
+COPY poker/arena/ ./arena/
+WORKDIR /src/arena
+RUN go build -o /out/botcheck ./cmd/botcheck
+
 # ---- stage 2: the runtime image -------------------------------------------
 FROM python:3.12-slim AS runtime
 WORKDIR /app
@@ -41,6 +54,9 @@ WORKDIR /app
 COPY mcp/requirements.txt ./mcp/requirements.txt
 RUN pip install --no-cache-dir -r ./mcp/requirements.txt
 COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/markdown_lite.py mcp/tables.py mcp/programs.py mcp/table_web.py ./mcp/
+# Submitted bots (mcp/bots.py; BOT-STORAGE.md): off until OBGL_BOT_STORE is set.
+COPY mcp/bots.py mcp/bot_web.py mcp/bot_files.py mcp/bot_files_gcs.py ./mcp/
+COPY --from=arenabuilder /out/botcheck ./arena/bin/botcheck
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).
 COPY mcp/oauth/ ./mcp/oauth/
 # server.py reads the docs from ../docs and ../README.md relative to its
@@ -58,7 +74,7 @@ COPY poker/engine/configs/table_50bb.json ./table/configs/table_50bb.json
 COPY deploy/cloudrun/data/ ./table/data/
 
 COPY deploy/cloudrun/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh ./table/bin/table
+RUN chmod +x ./entrypoint.sh ./table/bin/table ./arena/bin/botcheck
 
 # Cloud Run sets $PORT and expects the container to listen on it;
 # entrypoint.sh reads it for the MCP server and sets OBGL_TRANSPORT=http
@@ -83,6 +99,10 @@ ENV OBGL_STATE_DIR=/state
 # OBGL_GOOGLE_CLIENT_ID/_SECRET from Secret Manager (CLOUDRUN.md).
 ENV OBGL_PUBLIC_URL=https://obgl.truemirrorgames.com
 ENV OBGL_AUTH_STORE=firestore
+# Bot submissions: the module check is in the image; where the files go
+# (OBGL_BOT_STORE=gcs:<bucket>) is the deploy's to set, and until it does
+# the submission API answers 503.
+ENV OBGL_BOTCHECK=/app/arena/bin/botcheck
 # The git sha this image was built from, served at GET /version on the
 # MCP server (mcp/server.py). Pass it at build time:
 #   docker build --build-arg OBGL_GIT_SHA=$(git rev-parse HEAD) ...

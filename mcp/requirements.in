@@ -5,3 +5,4 @@
 #     --python-platform x86_64-unknown-linux-gnu -o mcp/requirements.txt
 mcp==2.3.0
 google-cloud-firestore==2.34.1
+google-cloud-storage==3.17.2

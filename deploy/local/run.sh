@@ -101,6 +101,10 @@ case ${OBGL_LOCAL_AUTH_STORE:-file} in
     export OBGL_AUTH_STORE=firestore ;;
   *) die "OBGL_LOCAL_AUTH_STORE must be file or firestore" ;;
 esac
+# Bot submissions (mcp/bots.py): the image leaves them off until a deploy names
+# a bucket; here they are on, files in $STATE like the rest, checked by the
+# image's botcheck at its path on this box. (A sha from before them ignores both.)
+export OBGL_BOT_STORE=local:$STATE/bots OBGL_BOTCHECK=$IMAGE_WORKDIR/arena/bin/botcheck
 # The image only has OBGL_GIT_SHA if its Dockerfile has the ARG (the /version commit).
 echo "run.sh: $SHA on 127.0.0.1:$PORT (table 127.0.0.1:$TABLE_PORT, state $STATE)"
 cd "$IMAGE_WORKDIR"

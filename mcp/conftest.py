@@ -146,9 +146,10 @@ class Site:
         return (await ot.agent_tokens(self.base, "github"))["access_token"]
 
 
-def league_app(base, idp_base, store):
+def league_app(base, idp_base, store, bots=None):
     """Our server's ASGI app at `base` with OAuth on and a GitHub sign-in
-    wired to the fake IdP served at `idp_base`."""
+    wired to the fake IdP served at `idp_base`; `bots(base, store)`, if
+    given, makes its bot submissions (bots.Bots)."""
     idp = github(
         ot.UPSTREAM_ID,
         ot.UPSTREAM_SECRET,
@@ -158,7 +159,7 @@ def league_app(base, idp_base, store):
         userinfo_endpoint=f"{idp_base}/userinfo",
     )
     config = OAuthConfig(public_url=base, mcp_path="/mcp", store=store, idps=[idp])
-    return server_module.build_server(None, config).streamable_http_app()
+    return server_module.build_server(None, config, bots(base, store) if bots else None).streamable_http_app()
 
 
 def _site_store(kind):
@@ -171,11 +172,23 @@ def _site_store(kind):
     return FirestoreStore(f"demo-obgl-{uuid.uuid4().hex[:12]}")
 
 
-@pytest.fixture(params=["memory", "firestore"])
-def site(request, serve_asgi, free_port):
-    store = _site_store(request.param)
+@contextmanager
+def _site(serve_asgi, port, store, bots=None):
     fake = ot.FakeIdP(USER_A)
     with serve_asgi(fake.app) as idp_base:
-        base = f"http://127.0.0.1:{free_port}"
-        with serve_asgi(league_app(base, idp_base, store), free_port):
+        base = f"http://127.0.0.1:{port}"
+        with serve_asgi(league_app(base, idp_base, store, bots), port):
             yield Site(base, fake)
+
+
+@pytest.fixture(params=["memory", "firestore"])
+def site(request, serve_asgi, free_port):
+    with _site(serve_asgi, free_port, _site_store(request.param)) as s:
+        yield s
+
+
+@pytest.fixture(params=["memory", "firestore"])
+def bot_site(request, serve_asgi, free_port):
+    """`site` with bot submissions on: call it with the Bots maker, as a
+    context manager: `with bot_site(lambda base, store: Bots(...)) as site`."""
+    return lambda bots: _site(serve_asgi, free_port, _site_store(request.param), bots)

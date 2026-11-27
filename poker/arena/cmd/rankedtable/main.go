@@ -1,7 +1,7 @@
 // Command rankedtable plays one ranked table and writes its record, or
 // prices a record written before.
 //
-//	rankedtable play -challenger shark -out table.json   # the defaults: 9 seats from the house pool, 1,000,000 hands a pair
+//	rankedtable play -challenger shark -out table.json   # the defaults: 10 seats from the house pool, 1,000,000 hands a pair
 //	rankedtable play -challenger dove -seats 3 -hands 20000 -seed 7
 //	rankedtable play -challenger-wasm mybot.wasm -challenger-data mydata -wasm-pool   # every seat in the sandbox
 //	rankedtable cost table.json                          # at Cloud Run job prices

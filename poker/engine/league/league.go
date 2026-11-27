@@ -36,11 +36,12 @@ import (
 // Format is the Record format this package writes.
 const Format = 1
 
-// Defaults for a ranked table: the challenger and nine seats from the
-// pool, a million hands a pair (a standard error of about 0.2 to 1.2
-// bb/100 a pair between the house bots).
+// Defaults for a ranked table: the challenger and ten seats from the
+// pool, eleven players and 55 pairs, so the challenger plays ten
+// opponents and ten million hands; a million hands a pair (a standard
+// error of about 0.2 to 1.2 bb/100 a pair between the house bots).
 const (
-	DefaultSeats = 9
+	DefaultSeats = 10
 	DefaultHands = 1_000_000
 )
 

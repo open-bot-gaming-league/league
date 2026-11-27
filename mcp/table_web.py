@@ -264,7 +264,7 @@ class TableWeb:
         )
 
     async def signout(self, request: Request) -> Response:
-        self._check_origin(request)
+        self.check_origin(request)
         access = request.cookies.get(ACCESS_COOKIE)
         if access:
             tok = await self.provider.load_access_token(access)
@@ -321,13 +321,13 @@ class TableWeb:
 
     # ---- the page's API ---------------------------------------------------------
 
-    def _check_origin(self, request: Request) -> None:
+    def check_origin(self, request: Request) -> None:
         origin = request.headers.get("origin")
         if origin is not None and origin.rstrip("/") != self.public_url:
             raise ApiError(403, "cross-origin request refused")
 
-    async def _body(self, request: Request) -> dict:
-        self._check_origin(request)
+    async def json_body(self, request: Request) -> dict:
+        self.check_origin(request)
         if not request.headers.get("content-type", "").startswith("application/json"):
             raise ApiError(415, "send JSON")
         try:
@@ -466,17 +466,17 @@ class TableWeb:
         return self.client.next(session_id, b.get("hand"), seat=b.get("seat"), opponent=b.get("opponent"))
 
     async def act(self, request: Request, account: str, party: Party) -> dict:
-        return await self._move(account, party, await self._body(request), self._act_step, deal=False)
+        return await self._move(account, party, await self.json_body(request), self._act_step, deal=False)
 
     async def next(self, request: Request, account: str, party: Party) -> dict:
-        b = await self._body(request)
+        b = await self.json_body(request)
         if party.kind != BROWSER and (b.get("seat") is not None or b.get("opponent") is not None):
             raise ApiError(403, "settings are changed on the table page: the bot and the seat are the user's to pick there")
         return await self._move(account, party, b, self._next_step, deal=True)
 
     async def reset(self, request: Request, account: str, party: Party) -> dict:
         """api/new: a new table for this account (Reset score)."""
-        b = await self._body(request)
+        b = await self.json_body(request)
         session_id, state = await self.tables.reset(account, seat=b.get("seat") or "alternate", opponent=b.get("opponent"))
         self.tables.moved(session_id, party, {"over": True})
         return self._view(state, session_id)
@@ -490,7 +490,7 @@ class TableWeb:
         return label if isinstance(label, str) else None
 
     async def make_token(self, request: Request, account: str, party: Party) -> dict:
-        b = await self._body(request)
+        b = await self.json_body(request)
         try:
             async with self.tables.lock("token:" + account):  # one token: no two made at once
                 return await self.programs.create(account, self._label(b) or "")
@@ -498,12 +498,12 @@ class TableWeb:
             raise ApiError(409, str(e)) from None
 
     async def regenerate_token(self, request: Request, account: str, party: Party) -> dict:
-        b = await self._body(request)
+        b = await self.json_body(request)
         async with self.tables.lock("token:" + account):
             return await self.programs.regenerate(account, self._label(b))
 
     async def revoke_token(self, request: Request, account: str, party: Party) -> dict:
-        await self._body(request)
+        await self.json_body(request)
         async with self.tables.lock("token:" + account):
             revoked = await self.programs.revoke(account)
         if not revoked:
