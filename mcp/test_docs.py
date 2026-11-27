@@ -27,7 +27,7 @@ FILES["/docs/TERMS.md"] = os.path.join(REPO, "docs", "TERMS.md")
 FILES["/docs/SDK.md"] = os.path.join(REPO, "docs", "SDK.md")
 # The legal pages: URL path -> (a heading the page must show, the markdown file's name).
 # Each legal page's stated date, as its file has it: a change to the text changes it.
-UPDATED = {"/docs/privacy": "November 26, 2026", "/docs/terms": "November 22, 2026"}
+UPDATED = {"/docs/privacy": "November 27, 2026", "/docs/terms": "November 27, 2026"}
 LEGAL = {
     "/docs/privacy": ("Privacy (interim)", "/docs/PRIVACY.md"),
     "/docs/terms": ("Terms of Service (interim)", "/docs/TERMS.md"),
