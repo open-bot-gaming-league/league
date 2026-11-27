@@ -15,9 +15,9 @@ import (
 	"time"
 )
 
-// The release's terms, exactly as ruled, with its newline: what the
-// manifest pins NOTICE.txt to.
-const ruledNotice = "Free to download and use with the Open Bot Gaming League SDK, for your own play and research. You may not redistribute these files. No other rights are granted. We expect to open this up after a legal review.\n"
+// The release's terms, exactly, with their newline: what the manifest
+// pins NOTICE.txt to.
+const noticeText = "Free to download and use with the Open Bot Gaming League SDK, for your own play and research. You may not redistribute these files. No other rights are granted. We expect to open this up after a legal review.\n"
 
 func sum(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 
@@ -26,8 +26,8 @@ func TestHouseManifest(t *testing.T) {
 	if m.Tag != "house-bots-1" || !strings.HasSuffix(m.BaseURL, "/releases/download/"+m.Tag+"/") {
 		t.Fatalf("tag %q, base %q", m.Tag, m.BaseURL)
 	}
-	if n := m.Files[HouseNotice]; n.SHA256 != sum([]byte(ruledNotice)) || n.Size != int64(len(ruledNotice)) {
-		t.Fatalf("NOTICE.txt pinned to %+v, not the ruled text", n)
+	if n := m.Files[HouseNotice]; n.SHA256 != sum([]byte(noticeText)) || n.Size != int64(len(noticeText)) {
+		t.Fatalf("NOTICE.txt pinned to %+v, not the notice text", n)
 	}
 	for id, bot := range m.Bots {
 		for _, name := range []string{bot.Buckets, bot.Blueprint} {
@@ -71,7 +71,7 @@ func (f *fakeRelease) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func tinyRelease() (*fakeRelease, HouseManifest) {
 	f := &fakeRelease{files: map[string][]byte{
-		HouseNotice: []byte(ruledNotice),
+		HouseNotice: []byte(noticeText),
 		"b1.bin":    []byte("buckets one"),
 		"b2.bin":    []byte("buckets two"),
 		"t.bp":      []byte("turtle's blueprint"),
@@ -107,7 +107,7 @@ func TestDownloadHouse(t *testing.T) {
 	if !strings.Contains(out.String(), "downloading 3 file(s)") {
 		t.Errorf("did not say what it would fetch: %q", out.String())
 	}
-	for name, want := range map[string]string{HouseNotice: ruledNotice, "b1.bin": "buckets one", "t.bp": "turtle's blueprint"} {
+	for name, want := range map[string]string{HouseNotice: noticeText, "b1.bin": "buckets one", "t.bp": "turtle's blueprint"} {
 		if got, err := os.ReadFile(filepath.Join(dir, name)); err != nil || string(got) != want {
 			t.Errorf("%s: %q, %v", name, got, err)
 		}
