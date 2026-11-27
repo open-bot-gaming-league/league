@@ -55,6 +55,7 @@ type Entrant struct {
 	ID      string // the bot's id in the pool, e.g. "ox"; the challenger's own id
 	Name    string // its name to show
 	Version string // exactly what plays: a content hash or a build revision
+	Owner   *Owner // whose submitted bot this is; nil for the house's
 	// New makes the bot for one pair. It is called once per pair the seat
 	// plays, possibly from several goroutines at once, so a bot that keeps
 	// state is never shared between pairs. A bot that is an io.Closer is
@@ -99,6 +100,7 @@ type Config struct {
 	Seed     uint64 // draws the seats, deals the cards, seeds the bots
 	Parallel int    // pairs played at once
 	Runner   string // the runner's version, for the record
+	Draw     string // how the seats are drawn: a key of Draws ("": DrawCopies)
 }
 
 func (c Config) withDefaults() Config {
@@ -111,7 +113,23 @@ func (c Config) withDefaults() Config {
 	if c.Parallel == 0 {
 		c.Parallel = runtime.GOMAXPROCS(0)
 	}
+	if c.Draw == "" {
+		c.Draw = DrawCopies
+	}
 	return c
+}
+
+// DrawCopies is the draw ranked tables use until the league rules on
+// one: every seat drawn from the whole pool, so a bot can sit more than
+// once (Draw).
+const DrawCopies = "copies"
+
+// Draws are the ways of drawing a table's seats, by the name Config.Draw
+// and the record use: each gives n indexes into a pool of poolSize, the
+// same for the same seed. The places are decided the same way whatever
+// the draw.
+var Draws = map[string]func(poolSize, n int, seed uint64) []int{
+	DrawCopies: Draw,
 }
 
 // Draw picks n seats from the pool, with replacement (a bot can sit more
@@ -127,7 +145,7 @@ func Draw(poolSize, n int, seed uint64) []int {
 }
 
 // Play runs one ranked table: the challenger in seat 0 and cfg.Seats seats
-// drawn from pool (Draw) after it; every pair of seats plays sdk.Match with
+// drawn from pool (Draws[cfg.Draw]) after it; every pair of seats plays sdk.Match with
 // cfg.Hands hands and cfg.Seed (every pair the same deals, so every seat
 // faces the same cards), up to cfg.Parallel pairs at once; and the seats
 // are placed by their total (Place).
@@ -147,8 +165,12 @@ func Play(cfg Config, challenger Entrant, pool []Entrant) (*Record, error) {
 	case cfg.Parallel < 1:
 		return nil, fmt.Errorf("league: parallel %d", cfg.Parallel)
 	}
+	draw, ok := Draws[cfg.Draw]
+	if !ok {
+		return nil, fmt.Errorf("league: no draw %q", cfg.Draw)
+	}
 	seats := []Entrant{challenger}
-	for _, i := range Draw(len(pool), cfg.Seats, cfg.Seed) {
+	for _, i := range draw(len(pool), cfg.Seats, cfg.Seed) {
 		seats = append(seats, pool[i])
 	}
 	rec := newRecord(cfg, challenger, pool, seats)

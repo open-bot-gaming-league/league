@@ -21,6 +21,9 @@ the same image tree on a machine without Docker, see
   Firestore records ("Deleting an account", under OAuth). Not in the image.
 - `BOT-STORAGE.md` -- submitted bots' files: why they go straight to Cloud
   Storage, and the bucket, IAM and settings to turn submissions on.
+- `RANKED-TABLES.md`, `ranked-job.yaml` -- the ranked tables every submitted
+  bot version queues: the Cloud Run job that plays them (the same image),
+  the records bucket the results are served from, IAM, how to start it.
 
 The service answers on `/mcp` (the connector), `/` and `/docs/` (see
 "Docs" below), `/version`, the OAuth routes (see "OAuth" below) and

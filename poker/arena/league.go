@@ -1,7 +1,9 @@
 package arena
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,8 +65,10 @@ func Build(dir string, flags ...string) ([]byte, error) {
 }
 
 // WasmPool is the house bots with the given ids (league.HousePool's) as
-// wasm entrants: the guests in guestsDir (this module's guests/) built and
-// compiled once, each pair starting fresh instances. A trained bot's data
+// wasm entrants: the guests in guestsDir compiled once, each pair
+// starting fresh instances. A guest is guestsDir/<name>.wasm if that file
+// is there (built before, as the image does), else the Go package
+// guestsDir/<name> (this module's guests/) built now. A trained bot's data
 // is its two files from the house-bot cache, mounted as /data, and its
 // version is the module's sha256 and the release's files.
 func WasmPool(guestsDir string, ids ...string) ([]league.Entrant, error) {
@@ -73,7 +77,10 @@ func WasmPool(guestsDir string, ids ...string) ([]league.Entrant, error) {
 		if p := progs[guest]; p != nil {
 			return p, nil
 		}
-		wasm, err := Build(filepath.Join(guestsDir, guest))
+		wasm, err := os.ReadFile(filepath.Join(guestsDir, guest+".wasm"))
+		if errors.Is(err, fs.ErrNotExist) {
+			wasm, err = Build(filepath.Join(guestsDir, guest))
+		}
 		if err != nil {
 			return nil, err
 		}

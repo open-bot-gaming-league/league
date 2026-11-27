@@ -13,8 +13,10 @@ deletes them only with --delete. Exit 1 if it finds no account record.
 It reads whole collections (the store keeps `record` as one unindexed JSON
 string, so there is no query): fine at this scale, not a thing to run in a loop.
 It does not touch the game server's hands file (CLOUDRUN.md, "Session state"),
-nor the account's submitted bots' files in Cloud Storage: it prints the
-command that removes those (BOT-STORAGE.md, "Deleting an account").
+nor the account's submitted bots' files and ranked tables' records in Cloud
+Storage: it prints the commands that remove those (BOT-STORAGE.md and
+RANKED-TABLES.md, "Deleting an account"). A deleted table still in the
+ranked queue is skipped by the runner.
 """
 
 import argparse
@@ -27,10 +29,12 @@ from google.cloud import firestore
 
 def find(db, account):
     """[(collection, document id)] holding `account`'s data."""
-    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs", "oauth_account-bots")
+    refs = [(c, account) for c in ("oauth_accounts", "oauth_account-tables", "oauth_account-programs", "oauth_account-bots",
+                                   "oauth_account-ranked")
             if db.collection(c).document(account).get().exists]
     for collection, field in (("table-sessions", "owner"), ("access", "subject"), ("refresh", "subject"), ("codes", "subject"),
-                              ("program-tokens", "account"), ("program-usage", "account"), ("bot-submissions", "account")):
+                              ("program-tokens", "account"), ("program-usage", "account"), ("bot-submissions", "account"),
+                              ("ranked-tables", "account")):
         for doc in db.collection(f"oauth_{collection}").stream():
             record = json.loads(doc.get("record"))
             if record.get(field) != account:
@@ -57,6 +61,11 @@ def main():
     if any(c in ("oauth_account-bots", "oauth_bot-submissions") for c, _ in refs):
         print(f"and its bots' files: gcloud storage rm -r gs://BUCKET/bots/{args.account}/ gs://BUCKET/uploads/{args.account}/",
               file=sys.stderr)
+    records = [doc_id for c, doc_id in refs if c == "oauth_ranked-tables"]
+    if records:
+        # A ranked table's record names its owner's account (RANKED-TABLES.md).
+        print("and its ranked tables' records: gcloud storage rm "
+              + " ".join(f"gs://RECORDS_BUCKET/{t}.json" for t in records), file=sys.stderr)
     if args.delete:
         for collection, doc_id in refs:
             db.collection(collection).document(doc_id).delete()

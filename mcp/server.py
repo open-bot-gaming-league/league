@@ -68,8 +68,10 @@ in-container address.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
+import time
 from collections.abc import Callable
 from urllib.parse import quote
 
@@ -100,6 +102,7 @@ from table_client import TableClient, TableError  # noqa: E402
 from table_web import TableWeb, register_table_routes  # noqa: E402
 from bot_web import bots_from_env, register_bot_routes  # noqa: E402
 from bots import Bots  # noqa: E402
+from ranked import RankedTables, runner_from_env, with_runner  # noqa: E402
 from programs import ProgramTokens  # noqa: E402
 from tables import Party, Tables  # noqa: E402
 
@@ -262,7 +265,8 @@ def _register_docs_routes(server: MCPServer, oauth: bool) -> None:
         _legal_route(name, url_path)
 
 
-def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, bots: Bots | None = None) -> MCPServer:
+def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, bots: Bots | None = None,
+                 ranked: RankedTables | None = None) -> MCPServer:
     client = TableClient(base_url)
 
     # One PokerSession per connection that has one (see _SHARED_SESSION_KEY
@@ -359,13 +363,15 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
     # program tokens (programs.py), and the browser table at /table
     # (table_web.py) on top of them.
     tables = Tables(oauth.store, client) if oauth else None
-    web = TableWeb(provider, tables, ProgramTokens(oauth.store), client, oauth.public_url, oauth.resource_url) if oauth else None
+    web = TableWeb(provider, tables, ProgramTokens(oauth.store), client, oauth.public_url, oauth.resource_url,
+                   ranked=ranked is not None) if oauth else None
     if provider is not None:
         register_login_routes(server, provider)
         register_table_routes(server, web)
-        # Submitted bots (bots.py) on the table's API: the same program
-        # token; answered 503 when no bot store is configured.
-        register_bot_routes(server, web, bots)
+        # Submitted bots (bots.py) and their ranked tables (ranked.py) on
+        # the table's API: the same program token; answered 503 when no bot
+        # store is configured.
+        register_bot_routes(server, web, bots, ranked)
 
     # mcp 2.3.0 also speaks a newer "modern" Streamable HTTP mode
     # (protocol version 2026-07-28): a self-contained POST per call, no
@@ -594,16 +600,32 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
         return out
 
     @server.tool()
-    def table_results(table_id: str) -> str:
+    async def table_results(table_id: str = "") -> str:
         """A ranked table's results, as text to read to your user: where
         their bot (the challenger) placed, which opponents it beat, lost
         to, or was too close to call, each with bb/100 ± standard error,
-        and every seat's place. table_id: the ranked table's id."""
+        and every seat's place. table_id: the ranked table's id; leave it
+        out for the signed-in user's newest ranked table (every bot
+        version they submit plays one), or where it stands if it has not
+        finished."""
+        heading = ""
+        if not table_id:
+            if ranked is None or oauth is None:
+                raise ToolError("give the ranked table's id: this server keeps no list of your ranked tables")
+            newest = await ranked.newest(_account())
+            if newest is None:
+                return ("You have no ranked tables yet. Every bot version you submit (the SDK's `bot submit`, "
+                        "see docs SDK.md) plays one: ten seats drawn from the house bots, and you read where it placed here.\n")
+            name = f"{newest['bot']} v{newest['version']}"
+            if newest["state"] != "done":
+                return _ranked_status(name, newest)
+            table_id = newest["result"]
+            heading = f"Your newest ranked table: {name} (table {table_id}).\n\n"
         try:
-            answer = client.results(table_id)
+            answer = await anyio.to_thread.run_sync(lambda: client.results(table_id))
         except TableError as e:
             raise ToolError(e.message) from e
-        text = answer["text"]
+        text = heading + answer["text"]
         if oauth is not None:
             text += f"\nThe full report, with every pair: {oauth.public_url.rstrip('/')}/table/results/{quote(table_id, safe='')}\n"
         return text
@@ -619,17 +641,52 @@ def build_server(base_url: str | None = None, oauth: OAuthConfig | None = None, 
     return server
 
 
+def _ranked_status(name: str, table: dict) -> str:
+    """A ranked table that has not finished, in a sentence or two."""
+    def at(t: int) -> str:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(t))
+    if table["state"] == "queued":
+        where = f", number {table['position']} in the queue" if "position" in table else ""
+        return f"Your newest ranked table, {name}, is queued{where} (since {at(table['queued_at'])}). Tables play one at a time; ask again later.\n"
+    if table["state"] == "running":
+        return f"Your newest ranked table, {name}, is playing (started {at(table['started_at'])}). Ask again later.\n"
+    return f"Your newest ranked table, {name}, did not finish: {table.get('reason', 'no reason given')}.\n"
+
+
 def main() -> None:
     base_url = os.environ.get("OBGL_TABLE_URL")
     if os.environ.get("OBGL_TRANSPORT", "stdio") == "http":
         # OAuth only exists over HTTP: stdio has no bearer tokens (its one
         # client is whoever launched the process).
         oauth = OAuthConfig.from_env(os.environ, MCP_PATH)
-        bots = bots_from_env(os.environ, oauth.store, oauth.public_url) if oauth else None
-        server = build_server(base_url, oauth, bots)
+        # Every finalized bot version queues a ranked table (ranked.py).
+        # Who plays them: this process with OBGL_RANKED_RUNNER=in-process
+        # (the local stack), else a runner of its own (the Cloud Run job).
+        ranked = RankedTables(oauth.store) if oauth else None
+        bots = bots_from_env(os.environ, oauth.store, oauth.public_url, ranked) if oauth else None
+        if bots is None:
+            ranked = None  # no submissions, no tables: the tables route answers 503
+        runner_kind = os.environ.get("OBGL_RANKED_RUNNER", "")
+        if runner_kind not in ("", "in-process"):
+            raise ValueError(f"OBGL_RANKED_RUNNER must be in-process or unset, got {runner_kind!r}")
+        runner = runner_from_env(os.environ, ranked) if runner_kind and ranked and bots else None
+        if runner_kind and runner is None:
+            raise ValueError("OBGL_RANKED_RUNNER=in-process needs sign-in (OBGL_PUBLIC_URL) and bot submissions (OBGL_BOT_STORE)")
+        server = build_server(base_url, oauth, bots, ranked)
         host = os.environ.get("HOST", "0.0.0.0")
         port = int(os.environ.get("PORT", "8080"))
-        server.run("streamable-http", host=host, port=port, streamable_http_path=MCP_PATH)
+        app = server.streamable_http_app(streamable_http_path=MCP_PATH, host=host)
+        if runner is not None:
+            with_runner(app, runner)
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+            logging.getLogger("obgl.ranked").addHandler(handler)
+            logging.getLogger("obgl.ranked").setLevel(logging.INFO)
+        # What server.run("streamable-http") does, with the app in hand.
+        import uvicorn
+
+        config = uvicorn.Config(app, host=host, port=port, log_level=server.settings.log_level.lower())
+        anyio.run(uvicorn.Server(config).serve)
     else:
         build_server(base_url).run("stdio")
 

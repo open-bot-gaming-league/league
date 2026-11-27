@@ -18,11 +18,19 @@ TABLE_ADDR=127.0.0.1:9790
 STATE_DIR="${OBGL_STATE_DIR:-/state}"
 mkdir -p "$STATE_DIR"
 
+# Ranked tables' records (mcp/ranked.py writes them; RANKED-TABLES.md): the
+# table serves their results when the deploy says where they are.
+set --
+if [ -n "${OBGL_RECORDS:-}" ]; then
+  mkdir -p "$OBGL_RECORDS"
+  set -- -records "$OBGL_RECORDS"
+fi
+
 ./table/bin/table \
   -config ./table/configs/table_50bb.json \
   -bots ./table/data/served.json \
   -hands "$STATE_DIR/hands.jsonl" \
-  -addr "$TABLE_ADDR" &
+  -addr "$TABLE_ADDR" "$@" &
 TABLE_PID=$!
 
 cleanup() {

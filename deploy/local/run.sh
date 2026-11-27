@@ -105,6 +105,15 @@ esac
 # a bucket; here they are on, files in $STATE like the rest, checked by the
 # image's botcheck at its path on this box. (A sha from before them ignores both.)
 export OBGL_BOT_STORE=local:$STATE/bots OBGL_BOTCHECK=$IMAGE_WORKDIR/arena/bin/botcheck
+# Ranked tables (mcp/ranked.py): each finalized bot version queues one, and here
+# the MCP server plays them itself, one at a time, 8 pairs at once (an 8-vCPU job's
+# share; OBGL_RANKED_PARALLEL overrides it, and OBGL_RANKED_HANDS etc. the table),
+# the records in $STATE/records where the table serves them. In the cloud a job
+# plays them instead (deploy/cloudrun/RANKED-TABLES.md).
+export OBGL_RECORDS=$STATE/records OBGL_RANKED_RUNNER=in-process OBGL_RANKED_PARALLEL=${OBGL_RANKED_PARALLEL:-8}
+# The image's paths for what plays them (/app/...), at their place on this box.
+export OBGL_RANKEDTABLE=$IMAGE_WORKDIR/arena/bin/rankedtable OBGL_RANKED_GUESTS=$IMAGE_WORKDIR/arena/guests \
+  OBGL_HOUSE_CACHE=$IMAGE_WORKDIR/table/data
 # The image only has OBGL_GIT_SHA if its Dockerfile has the ARG (the /version commit).
 echo "run.sh: $SHA on 127.0.0.1:$PORT (table 127.0.0.1:$TABLE_PORT, state $STATE)"
 cd "$IMAGE_WORKDIR"

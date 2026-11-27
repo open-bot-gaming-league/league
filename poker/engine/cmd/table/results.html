@@ -61,6 +61,34 @@ bb/100 is big blinds won per 100 hands, &plusmn; its standard error. Too close t
 </tbody>
 </table>
 <p class="dim small">Total: a seat's bb/100 summed over its {{len .Opponents}} opponents; the places go by it. Won, lost and too close count its opponents.</p>
+{{- if .Faulted}}
+
+<h2>Where the sandbox played for a bot</h2>
+<p class="dim small">A bot's move that was illegal or an error, and every move after it broke a limit (fuel, time, memory) in a pair, was played for it: a check, else a fold. Its results above count those moves.</p>
+<table id="faults">
+<thead><tr><th>Bot</th><th class="num">Moves played for it</th><th>Stopped</th></tr></thead>
+<tbody>
+{{- range .Faulted}}
+<tr><td>{{.Label}}</td><td class="num">{{thousands .Forfeited}}</td><td>{{if .Faults}}in {{len .Faults}} of its {{.Pairs}} pairs: {{.Kinds}}{{else}}never{{end}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+{{- range .Faulted}}{{if .Faults}}
+<details class="faults">
+<summary>{{.Label}}: what stopped it</summary>
+<div class="scroll">
+<table>
+<thead><tr><th>Against</th><th>Fault</th><th class="num">Decision</th><th class="num">Hand</th><th>Detail</th></tr></thead>
+<tbody>
+{{- range .Faults}}
+<tr><td>{{.Opponent}}</td><td>{{.Kind}}</td><td class="num">{{thousands .Decision}}</td><td class="num">{{thousands .Hand}}</td><td class="small">{{.Detail}}</td></tr>
+{{- end}}
+</tbody>
+</table>
+</div>
+</details>
+{{- end}}{{end}}
+{{- end}}
 
 <details id="grid">
 <summary>Every pair</summary>

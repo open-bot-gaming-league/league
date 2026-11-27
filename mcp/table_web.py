@@ -140,7 +140,11 @@ class TableWeb:
         client: TableClient,
         public_url: str,
         resource_url: str,
+        ranked: bool = False,
     ) -> None:
+        """ranked: the API has the account's ranked tables (bot_web.py's
+        api/tables), so the page shows them."""
+        self.ranked = ranked
         self.provider = provider
         self.tables = tables
         self.programs = programs
@@ -409,7 +413,8 @@ class TableWeb:
         if account is not None:
             rec = await self.provider.account(account) or {}
             who = {"name": rec.get("display_name") or "you"}
-        info["league"] = {"account": who, "signIn": self.signin_url(COOKIE_PATH + "/"), "signOut": COOKIE_PATH + "/signout"}
+        info["league"] = {"account": who, "signIn": self.signin_url(COOKIE_PATH + "/"), "signOut": COOKIE_PATH + "/signout",
+                          "ranked": self.ranked}
         return info
 
     async def state(self, request: Request, account: str, party: Party) -> dict:

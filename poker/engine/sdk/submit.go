@@ -175,10 +175,17 @@ func (t *Table) SubmitBot(ctx context.Context, opt SubmitOptions) (BotVersion, e
 
 	say("finalize: the league checks every file and the module")
 	var done struct {
-		Bot BotVersion `json:"bot"`
+		Bot   BotVersion `json:"bot"`
+		Table *struct {
+			ID       string `json:"id"`
+			Position int    `json:"position"`
+		} `json:"table"` // the version's ranked table, queued
 	}
 	if err := api.call(ctx, "POST", "api/bots/submissions/"+sub.ID+"/finalize", nil, &done); err != nil {
 		return BotVersion{}, err
+	}
+	if t := done.Table; t != nil {
+		say(fmt.Sprintf("ranked table %s queued (number %d): ten seats from the house bots; where it placed is in your agent's table_results, and on your table's page once it has played", t.ID, t.Position))
 	}
 	return done.Bot, nil
 }

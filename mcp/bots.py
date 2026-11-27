@@ -36,7 +36,7 @@ import re
 import secrets
 import subprocess
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 
 import anyio
@@ -100,8 +100,13 @@ def _now_iso(t: float) -> str:
 
 class Bots:
     def __init__(self, store: AuthStore, files: BotFiles, check: WasmCheck,
-                 limits: Limits = Limits(), clock: Callable[[], float] = time.time) -> None:
+                 limits: Limits = Limits(), clock: Callable[[], float] = time.time,
+                 on_finalized: Callable[[str, dict], Awaitable[dict]] | None = None) -> None:
+        """on_finalized(account, version) is called with each version filed
+        (ranked.py queues its table); what it returns is the finalize
+        answer's `table`."""
         self.store, self.files, self.check, self.limits, self.clock = store, files, check, limits, clock
+        self.on_finalized = on_finalized
         self._locks: dict[str, anyio.Lock] = {}
 
     def _lock(self, account: str) -> anyio.Lock:
@@ -161,6 +166,10 @@ class Bots:
             seen.add(path)
             if f is not None and isinstance(path, str):
                 data.append({"path": path, **f})
+        for path in sorted(seen):
+            parents = ["/".join(path.split("/")[:i]) for i in range(1, path.count("/") + 1)]
+            if any(p in seen for p in parents):
+                problems.append(f"data file {path!r}: its folder is also a file of the bot's")
         total = sum(f["size"] for f in data)
         if total > lim.data_bytes:
             problems.append(f"data: {total:,} bytes in all is over the {lim.data_bytes:,}-byte cap")
@@ -197,7 +206,8 @@ class Bots:
             return await self._status(sid, await self._own(account, sid))
 
     async def finalize(self, account: str, sid: str) -> dict:
-        """Check every file and the module; file the version: {bot: version}.
+        """Check every file and the module; file the version: {bot: version,
+        table: its ranked table (with on_finalized)}.
         Refused(422) with the problems (and the submission rejected) if any
         file or the module is wrong; Refused(409) if it is not open,
         Refused(429) if the account is over its throttle (it stays open)."""
@@ -224,7 +234,9 @@ class Bots:
             index["versions"].append(entry)
             index["open"] = None
             await self.store.put("account-bots", account, index)
-            return {"bot": entry}
+            if self.on_finalized is None:
+                return {"bot": entry}
+            return {"bot": entry, "table": await self.on_finalized(account, entry)}
 
     async def list(self, account: str) -> dict:
         index = await self._index(account)

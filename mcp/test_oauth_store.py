@@ -129,6 +129,35 @@ async def test_twenty_concurrent_takes_one_winner(open_store):
 
 
 @pytest.mark.asyncio
+async def test_update_reads_changes_and_writes(store):
+    assert await store.update("ranked-queue", "q", lambda v: None) is None  # nothing to file: nothing filed
+    assert await store.get("ranked-queue", "q") is None
+    assert await store.update("ranked-queue", "q", lambda v: {"n": 1} if v is None else None) == {"n": 1}
+    assert await store.update("ranked-queue", "q", lambda v: {"n": v["n"] + 1}) == {"n": 2}
+    await store.put("ranked-queue", "e", {"n": 0, "expires_at": FAR})
+    assert await store.update("ranked-queue", "e", lambda v: {"n": v["n"] + 1}) == {"n": 1}  # expires_at dropped
+    assert await store.get("ranked-queue", "e") == {"n": 1}
+    assert await store.get("ranked-queue", "q") == {"n": 2}
+
+
+@pytest.mark.asyncio
+async def test_twenty_concurrent_updates_none_lost(open_store):
+    """Twenty appends at once, over four store instances where the
+    backend is shared (four processes): all twenty land."""
+    first = open_store()
+    if isinstance(first, FileStore):
+        pytest.skip("a file store is one process's")
+    stores = [first] + [open_store() for _ in range(3)]
+
+    def append(i):
+        return lambda v: {"items": [*(v or {"items": []})["items"], i]}
+
+    await asyncio.gather(*(stores[i % 4].update("ranked-queue", "queue", append(i)) for i in range(20)))
+    got = await stores[1].get("ranked-queue", "queue")
+    assert sorted(got["items"]) == list(range(20)), got
+
+
+@pytest.mark.asyncio
 async def test_survives_reopen(open_store):
     await open_store().put("accounts", "github:abc", {"provider": "github"})
     await open_store().put("table-sessions", "t-1", {"owner": "github:abc"})

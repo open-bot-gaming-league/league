@@ -74,6 +74,11 @@ Check any staged data dir with `cd <data dir> && sha256sum -c deploy/local/bot-d
   (no `OBGL_BOT_STORE`: the API answers 503) until a deploy names a Cloud Storage bucket
   (`deploy/cloudrun/BOT-STORAGE.md`). Uploads go to the server itself here, at `/bots/upload/`;
   in the image they go straight to Cloud Storage.
+- Ranked tables play in the MCP server itself (`OBGL_RANKED_RUNNER=in-process`, 8 pairs at
+  once), their records in `<state dir>/records/`, which the table serves (`OBGL_RECORDS`).
+  In the cloud the service only queues them and a Cloud Run job plays them
+  (`deploy/cloudrun/RANKED-TABLES.md`). A full-size table takes this box's cores for
+  several minutes to half an hour; `OBGL_RANKED_HANDS` shrinks it.
 - `HOST=127.0.0.1` (server.py defaults to 0.0.0.0, which is what Cloud Run gets). No
   TLS, no Cloud Run front end: no HTTPS termination or `X-Forwarded-*`, request timeout,
   concurrency limit, scale-to-zero/cold start, or instance limit.

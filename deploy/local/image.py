@@ -7,7 +7,7 @@ instructions against directories instead of layers, so a change to the
 image (a new COPY, a new ENV) shows up locally without anyone editing a
 second script. It understands only the instructions the Dockerfile uses
 today -- FROM, ARG, ENV, WORKDIR, COPY (incl. --from=<stage>), ENTRYPOINT,
-and RUN for exactly three commands (go build, pip install -r, chmod) -- and
+and RUN for exactly three commands (go build [-buildmode=...], pip install -r, chmod) -- and
 FAILS on anything else rather than guess. When the Dockerfile grows
 something new, extend this file (and deploy/local/README.md).
 
@@ -148,13 +148,14 @@ class Image:
         st = self.cur
         toks = shlex.split(rest)
         if toks[:2] == ["go", "build"]:
-            if toks[2] != "-o" or len(toks) != 5:
+            flags = [t for t in toks[2:-3] if t.startswith("-buildmode=")]
+            if toks[-3] != "-o" or len(toks) != 5 + len(flags) or flags != toks[2:-3]:
                 die(f"unsupported go build form: {rest!r}")
             env = dict(os.environ, GOTOOLCHAIN="local")  # what the golang image sets
             env.update(st.env)
-            out = st.path(toks[3])
+            out = st.path(toks[-2])
             os.makedirs(os.path.dirname(out), exist_ok=True)
-            self.sh(["go", "build", "-o", out, toks[4]], cwd=st.path("."), env=env)
+            self.sh(["go", "build", *flags, "-o", out, toks[-1]], cwd=st.path("."), env=env)
         elif toks[:2] == ["pip", "install"]:
             if toks[2:4] != ["--no-cache-dir", "-r"] or len(toks) != 5:
                 die(f"unsupported pip install form: {rest!r}")

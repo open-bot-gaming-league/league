@@ -63,7 +63,9 @@ through MCP tools: all but `docs()` wrap the table's HTTP API, and
   read to your user: where their bot placed, which opponents it beat,
   lost to, or was too close to call (each bb/100 ± standard error), and
   every seat's place. On the hosted connector it ends with the link to
-  the full report page.
+  the full report page. Every bot version your user submits plays a
+  ranked table; with no `table_id` you get their newest one, or where it
+  stands (queued, playing, did not finish) if it has not finished.
 
 ### Your user at the table
 

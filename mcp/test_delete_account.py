@@ -46,6 +46,8 @@ async def _populate(store, account, sessions, old_sessions=0):
         await store.put(kind, hashlib.sha256(f"{kind}-{account}".encode()).hexdigest(), {"subject": account, "expires_at": FAR})
     await store.put("account-bots", account, {"versions": [], "open": f"{account}-bot"})
     await store.put("bot-submissions", f"{account}-bot", {"account": account, "state": "open"})
+    await store.put("account-ranked", account, {"tables": [f"{account}-table"]})
+    await store.put("ranked-tables", f"{account}-table", {"account": account, "state": "done"})
     programs = ProgramTokens(store)
     used = await programs.create(account, "one")
     assert await programs.check(used["token"]) is not None  # writes its program-usage record
@@ -66,8 +68,9 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert dry.returncode == 0, dry.stderr
     listed = dry.stdout.splitlines()
     # account + its list + its program list, each session (+ an old one's watch token),
-    # access + refresh, the program token + its usage record, its bot list + a submission
-    assert len(listed) == 3 + (new + old) + old + 2 + 1 + 1 + 2, listed
+    # access + refresh, the program token + its usage record, its bot list + a submission,
+    # its ranked tables' list + a table
+    assert len(listed) == 3 + (new + old) + old + 2 + 1 + 1 + 2 + 2, listed
     assert all(line.startswith("would delete oauth_") for line in listed) and not any("github:2" in line for line in listed)
     assert await store.get("accounts", ME) is not None  # a dry run deletes nothing
 
@@ -78,6 +81,8 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert await store.get("account-programs", ME) is None
     assert await store.get("account-bots", ME) is None and await store.get("bot-submissions", f"{ME}-bot") is None
     assert "gs://BUCKET/bots/github:1/" in done.stderr
+    assert f"gs://RECORDS_BUCKET/{ME}-table.json" in done.stderr
+    assert await store.get("ranked-tables", f"{ME}-table") is None and await store.get("account-ranked", ME) is None
     assert await store.get("table-sessions", f"{ME}-s0") is None
     assert await store.get("table-sessions", f"{ME}-s{new + old - 1}") is None
     assert await store.get("watch-tokens", hashlib.sha256(f"watch-{ME}-s0".encode()).hexdigest()) is None
@@ -91,6 +96,7 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert await ProgramTokens(store).check(other_token) is not None
     assert (await ProgramTokens(store).get(OTHER))["label"] == "one"
     assert await store.get("bot-submissions", f"{OTHER}-bot") is not None
+    assert await store.get("ranked-tables", f"{OTHER}-table") is not None
 
     again = _run(project, ME)
     assert again.returncode == 1 and "no account record" in again.stderr

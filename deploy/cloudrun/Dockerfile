@@ -41,6 +41,22 @@ COPY poker/engine/ ./engine/
 COPY poker/arena/ ./arena/
 WORKDIR /src/arena
 RUN go build -o /out/botcheck ./cmd/botcheck
+# rankedtable plays a ranked table (mcp/ranked.py's runner runs it).
+RUN go build -o /out/rankedtable ./cmd/rankedtable
+
+# ---- stage 1c: the house bots as wasm guests, for ranked tables ----------
+# (poker/arena/guests: the starters, and the house guest Turtle and Ox
+# share), built once here so a table compiles them but builds nothing.
+FROM golang:1.27 AS guestbuilder
+WORKDIR /src
+COPY poker/engine/ ./engine/
+COPY poker/arena/ ./arena/
+WORKDIR /src/arena
+ENV GOOS=wasip1 GOARCH=wasm
+RUN go build -buildmode=c-shared -o /out/guests/dove.wasm ./guests/dove
+RUN go build -buildmode=c-shared -o /out/guests/clam.wasm ./guests/clam
+RUN go build -buildmode=c-shared -o /out/guests/shark.wasm ./guests/shark
+RUN go build -buildmode=c-shared -o /out/guests/house.wasm ./guests/house
 
 # ---- stage 2: the runtime image -------------------------------------------
 FROM python:3.12-slim AS runtime
@@ -57,6 +73,12 @@ COPY mcp/server.py mcp/session.py mcp/table_client.py mcp/pages.py mcp/markdown_
 # Submitted bots (mcp/bots.py; BOT-STORAGE.md): off until OBGL_BOT_STORE is set.
 COPY mcp/bots.py mcp/bot_web.py mcp/bot_files.py mcp/bot_files_gcs.py ./mcp/
 COPY --from=arenabuilder /out/botcheck ./arena/bin/botcheck
+# Ranked tables (mcp/ranked.py; RANKED-TABLES.md): the service queues them;
+# the same image, run as the Cloud Run job `python ./mcp/ranked.py run`,
+# plays them with rankedtable, the guests, and the house bots' data below.
+COPY mcp/ranked.py ./mcp/
+COPY --from=arenabuilder /out/rankedtable ./arena/bin/rankedtable
+COPY --from=guestbuilder /out/guests/ ./arena/guests/
 # OAuth on the connector (mcp/oauth/__init__.py; CLOUDRUN.md's OAuth section).
 COPY mcp/oauth/ ./mcp/oauth/
 # server.py reads the docs from ../docs and ../README.md relative to its
@@ -74,7 +96,7 @@ COPY poker/engine/configs/table_50bb.json ./table/configs/table_50bb.json
 COPY deploy/cloudrun/data/ ./table/data/
 
 COPY deploy/cloudrun/entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh ./table/bin/table ./arena/bin/botcheck
+RUN chmod +x ./entrypoint.sh ./table/bin/table ./arena/bin/botcheck ./arena/bin/rankedtable
 
 # Cloud Run sets $PORT and expects the container to listen on it;
 # entrypoint.sh reads it for the MCP server and sets OBGL_TRANSPORT=http
@@ -103,6 +125,13 @@ ENV OBGL_AUTH_STORE=firestore
 # (OBGL_BOT_STORE=gcs:<bucket>) is the deploy's to set, and until it does
 # the submission API answers 503.
 ENV OBGL_BOTCHECK=/app/arena/bin/botcheck
+# Ranked tables: what the runner plays them with. Where the records go
+# (OBGL_RECORDS, also the table's -records) and where the bots' files are
+# (OBGL_BOT_FILES_DIR) are the deploy's: RANKED-TABLES.md. The house bots'
+# data is the table's own (./table/data, named as sdk.Houses names them).
+ENV OBGL_RANKEDTABLE=/app/arena/bin/rankedtable
+ENV OBGL_RANKED_GUESTS=/app/arena/guests
+ENV OBGL_HOUSE_CACHE=/app/table/data
 # The git sha this image was built from, served at GET /version on the
 # MCP server (mcp/server.py). Pass it at build time:
 #   docker build --build-arg OBGL_GIT_SHA=$(git rev-parse HEAD) ...

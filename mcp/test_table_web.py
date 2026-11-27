@@ -120,6 +120,7 @@ async def test_one_table_for_the_browser_and_every_agent_connection(site):
         assert (await browser.get("/table/table.js")).status_code == 200
         info = (await browser.get("/table/api/info")).json()
         assert info["league"]["account"] == {"name": "alice"}
+        assert info["league"]["ranked"] is False  # no bot submissions here: no ranked tables for the page to show
         p = Page(browser)
         first = await p.state()  # the table is made on first sight
         assert first["session"] and "presence" in first and "control" not in first

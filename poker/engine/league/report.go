@@ -23,6 +23,48 @@ type Report struct {
 	// len(Opponents).
 	Beat, LostTo, TooClose int
 	Grid                   [][]Cell // Grid[i][j]: seat i against seat j
+	// Faulted are the seats whose sandbox played some of their decisions
+	// for them (a check, else a fold), in seat order: a move that was
+	// illegal or an error, or a limit the bot broke. Their results count
+	// those decisions as played. Empty when every bot played every
+	// decision itself.
+	Faulted []Faulted
+}
+
+// Faulted is one seat's decisions its sandbox played, and what stopped
+// it in each pair where something did.
+type Faulted struct {
+	Seat      int
+	Label     string
+	Forfeited int
+	Faults    []SeatFault // in the record's order
+	Pairs     int         // the pairs the seat played
+}
+
+// SeatFault is what stopped a seat's bot in its pair against Opponent.
+type SeatFault struct {
+	Opponent string // the opponent's label
+	Fault
+}
+
+// Kinds is the seat's faults by kind, most frequent first (then by
+// name): "fuel x10, memory x1".
+func (f Faulted) Kinds() string {
+	count := make(map[string]int)
+	for _, x := range f.Faults {
+		count[x.Kind]++
+	}
+	kinds := make([]string, 0, len(count))
+	for k := range count {
+		kinds = append(kinds, k)
+	}
+	sort.Slice(kinds, func(x, y int) bool {
+		return count[kinds[x]] > count[kinds[y]] || count[kinds[x]] == count[kinds[y]] && kinds[x] < kinds[y]
+	})
+	for i, k := range kinds {
+		kinds[i] = fmt.Sprintf("%s x%d", k, count[k])
+	}
+	return strings.Join(kinds, ", ")
 }
 
 // Standing is one seat's place.
@@ -155,6 +197,26 @@ func NewReport(r *Record) (*Report, error) {
 	sort.SliceStable(rep.Opponents, func(x, y int) bool {
 		return rep.Opponents[x].Result.BBPer100 > rep.Opponents[y].Result.BBPer100
 	})
+	for _, u := range r.Usage {
+		if u.Seat < 0 || u.Seat >= n {
+			return nil, fmt.Errorf("league: record: usage for seat %d", u.Seat)
+		}
+		if (u.Forfeited == nil || *u.Forfeited == 0) && len(u.Faults) == 0 {
+			continue
+		}
+		f := Faulted{Seat: u.Seat, Label: rep.Labels[u.Seat], Pairs: n - 1}
+		if u.Forfeited != nil {
+			f.Forfeited = int(*u.Forfeited)
+		}
+		for _, x := range u.Faults {
+			if x.Opponent < 0 || x.Opponent >= n || x.Opponent == u.Seat {
+				return nil, fmt.Errorf("league: record: seat %d faulted against seat %d", u.Seat, x.Opponent)
+			}
+			f.Faults = append(f.Faults, SeatFault{Opponent: rep.Labels[x.Opponent], Fault: x.Fault})
+		}
+		rep.Faulted = append(rep.Faulted, f)
+	}
+	sort.SliceStable(rep.Faulted, func(x, y int) bool { return rep.Faulted[x].Seat < rep.Faulted[y].Seat })
 	return rep, nil
 }
 
@@ -219,6 +281,16 @@ func (rep *Report) Text() string {
 			mark = "  <- " + ch.Label
 		}
 		fmt.Fprintf(&b, "  %2d. %s  %+7.1f%s\n", p.Place, pad(p.Label, w), p.Total, mark)
+	}
+	if len(rep.Faulted) > 0 {
+		b.WriteString("\nThe sandbox played for these bots (a check, else a fold) where they broke a rule or a limit:\n")
+		for _, f := range rep.Faulted {
+			fmt.Fprintf(&b, "  %s: %s decisions played for it", f.Label, Thousands(f.Forfeited))
+			if len(f.Faults) > 0 {
+				fmt.Fprintf(&b, "; stopped in %d of its %d pairs (%s)", len(f.Faults), f.Pairs, f.Kinds())
+			}
+			b.WriteString("\n")
+		}
 	}
 	return b.String()
 }

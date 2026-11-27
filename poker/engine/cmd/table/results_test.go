@@ -146,3 +146,42 @@ func TestResultsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A seat whose sandbox played for it: the page says where, and what
+// stopped it; a table without that has no such section.
+func TestResultsPageFaults(t *testing.T) {
+	ts, s := testTable(t)
+	rec, err := league.RecordDir(recordsDir).Record("table-p8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	five := int64(5)
+	rec.Usage[0].Forfeited = &five
+	rec.Usage[0].Faults = []league.PairFault{{Opponent: 1, Fault: league.Fault{Kind: "fuel", Decision: 3, Hand: 2, Detail: "out of decision fuel"}}}
+	dir := t.TempDir()
+	b, err := rec.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "faulty.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.records = league.RecordDir(dir)
+	status, _, page := get(t, ts.URL+"/results/faulty")
+	if status != http.StatusOK {
+		t.Fatalf("%d\n%s", status, page)
+	}
+	page = html.UnescapeString(page)
+	for _, want := range []string{
+		"<tr><td>Example</td><td class=\"num\">5</td><td>in 1 of its 9 pairs: fuel x1</td></tr>",
+		"<tr><td>Turtle (seat 1)</td><td>fuel</td><td class=\"num\">3</td><td class=\"num\">2</td><td class=\"small\">out of decision fuel</td></tr>",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page has no %q", want)
+		}
+	}
+	s.records = league.RecordDir(recordsDir)
+	if _, _, clean := get(t, ts.URL+"/results/table-p8"); strings.Contains(clean, `id="faults"`) {
+		t.Error("a table without faults has a faults section")
+	}
+}

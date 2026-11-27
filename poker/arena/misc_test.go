@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/open-bot-gaming-league/league/poker/engine/sdk"
 	"github.com/open-bot-gaming-league/league/poker/engine/sdk/bots"
@@ -71,6 +72,19 @@ func TestFilesMount(t *testing.T) {
 	info, err := f.Stat("a.bin")
 	if err != nil || info.Size() != 3 || info.Name() != "a.bin" {
 		t.Fatalf("Stat: %v %v", info, err)
+	}
+	// Folders, made up from the names: a submitted bot's data.
+	nested := Files{"a.bin": path, "t/c.bin": path, "t/u/d.bin": path, "t/u/e.bin": path}
+	if err := fstest.TestFS(nested, "a.bin", "t/c.bin", "t/u/d.bin", "t/u/e.bin"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"t/", "t/x", "u", "t/u/d.bin/x"} {
+		if _, err := nested.Open(bad); err == nil {
+			t.Errorf("opened %q", bad)
+		}
+	}
+	if info, err := nested.Stat("t/u"); err != nil || !info.IsDir() || info.Name() != "u" {
+		t.Errorf("Stat(t/u): %v %v", info, err)
 	}
 }
 

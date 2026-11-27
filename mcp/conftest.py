@@ -12,6 +12,7 @@ import urllib.error
 import uuid
 import urllib.request
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass
 
 import pytest
 
@@ -24,6 +25,7 @@ import server as server_module  # noqa: E402
 from oauth import OAuthConfig  # noqa: E402
 from oauth.idp import github  # noqa: E402
 from oauth.store import FirestoreStore, MemoryStore  # noqa: E402
+from ranked import with_runner  # noqa: E402
 
 USER_A = {"id": 1001, "login": "alice"}  # GitHub users for the fake IdP (the `site` fixture)
 USER_B = {"id": 2002, "login": "bob"}
@@ -146,10 +148,22 @@ class Site:
         return (await ot.agent_tokens(self.base, "github"))["access_token"]
 
 
-def league_app(base, idp_base, store, bots=None):
+@dataclass
+class Wiring:
+    """What a test's `bots(base, store)` maker may give the server: its
+    bot submissions, and the ranked tables they queue, with the runner
+    that plays them in the server (ranked.with_runner) if any."""
+
+    bots: object
+    ranked: object = None
+    runner: object = None
+
+
+def league_app(base, idp_base, store, bots=None, table_url=None):
     """Our server's ASGI app at `base` with OAuth on and a GitHub sign-in
     wired to the fake IdP served at `idp_base`; `bots(base, store)`, if
-    given, makes its bot submissions (bots.Bots)."""
+    given, makes its bot submissions (bots.Bots, or a Wiring). table_url:
+    the Go table (default: OBGL_TABLE_URL's)."""
     idp = github(
         ot.UPSTREAM_ID,
         ot.UPSTREAM_SECRET,
@@ -159,7 +173,12 @@ def league_app(base, idp_base, store, bots=None):
         userinfo_endpoint=f"{idp_base}/userinfo",
     )
     config = OAuthConfig(public_url=base, mcp_path="/mcp", store=store, idps=[idp])
-    return server_module.build_server(None, config, bots(base, store) if bots else None).streamable_http_app()
+    made = bots(base, store) if bots else None
+    wiring = made if isinstance(made, Wiring) else Wiring(made)
+    app = server_module.build_server(table_url, config, wiring.bots, wiring.ranked).streamable_http_app()
+    if wiring.runner is not None:
+        with_runner(app, wiring.runner)
+    return app
 
 
 def _site_store(kind):
@@ -173,11 +192,11 @@ def _site_store(kind):
 
 
 @contextmanager
-def _site(serve_asgi, port, store, bots=None):
+def _site(serve_asgi, port, store, bots=None, table_url=None):
     fake = ot.FakeIdP(USER_A)
     with serve_asgi(fake.app) as idp_base:
         base = f"http://127.0.0.1:{port}"
-        with serve_asgi(league_app(base, idp_base, store, bots), port):
+        with serve_asgi(league_app(base, idp_base, store, bots, table_url), port):
             yield Site(base, fake)
 
 
@@ -190,5 +209,6 @@ def site(request, serve_asgi, free_port):
 @pytest.fixture(params=["memory", "firestore"])
 def bot_site(request, serve_asgi, free_port):
     """`site` with bot submissions on: call it with the Bots maker, as a
-    context manager: `with bot_site(lambda base, store: Bots(...)) as site`."""
-    return lambda bots: _site(serve_asgi, free_port, _site_store(request.param), bots)
+    context manager: `with bot_site(lambda base, store: Bots(...)) as site`
+    (table_url=: the Go table it talks to)."""
+    return lambda bots, table_url=None: _site(serve_asgi, free_port, _site_store(request.param), bots, table_url)

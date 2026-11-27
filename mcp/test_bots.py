@@ -181,7 +181,24 @@ async def test_the_caps_and_the_manifest_are_checked_before_any_upload(env):
         await bots.create(ALICE, bad)
     assert [p.split(":")[0] for p in e.value.problems] == ["name", "wasm", "data file '.hidden'", "data file 'x'", "data file 'x'"]
     assert e.value.problems[-1] == "data file 'x': listed twice"
+    with pytest.raises(Refused) as e:
+        await bots.create(ALICE, manifest(data={"t": b"1", "t/u/v.bin": b"2", "w/x": b"3"}))
+    assert e.value.problems == ["data file 't/u/v.bin': its folder is also a file of the bot's"]
     assert (await bots.list(ALICE))["open"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_filed_version_is_handed_on(env):
+    bots, _ = env
+    handed = []
+
+    async def queue(account, version):
+        handed.append((account, version["name"], version["version"]))
+        return {"id": "t1", "state": "queued"}
+
+    bots.on_finalized = queue
+    done = await submit(bots, ALICE)
+    assert done["table"] == {"id": "t1", "state": "queued"} and handed == [(ALICE, "mybot", 1)]
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,82 @@
+# ranked-job.yaml: the Cloud Run job that plays queued ranked tables
+# (mcp/ranked.py), from the service's own image. RANKED-TABLES.md says how
+# to fill it in, create it and run it. Not deployed.
+#
+#   gcloud run jobs replace deploy/cloudrun/ranked-job.yaml --project PROJECT --region REGION
+#
+# Fill in IMAGE (the service's image, the same tag), PROJECT,
+# RANKED_SERVICE_ACCOUNT, BOTS_BUCKET and RECORDS_BUCKET.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: obgl-ranked
+  annotations:
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # Cloud Storage volumes need the second-generation environment.
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      # One task, one execution's worth: a runner plays the queue one table
+      # at a time and exits when it is empty. A second execution started
+      # while one runs finds the queue's head under its lease and exits.
+      taskCount: 1
+      parallelism: 1
+      template:
+        spec:
+          # A task that dies (out of memory, a crash) is not retried by Cloud
+          # Run: the table stays at the queue's head with its lease running
+          # out, and the next execution plays it again (up to ranked.py's
+          # MAX_STARTS starts).
+          maxRetries: 0
+          # rankedtable's own limit is OBGL_RANKED_TIMEOUT (4 h, the table's
+          # wall); the task's must be longer, for a queue of several.
+          timeoutSeconds: 86400
+          serviceAccountName: RANKED_SERVICE_ACCOUNT
+          containers:
+            - image: IMAGE
+              command: ["python", "./mcp/ranked.py", "run"]
+              resources:
+                limits:
+                  # 8 pairs at once (OBGL_RANKED_PARALLEL). Memory: a normal
+                  # table peaks near 2.5 GiB, but a bot may use up to 2 GiB
+                  # (the Lightweight class) in each of the 8 pairs it can
+                  # be playing at once: 16 GiB for one heavy challenger, plus
+                  # the house seats.
+                  cpu: "8"
+                  memory: 20Gi
+              env:
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: PROJECT
+                - name: OBGL_AUTH_STORE
+                  value: firestore
+                - name: OBGL_RANKED_PARALLEL
+                  value: "8"
+                - name: OBGL_BOT_FILES_DIR
+                  value: /bots
+                - name: OBGL_RECORDS
+                  value: /records
+                # OBGL_RANKEDTABLE, OBGL_RANKED_GUESTS and OBGL_HOUSE_CACHE are
+                # the image's (Dockerfile); OBGL_RANKED_HANDS, _SEATS, _POOL and
+                # _DRAW default to the ranked table (ranked.py TableSettings).
+              volumeMounts:
+                - name: bots
+                  mountPath: /bots
+                - name: records
+                  mountPath: /records
+          volumes:
+            # The submitted bots' bucket (BOT-STORAGE.md), read-only: a bot's
+            # files are read on demand, as the bot reads them, never copied.
+            - name: bots
+              csi:
+                driver: gcsfuse.run.googleapis.com
+                readOnly: true
+                volumeAttributes:
+                  bucketName: BOTS_BUCKET
+            - name: records
+              csi:
+                driver: gcsfuse.run.googleapis.com
+                volumeAttributes:
+                  bucketName: RECORDS_BUCKET

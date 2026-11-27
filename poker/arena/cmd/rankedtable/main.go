@@ -4,30 +4,39 @@
 //	rankedtable play -challenger shark -out table.json   # the defaults: 10 seats from the house pool, 1,000,000 hands a pair
 //	rankedtable play -challenger dove -seats 3 -hands 20000 -seed 7
 //	rankedtable play -challenger-wasm mybot.wasm -challenger-data mydata -wasm-pool   # every seat in the sandbox
+//	rankedtable play -challenger-spec challenger.json -wasm-pool -guests guests -seed 7 -out table.json   # a submitted bot, as the queue runs it
 //	rankedtable cost table.json                          # at Cloud Run job prices
 //	rankedtable cost -vcpu 8 -gib 4 table.json
 //
-// play draws the seats from -pool (copies allowed), plays every pair
+// play draws the seats from -pool (-draw; copies allowed), plays every pair
 // heads-up on the same duplicate deals, and writes the record (JSON,
 // package league) to -out, then prints the places and the cost to stderr.
 // The house pool's trained bots must be in the house-bot cache: go run
 // ./sdk/cmd/house download all (in poker/engine). The challenger is a pool
 // bot by id, or a wasm bot (-challenger-wasm, with its data directory
-// mounted read-only as -challenger-data) run in the arena sandbox. The
-// pool runs natively, or with -wasm-pool as wasm bots built from
-// ./guests: then every seat is sandboxed and metered.
+// mounted read-only as -challenger-data) run in the arena sandbox, or a
+// wasm bot described by a JSON file (-challenger-spec: its module, its
+// data files and the host file each is read from, whose bot it is; see
+// spec), as the ranked-table queue (mcp/ranked.py) runs a submitted bot.
+// The pool runs natively, or with -wasm-pool as wasm bots from -guests
+// (prebuilt <id>.wasm files, else built from the Go packages there):
+// then every seat is sandboxed and metered.
 //
 // Run it from poker/arena, the Go module's root.
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/open-bot-gaming-league/league/poker/arena"
@@ -59,19 +68,21 @@ func play(args []string, stdout, stderr io.Writer) error {
 	challengerWasm := fs.String("challenger-wasm", "", "the challenger: a wasm bot module (instead of -challenger)")
 	challengerData := fs.String("challenger-data", "", "the wasm challenger's data directory, mounted read-only at /data")
 	challengerName := fs.String("challenger-name", "Challenger", "the wasm challenger's name in the record")
+	challengerSpec := fs.String("challenger-spec", "", "the challenger: a wasm bot described by a JSON file (instead of -challenger; see spec)")
 	wasmPool := fs.Bool("wasm-pool", false, "run the pool as wasm bots in the sandbox, built from -guests")
 	guests := fs.String("guests", "guests", "the house bots' wasm guest packages, for -wasm-pool")
 	pool := fs.String("pool", strings.Join(league.HousePool, ","), "the bots seats are drawn from, by id, comma-separated")
 	seats := fs.Int("seats", league.DefaultSeats, "seats drawn from the pool, besides the challenger")
 	hands := fs.Int("hands", league.DefaultHands, "hands per pair")
 	seed := fs.Uint64("seed", 1, "draws the seats, deals the cards and seeds the bots: the same seed plays the same table")
+	draw := fs.String("draw", league.DrawCopies, "how the seats are drawn from the pool (league.Draws)")
 	parallel := fs.Int("parallel", 0, "pairs played at once (0: GOMAXPROCS)")
 	out := fs.String("out", "-", "where to write the record (-: stdout)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if (*challenger == "") == (*challengerWasm == "") || fs.NArg() > 0 {
-		return errors.New("play: one of -challenger and -challenger-wasm is required, and play takes no arguments")
+	if given := len(slices.DeleteFunc([]string{*challenger, *challengerWasm, *challengerSpec}, func(s string) bool { return s == "" })); given != 1 || fs.NArg() > 0 {
+		return errors.New("play: one of -challenger, -challenger-wasm and -challenger-spec is required, and play takes no arguments")
 	}
 	var bots []league.Entrant
 	var err error
@@ -91,6 +102,10 @@ func play(args []string, stdout, stderr io.Writer) error {
 	}
 	var ch league.Entrant
 	switch {
+	case *challengerSpec != "":
+		if ch, err = specChallenger(*challengerSpec); err != nil {
+			return err
+		}
 	case *challengerWasm != "":
 		var closeCh func() error
 		if ch, closeCh, err = wasmChallenger(*challengerWasm, *challengerData, *challengerName); err != nil {
@@ -111,7 +126,7 @@ func play(args []string, stdout, stderr io.Writer) error {
 		defer closeCh()
 		ch = chs[0]
 	}
-	cfg := league.Config{Seats: *seats, Hands: *hands, Seed: *seed, Parallel: *parallel, Runner: league.RunnerVersion()}
+	cfg := league.Config{Seats: *seats, Hands: *hands, Seed: *seed, Parallel: *parallel, Runner: league.RunnerVersion(), Draw: *draw}
 	rec, err := league.Play(cfg, ch, bots)
 	if err != nil {
 		return err
@@ -161,6 +176,56 @@ func wasmChallenger(path, dataDir, name string) (league.Entrant, func() error, e
 		version += " data " + filepath.Base(dataDir)
 	}
 	return arena.Entrant("challenger", name, version, p, cfg), done, nil
+}
+
+// spec is a submitted bot as -challenger-spec describes it: its module,
+// its data files as a mount (arena.Files: each path of the bot's /data and
+// the host file it is read from), and whose it is.
+type spec struct {
+	Name    string            `json:"name"`
+	Version string            `json:"version"` // "": the module's sha256
+	Wasm    string            `json:"wasm"`    // the module's host path
+	Data    map[string]string `json:"data"`
+	Owner   *league.Owner     `json:"owner"`
+}
+
+func specChallenger(path string) (league.Entrant, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return league.Entrant{}, err
+	}
+	var s spec
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
+		return league.Entrant{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if s.Name == "" || s.Wasm == "" {
+		return league.Entrant{}, fmt.Errorf("%s: a challenger needs a name and a wasm module", path)
+	}
+	wasm, err := os.ReadFile(s.Wasm)
+	if err != nil {
+		return league.Entrant{}, err
+	}
+	p, err := arena.Compile(wasm)
+	if err != nil {
+		return league.Entrant{}, fmt.Errorf("%s: %w", s.Wasm, err)
+	}
+	if s.Version == "" {
+		s.Version = "wasm sha256:" + p.SHA256()
+	}
+	for name := range s.Data {
+		if !iofs.ValidPath(name) || name == "." {
+			return league.Entrant{}, fmt.Errorf("%s: data path %q", path, name)
+		}
+	}
+	var cfg arena.Config
+	if len(s.Data) > 0 {
+		cfg.Data = arena.Files(s.Data)
+	}
+	e := arena.Entrant("challenger", s.Name, s.Version, p, cfg)
+	e.Owner = s.Owner
+	return e, nil
 }
 
 func cost(args []string, stdout io.Writer) error {

@@ -15,11 +15,12 @@ type Record struct {
 	Runner       string      `json:"runner"` // the runner's version
 	Seed         uint64      `json:"seed"`
 	HandsPerPair int         `json:"hands_per_pair"`
-	Pool         []Bot       `json:"pool"`   // the bots seats were drawn from
-	Seats        []Seat      `json:"seats"`  // seat 0 is the challenger
-	Pairs        []Pair      `json:"pairs"`  // every pair of seats, A < B, in order
-	Places       []Placing   `json:"places"` // best first; equal places in seat order
-	Usage        []SeatUsage `json:"usage"`  // per seat, in seat order
+	Draw         string      `json:"draw,omitempty"` // how the seats were drawn (Config.Draw); absent: DrawCopies
+	Pool         []Bot       `json:"pool"`           // the bots seats were drawn from
+	Seats        []Seat      `json:"seats"`          // seat 0 is the challenger
+	Pairs        []Pair      `json:"pairs"`          // every pair of seats, A < B, in order
+	Places       []Placing   `json:"places"`         // best first; equal places in seat order
+	Usage        []SeatUsage `json:"usage"`          // per seat, in seat order
 	Measured     Measured    `json:"measured"`
 }
 
@@ -35,6 +36,16 @@ type Seat struct {
 	Seat       int  `json:"seat"`
 	Challenger bool `json:"challenger,omitempty"`
 	Bot
+	Owner *Owner `json:"owner,omitempty"` // a submitted bot's; absent for the house's
+}
+
+// Owner is whose submitted bot sits in a seat: the account that submitted
+// it, and which of its versions this is.
+type Owner struct {
+	Account    string `json:"account"`              // the league account's id
+	Bot        string `json:"bot"`                  // the bot's name in the account
+	Version    int    `json:"version"`              // its version number, from 1
+	Submission string `json:"submission,omitempty"` // the submission that made the version
 }
 
 // Pair is one pair's match, as seat A saw it: sdk.Match(A, B).
@@ -107,6 +118,9 @@ type PairTime struct {
 
 func newRecord(cfg Config, challenger Entrant, pool, seats []Entrant) *Record {
 	r := &Record{Format: Format, Runner: cfg.Runner, Seed: cfg.Seed, HandsPerPair: cfg.Hands}
+	if cfg.Draw != DrawCopies {
+		r.Draw = cfg.Draw
+	}
 	for _, e := range pool {
 		r.Pool = append(r.Pool, botOf(e))
 	}
@@ -114,7 +128,7 @@ func newRecord(cfg Config, challenger Entrant, pool, seats []Entrant) *Record {
 	r.Usage = make([]SeatUsage, len(seats))
 	r.Measured.Seats = make([]SeatTime, len(seats))
 	for i, e := range seats {
-		r.Seats[i] = Seat{Seat: i, Challenger: i == 0, Bot: botOf(e)}
+		r.Seats[i] = Seat{Seat: i, Challenger: i == 0, Bot: botOf(e), Owner: e.Owner}
 		r.Usage[i].Seat = i
 		r.Measured.Seats[i].Seat = i
 	}

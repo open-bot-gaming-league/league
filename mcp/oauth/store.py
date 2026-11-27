@@ -23,6 +23,10 @@ with a durable backend, across restarts) is a JSON object filed under a
     bot-submissions   a bot submission: its files, its state, by submission id
     account-bots      an account's bot versions and its open submission, by account id
     (the last two belong to mcp/bots.py)
+    ranked-tables     a ranked table of a submitted bot: its state, its result, by table id
+    account-ranked    an account's ranked tables, by account id
+    ranked-queue      the tables waiting or playing, in order (one record, key "queue")
+    (the last three belong to mcp/ranked.py)
 
 Bearer secrets (codes, tokens) are filed by their sha256, never in the
 clear, so a copy of the store is not a copy of anyone's tokens. (Registered
@@ -49,7 +53,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 KINDS = (
@@ -57,6 +61,7 @@ KINDS = (
     "table-sessions", "watch-tokens", "account-tables",
     "program-tokens", "account-programs", "program-usage",
     "bot-submissions", "account-bots",
+    "ranked-tables", "account-ranked", "ranked-queue",
 )
 
 Record = dict[str, Any]
@@ -79,6 +84,15 @@ class AuthStore(Protocol):
         """Get and delete in one step, so a single-use record (an
         authorization code, a refresh token being rotated) can be
         redeemed at most once even under concurrent requests."""
+        ...
+
+    async def update(self, kind: str, key: str, change: Callable[[Record | None], Record | None]) -> Record | None:
+        """Read, change and write one record as one step: `change` gets
+        the record (its own copy) or None, and returns the record to file,
+        or None to leave the store as it is. Under concurrent updates, from
+        any process, none is lost: a backend that cannot hold a lock runs
+        `change` again on what the other wrote. So `change` must do
+        nothing but compute. Returns what was filed (or None)."""
         ...
 
 
@@ -113,6 +127,14 @@ class MemoryStore:
         _check_kind(kind)
         value = self._data[kind].pop(key, None)
         if value is not None:
+            self._changed()
+        return value
+
+    async def update(self, kind: str, key: str, change: Callable[[Record | None], Record | None]) -> Record | None:
+        _check_kind(kind)
+        value = change(copy.deepcopy(self._data[kind].get(key)))
+        if value is not None:
+            self._data[kind][key] = copy.deepcopy(value)
             self._changed()
         return value
 
@@ -234,13 +256,15 @@ class FirestoreStore:
     async def get(self, kind: str, key: str) -> Record | None:
         return self._live(await self._doc(kind, key).get())
 
-    async def put(self, kind: str, key: str, value: Record) -> None:
-        ref = self._doc(kind, key)
+    def _body(self, value: Record) -> dict[str, Any]:
         body: dict[str, Any] = {"record": json.dumps(value, separators=(",", ":"))}
         expires_at = value.get("expires_at")
         if expires_at is not None:
             body["expires_at"] = datetime.datetime.fromtimestamp(expires_at, tz=datetime.timezone.utc)
-        await ref.set(body)
+        return body
+
+    async def put(self, kind: str, key: str, value: Record) -> None:
+        await self._doc(kind, key).set(self._body(value))
 
     async def delete(self, kind: str, key: str) -> None:
         await self._doc(kind, key).delete()
@@ -262,6 +286,33 @@ class FirestoreStore:
                 continue
             # Ours, and gone. An expired one is gone too, but was never there to take.
             return self._live(snapshot)
+
+    async def update(self, kind: str, key: str, change: Callable[[Record | None], Record | None]) -> Record | None:
+        """The write is conditional on the document being as read: created
+        only if still absent, else replaced only if unchanged since the
+        read (its update time). If another writer got there first, read
+        again and run `change` on that."""
+        from google.api_core import exceptions
+
+        ref = self._doc(kind, key)
+        client = self._db()
+        while True:
+            snapshot = await ref.get()
+            value = change(self._live(snapshot))
+            if value is None:
+                return None
+            body = self._body(value)
+            try:
+                if snapshot.exists:
+                    if "expires_at" not in body:
+                        body["expires_at"] = self._firestore.DELETE_FIELD
+                    await ref.update(body, option=client.write_option(last_update_time=snapshot.update_time))
+                else:
+                    await ref.create(body)
+            except (exceptions.FailedPrecondition, exceptions.Aborted, exceptions.Conflict):
+                # Changed since our read (Conflict: created since), or write contention.
+                continue
+            return value
 
 
 def _adc_project() -> str | None:

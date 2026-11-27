@@ -117,7 +117,8 @@ kbd{font:700 .7em "Liberation Mono",monospace;background:#0005;border:1px solid 
 #token-value,#token-use{flex:1;font:.85rem/1.4 "Liberation Mono",Menlo,Consolas,monospace;color:#e8eef3;padding:.4rem .5rem;user-select:all;-webkit-user-select:all;white-space:pre-wrap;word-break:break-all;min-width:0}
 #token-copy{border:0;border-left:1px solid #2d3a44;border-radius:0;background:#2a3a48;font-weight:700;min-width:5rem}
 #token-copy.ok{background:#2e6a45}
-#token-error{color:#ff9d8f}
+#token-error,#ranked-error{color:#ff9d8f}
+#ranked[hidden]{display:none} #ranked-list{margin:.35rem 0 0;padding-left:1.1rem} #ranked-list li{margin:.15rem 0}
 .link{background:none!important;border:0!important;color:#9fd0ff;padding:0 .2rem!important;text-decoration:underline}
 #keys kbd{margin:0 .1em}
 /* the session's score sits on the felt, under the hand number: always in view, whatever the layout of the side panel */
