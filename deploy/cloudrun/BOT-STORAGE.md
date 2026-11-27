@@ -31,8 +31,10 @@ is rejected.
 
 ## Bucket
 
-One bucket for submitted bots, `BOTS_BUCKET` (its name is the deploy's:
-`OBGL_BOT_STORE=gcs:BOTS_BUCKET` and finalize-job.yaml):
+One bucket for submitted bots, `BOTS_BUCKET`. `BOTS_BUCKET` and the
+records bucket's `RECORDS_BUCKET` (RANKED-TABLES.md) are the names set in
+`finalize-job.yaml` and `ranked-job.yaml` (`OBGL_BOT_STORE=gcs:BOTS_BUCKET`,
+the jobs' volumes); the service's deploy uses the same.
 
 - **Location**: the service's region (`REGION`), Standard class.
 - **Access**: uniform bucket-level access; public access prevention enforced.

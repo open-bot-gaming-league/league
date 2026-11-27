@@ -14,7 +14,7 @@
 # what to stage and served.example.json for its shape.
 
 # ---- stage 1: build the Go table server ----------------------------------
-FROM golang:1.27 AS tablebuilder
+FROM golang:1.27.4-trixie AS tablebuilder
 WORKDIR /src
 COPY poker/engine/go.mod ./
 COPY poker/engine/*.go ./
@@ -34,8 +34,10 @@ RUN go build -o /out/table ./cmd/table
 # check against the guest ABI.) The arena module needs the engine's (a
 # replace directive: ../engine), and downloads wasmtime-go, checked against
 # go.sum; wasmtime-go links its bundled wasmtime library with cgo (the
-# golang image has gcc).
-FROM golang:1.27 AS arenabuilder
+# golang image has gcc). This stage, which links wasmtime-go, stays on Go
+# 1.27.3 until Go accepts the LLVM bitcode sections in its library
+# (golang/go#83126: 1.27.4 refuses them).
+FROM golang:1.27.3-trixie AS arenabuilder
 WORKDIR /src
 COPY poker/engine/ ./engine/
 COPY poker/arena/ ./arena/
@@ -47,7 +49,7 @@ RUN go build -o /out/rankedtable ./cmd/rankedtable
 # ---- stage 1c: the house bots as wasm guests, for ranked tables ----------
 # (poker/arena/guests: the starters, and the house guest Turtle and Ox
 # share), built once here so a table compiles them but builds nothing.
-FROM golang:1.27 AS guestbuilder
+FROM golang:1.27.4-trixie AS guestbuilder
 WORKDIR /src
 COPY poker/engine/ ./engine/
 COPY poker/arena/ ./arena/
@@ -59,7 +61,7 @@ RUN go build -buildmode=c-shared -o /out/guests/shark.wasm ./guests/shark
 RUN go build -buildmode=c-shared -o /out/guests/house.wasm ./guests/house
 
 # ---- stage 2: the runtime image -------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12.16-slim-trixie AS runtime
 WORKDIR /app
 
 # Python side: the MCP server, run in Streamable HTTP mode
