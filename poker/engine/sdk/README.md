@@ -312,8 +312,8 @@ forfeits, fuel, memory, data read, output. `poker/arena` builds with cgo
 A submitted bot is a WebAssembly module (at most 64 MB) and, if it reads
 any, a folder of data files (at most 16 GB in all). The league checks the
 module as the sandbox does (`poker/arena/cmd/botcheck`) and keeps it as
-the next version of the bot by that name: one submission per account a
-day. The program token is the table's (`OBGL_TOKEN` or `obgl-token.txt`,
+the next version of the bot by that name: one submission per account an
+hour. The program token is the table's (`OBGL_TOKEN` or `obgl-token.txt`,
 as in "Play your table").
 
     go run ./sdk/cmd/bot submit -name mybot -wasm mybot.wasm -data ./data

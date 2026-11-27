@@ -109,9 +109,9 @@ async def test_the_api_takes_a_bot_and_refuses_what_it_should(league, wasm):
         assert (await http.get(f"/table/api/bots/submissions/{sub['id']}", headers=auth)).json()["uploads"][0]["done"]
         r = await http.post(f"/table/api/bots/submissions/{sub['id']}/finalize", headers=auth)
         assert r.status_code == 200 and r.json()["bot"]["version"] == 1, r.text
-        # The day's one is used.
+        # The hour's one is used.
         r = await http.post("/table/api/bots/submissions", headers=auth, json={"name": "mybot", "wasm": _entry(wasm)})
-        assert r.status_code == 429 and "a day" in r.json()["error"] and "retry_at" in r.json()
+        assert r.status_code == 429 and "an hour" in r.json()["error"] and "retry_at" in r.json()
         assert "retry-after" not in r.headers
         listed = (await http.get("/table/api/bots", headers=auth)).json()
         assert [(b["name"], b["version"]) for b in listed["bots"]] == [("mybot", 1)] and listed["open"] is None
@@ -151,7 +151,7 @@ async def test_the_sdk_submits_and_lists(league, tools, wasm, tmp_path):
     done = await anyio.to_thread.run_sync(lambda: bot("list"))
     assert done.returncode == 0 and done.stdout.splitlines() == [lines[-1].removeprefix("submitted: ")], done.stdout
     done = await anyio.to_thread.run_sync(lambda: bot("submit", "-name", "mybot", "-wasm", "bot.wasm", "-data", "data"))
-    assert done.returncode == 1 and "429" in done.stderr and "a day" in done.stderr, done.stdout + done.stderr
+    assert done.returncode == 1 and "429" in done.stderr and "You can submit one bot an hour" in done.stderr, done.stdout + done.stderr
     del env["OBGL_TOKEN"]
     done = await anyio.to_thread.run_sync(lambda: bot("list"))
     assert done.returncode == 1 and "no program token" in done.stderr, done.stderr

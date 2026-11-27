@@ -24,9 +24,12 @@ the version. An account has at most one open submission: starting another
 drops the first and its uploads, unless it declares the same files under
 the same name, which picks the first up where it left off.
 
-Throttle: Limits.per_day finalized submissions per account in any 24 hours
-(OBGL_BOT_SUBMITS_PER_DAY, default 1). Checked when a submission is made
-and again when it is finalized; a refused finalize leaves it open.
+Throttle: Limits.per_hour finalized submissions per account in any hour
+(OBGL_BOT_SUBMITS_PER_HOUR, default 1). Checked when a submission is made
+and again when it is finalized; a refused finalize leaves it open. The
+account's record is written only by conditional updates (AuthStore.update),
+so the version that would go over the limit is refused even when two
+servers finalize at once.
 """
 
 from __future__ import annotations
@@ -46,6 +49,7 @@ from bot_files import BotFiles, bot_key, upload_key
 from oauth.store import AuthStore
 
 DAY = 24 * 60 * 60
+HOUR = 60 * 60
 OPEN_FOR = 7 * DAY  # an open submission lasts as long as a Cloud Storage upload session
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -58,7 +62,7 @@ class Limits:
     data_bytes: int = 16 << 30
     data_files: int = 1000
     path_bytes: int = 200
-    per_day: int = 1
+    per_hour: int = 1  # finalized submissions per account in any hour (0: no limit)
 
 
 class Refused(Exception):
@@ -94,8 +98,10 @@ class GoBotCheck:
         raise RuntimeError(f"botcheck failed (exit {done.returncode}): {reason[-500:]}")
 
 
-def _now_iso(t: float) -> str:
-    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(t))
+def _closed(index: dict | None, sid: str) -> dict:
+    """The account's record with submission sid no longer its open one."""
+    index = index or {"versions": [], "open": None}
+    return {**index, "open": None if index.get("open") == sid else index.get("open")}
 
 
 class Bots:
@@ -119,14 +125,17 @@ class Bots:
         return await self.store.get("account-bots", account) or {"versions": [], "open": None}
 
     def _throttle(self, index: dict) -> None:
-        if self.limits.per_day <= 0:
+        """Refused(429) if the account has finalized its limit in the last hour."""
+        n = self.limits.per_hour
+        if n <= 0:
             return
         now = self.clock()
-        recent = sorted(v["created_at"] for v in index["versions"] if v["created_at"] > now - DAY)
-        if len(recent) >= self.limits.per_day:
-            at = recent[-self.limits.per_day] + DAY
-            raise Refused(429, [f"one account may submit {self.limits.per_day} bot version(s) a day: "
-                                f"the next can be finalized from {_now_iso(at)}"], retry_at=int(at))
+        recent = sorted(v["created_at"] for v in index["versions"] if v["created_at"] > now - HOUR)
+        if len(recent) >= n:
+            at = recent[-n] + HOUR
+            bots = "one bot" if n == 1 else f"{n} bots"
+            raise Refused(429, [f"You can submit {bots} an hour: try again at "
+                                f"{time.strftime('%H:%M UTC', time.gmtime(at))}"], retry_at=int(at))
 
     def _manifest(self, body: Mapping) -> tuple[str, dict, list[dict]]:
         """(name, wasm, data) from a submission's JSON, or Refused with every problem in it."""
@@ -197,8 +206,7 @@ class Bots:
             sub = {"account": account, "name": name, "wasm": wasm, "data": data, "state": "open",
                    "created_at": now, "expires_at": now + OPEN_FOR}
             await self.store.put("bot-submissions", sid, sub)
-            index["open"] = sid
-            await self.store.put("account-bots", account, index)
+            await self.store.update("account-bots", account, lambda i: {**(i or {"versions": []}), "open": sid})
             return await self._status(sid, sub)
 
     async def status(self, account: str, sid: str) -> dict:
@@ -210,7 +218,7 @@ class Bots:
         table: its ranked table (with on_finalized)}.
         Refused(422) with the problems (and the submission rejected) if any
         file or the module is wrong; Refused(409) if it is not open,
-        Refused(429) if the account is over its throttle (it stays open)."""
+        Refused(429) if the account is over its hourly limit (it stays open)."""
         async with self._lock(account):
             sub = await self._own(account, sid)
             if sub["state"] != "open":
@@ -221,19 +229,27 @@ class Bots:
             problems = await anyio.to_thread.run_sync(lambda: self._verify(account, sid, sub))
             if problems:
                 await self._drop(sid, sub, "rejected", problems)
-                index["open"] = None
-                await self.store.put("account-bots", account, index)
+                await self.store.update("account-bots", account, lambda i: _closed(i, sid))
                 raise Refused(422, problems)
-            version = 1 + max((v["version"] for v in index["versions"] if v["name"] == sub["name"]), default=0)
             now = int(self.clock())
-            entry = {"name": sub["name"], "version": version, "submission": sid, "created_at": now, "wasm": sub["wasm"],
-                     "data_files": len(sub["data"]), "data_bytes": sum(f["size"] for f in sub["data"])}
+            filed = {}
+
+            def file(i):
+                # The account's versions as they are now: another server may
+                # have filed one since the throttle's look above.
+                i = i or {"versions": [], "open": None}
+                self._throttle(i)
+                version = 1 + max((v["version"] for v in i["versions"] if v["name"] == sub["name"]), default=0)
+                filed["entry"] = {"name": sub["name"], "version": version, "submission": sid, "created_at": now,
+                                  "wasm": sub["wasm"], "data_files": len(sub["data"]),
+                                  "data_bytes": sum(f["size"] for f in sub["data"])}
+                return {**_closed(i, sid), "versions": [*i["versions"], filed["entry"]]}
+
+            await self.store.update("account-bots", account, file)
+            entry = filed["entry"]
             sub = {k: v for k, v in sub.items() if k not in ("expires_at", "sessions")}
-            sub.update(state="finalized", version=version, finalized_at=now)
+            sub.update(state="finalized", version=entry["version"], finalized_at=now)
             await self.store.put("bot-submissions", sid, sub)
-            index["versions"].append(entry)
-            index["open"] = None
-            await self.store.put("account-bots", account, index)
             if self.on_finalized is None:
                 return {"bot": entry}
             return {"bot": entry, "table": await self.on_finalized(account, entry)}

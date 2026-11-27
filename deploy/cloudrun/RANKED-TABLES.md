@@ -15,9 +15,10 @@ tables), and reads the result at `/table/results/<id>` or from the MCP tool
   Firestore (`oauth_ranked-tables`), appends it to the queue
   (`oauth_ranked-queue/queue`) and to the account's list
   (`oauth_account-ranked`), and starts the job (Running it). It serves the
-  results from the records bucket, mounted read-only: `OBGL_RECORDS=/records` makes the table server read
-  `/records/<id>.json` (entrypoint.sh's `-records`).
-- **The job** (`ranked-job.yaml`, obgl-ranked) plays: the same image, run as
+  results from the records bucket, mounted read-only:
+  `OBGL_RECORDS=/records` makes the table server read `/records/<id>.json`
+  (entrypoint.sh's `-records`).
+- **The job** (`ranked-job.yaml`, tmg-obgl-ranked) plays: the same image, run as
   `python ./mcp/ranked.py run`. It plays the queue's head under a lease it
   renews every 40 s, writes the record to the records bucket, marks the
   table done or failed, takes it off the queue, and goes on until the queue
@@ -50,15 +51,19 @@ table. There is no leaderboard.
   (Cloud Storage FUSE): a bot reads its data on demand, nothing is copied
   to the job's memory-backed disk. The runner checks each file's size
   there before it plays.
-- **Records**, new: e.g. `PROJECT-obgl-records`, the service's region,
-  Standard class, uniform access, public access prevention, versioning
-  off, soft delete off. One object per finished table, `<id>.json`
-  (20-60 KB). The job mounts it read-write at `/records`; the service
-  read-only at `/records`. Records are kept until deleted (no lifecycle).
+- **Records**, new: `tmg-obgl-records`, the service's region, Standard
+  class, uniform access, public access prevention, versioning off, soft
+  delete on (the default, 7 days). One object per finished table,
+  `<id>.json` (20-60 KB). The job mounts it read-write at `/records`; the
+  service read-only at `/records`. Records are kept until deleted (no
+  lifecycle). A deleted record (an account's deletion, or the temporary
+  object each record write renames) can be restored for 7 days and is
+  billed for them.
 
 ## IAM
 
-A dedicated service account for the job, `RANKED_SERVICE_ACCOUNT`:
+A dedicated service account for the job,
+`tmg-obgl-ranked@PROJECT.iam.gserviceaccount.com`:
 
 - `roles/datastore.user` on the project (the queue, the tables, the bots'
   versions in Firestore);
@@ -66,12 +71,12 @@ A dedicated service account for the job, `RANKED_SERVICE_ACCOUNT`:
 - `roles/storage.objectUser` on the records bucket (a record is written to
   a temporary object and renamed: create and delete).
 
-The service's account gets `roles/storage.objectViewer` on the records
-bucket and, to start the job (Running it), `roles/run.invoker` on the job
-only:
+The service's account (`obgl-run@PROJECT.iam.gserviceaccount.com`) gets
+`roles/storage.objectViewer` on the records bucket and, to start the job
+(Running it), `roles/run.invoker` on the job only:
 
-    gcloud run jobs add-iam-policy-binding obgl-ranked --project PROJECT --region REGION \
-        --member serviceAccount:SERVICE_ACCOUNT --role roles/run.invoker
+    gcloud run jobs add-iam-policy-binding tmg-obgl-ranked --project PROJECT --region REGION \
+        --member serviceAccount:obgl-run@PROJECT.iam.gserviceaccount.com --role roles/run.invoker
 
 ## Create it
 
@@ -80,9 +85,9 @@ only:
 with IMAGE the service's image (the same tag: the job's `ranked.py` and
 the service's must agree on the queue), and the service deployed with
 
-    --add-volume name=records,type=cloud-storage,bucket=RECORDS_BUCKET,readonly=true
+    --add-volume name=records,type=cloud-storage,bucket=tmg-obgl-records,readonly=true
     --add-volume-mount volume=records,mount-path=/records
-    --set-env-vars OBGL_RECORDS=/records,OBGL_RANKED_JOB=projects/PROJECT/locations/REGION/jobs/obgl-ranked
+    --set-env-vars OBGL_RECORDS=/records,OBGL_RANKED_JOB=projects/PROJECT/locations/REGION/jobs/tmg-obgl-ranked
 
 (Cloud Storage volumes need `--execution-environment gen2` on the
 service too.)
@@ -90,9 +95,10 @@ service too.)
 ## Running it
 
 The service starts the job. With `OBGL_RANKED_JOB` set on the service
-(`projects/PROJECT/locations/REGION/jobs/obgl-ranked`), each table it
+(`projects/PROJECT/locations/REGION/jobs/tmg-obgl-ranked`), each table it
 queues starts an execution (the Run Admin API's `jobs.run`, as the
-service's account), unless a runner holds the queue's head under a live
+service's account, which needs `roles/run.invoker` on `tmg-obgl-ranked`:
+IAM), unless a runner holds the queue's head under a live
 lease: that runner plays on to the end of the queue, the new table
 included. A start that fails is logged (`ranked: table <id> is queued, but
 its runner did not start`, with the API's answer) and the table stays
@@ -103,12 +109,12 @@ no bot submissions, or with `OBGL_RANKED_RUNNER` (the job is the runner).
 
 By hand:
 
-    gcloud run jobs execute obgl-ranked --project PROJECT --region REGION
+    gcloud run jobs execute tmg-obgl-ranked --project PROJECT --region REGION
 
 An execution started while another runs sees the head's live lease and
-exits; the running one plays the rest of the queue. So does the second of
-two tables queued before the first's execution has claimed the head: it
-starts an execution that finds the lease and exits. A runner that dies
+exits; the running one plays the rest of the queue. When two tables are
+queued before the first one's execution has claimed the head, each starts
+an execution; the later one finds the lease and exits. A runner that dies
 leaves its lease live for 2 minutes: a table queued in that time starts
 nothing, and the queue waits for the next table queued or a start by hand,
 which plays the dead runner's table again.

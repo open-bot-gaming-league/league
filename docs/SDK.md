@@ -74,7 +74,7 @@ not syntax. Before anything else, add `obgl-token.txt` to the workspace's
    for the bots on this computer; a ranked table is the league's answer.
    Build the bot as wasm, try it in the sandbox, and submit it, as
    `sdk/README.md` says ("Build your bot as wasm and try it", "Submit your
-   bot"): one submission a day. Each version plays a ranked table from the
+   bot"): one submission an hour. Each version plays a ranked table from the
    queue: their bot and ten seats drawn from the house bots, a million
    hands a pair. Tell your user it is queued; the agent at their table
    reads the result (`table_results`), and the table page shows it under

@@ -34,7 +34,7 @@ module (`botcheck`). Only then is a file moved from `uploads/` to `bots/`.
 
 ## Bucket
 
-One bucket for submitted bots, e.g. `PROJECT-obgl-bots`:
+One bucket for submitted bots, `tmg-obgl-bots`:
 
 - **Location**: the service's region (`REGION`), Standard class.
 - **Access**: uniform bucket-level access; public access prevention enforced.
@@ -43,8 +43,7 @@ One bucket for submitted bots, e.g. `PROJECT-obgl-bots`:
 - **Soft delete**: off (`--soft-delete-duration=0`). Every accepted file is
   written to `uploads/`, copied to `bots/` and deleted from `uploads/`; with
   the default 7-day soft delete each deleted upload would be billed for 7
-  more days (up to 16 GB a submission). Keeping it on gives an undo for
-  `bots/`, at that cost.
+  more days (up to 16 GB a submission). A deleted bot file is gone at once.
 - **Lifecycle**: delete objects with prefix `uploads/` older than 8 days.
   An open submission lasts 7 days (a session's life), and an abandoned one
   leaves its finished uploads there; nothing else ever needs them.
@@ -71,8 +70,8 @@ URLs. The arena's runner, when it reads bots' files, needs
 The image already has the module check (`/app/arena/bin/botcheck`,
 `OBGL_BOTCHECK`). The deploy sets:
 
-    OBGL_BOT_STORE=gcs:PROJECT-obgl-bots
-    OBGL_BOT_SUBMITS_PER_DAY=1     # the default; 0 is no limit
+    OBGL_BOT_STORE=gcs:tmg-obgl-bots
+    OBGL_BOT_SUBMITS_PER_HOUR=1    # per account; the default; 0 is no limit
 
 and raises the request timeout (`gcloud run deploy ... --timeout 900`).
 Finalize is one request that reads every new file back to hash it: 16 GB
@@ -80,11 +79,13 @@ at the 100-200 MB/s a single stream from Cloud Storage should give is
 80-170 s, before the module check; the default 300 s is too close.
 Without `OBGL_BOT_STORE` the submission routes answer 503.
 
-The throttle (one finalized submission per account per day) and the
-one-open-submission rule are enforced under a lock in the server's
-memory, which is sound only with one instance: another reason to keep
-`--max-instances 1` (CLOUDRUN.md). With more instances, move them into a
-Firestore transaction.
+The hourly limit (one finalized submission per account per hour; over
+it a coach is told "You can submit one bot an hour: try again at HH:MM
+UTC") is checked in the account's record (`oauth_account-bots`) with a
+conditional write, so it holds with any number of instances. The
+one-open-submission rule is enforced under a lock in the server's memory,
+which is sound only with one instance: another reason to keep
+`--max-instances 1` (CLOUDRUN.md).
 
 ## Deleting an account
 
@@ -92,4 +93,4 @@ Firestore transaction.
 `oauth_bot-submissions`) with the rest, and prints the command for its
 files:
 
-    gcloud storage rm -r gs://BUCKET/bots/ACCOUNT/ gs://BUCKET/uploads/ACCOUNT/
+    gcloud storage rm -r gs://tmg-obgl-bots/bots/ACCOUNT/ gs://tmg-obgl-bots/uploads/ACCOUNT/

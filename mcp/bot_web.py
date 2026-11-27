@@ -25,7 +25,7 @@ Configuration (environment):
 
     OBGL_BOT_STORE            local:<dir> | gcs:<bucket>; unset: no bot submissions (the routes answer 503)
     OBGL_BOTCHECK             the botcheck binary (poker/arena/cmd/botcheck); required with a store
-    OBGL_BOT_SUBMITS_PER_DAY  finalized submissions an account may make in 24 hours (default 1; 0: no limit)
+    OBGL_BOT_SUBMITS_PER_HOUR finalized submissions an account may make in an hour (default 1; 0: no limit)
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ def bots_from_env(env: Mapping[str, str], store: AuthStore, public_url: str,
     if not command:
         raise ValueError("OBGL_BOT_STORE is set but OBGL_BOTCHECK is not: the server cannot check a submitted module")
     limits = Limits()
-    if env.get("OBGL_BOT_SUBMITS_PER_DAY"):
-        limits = replace(limits, per_day=int(env["OBGL_BOT_SUBMITS_PER_DAY"]))
+    if env.get("OBGL_BOT_SUBMITS_PER_HOUR"):
+        limits = replace(limits, per_hour=int(env["OBGL_BOT_SUBMITS_PER_HOUR"]))
     return Bots(store, files, GoBotCheck(command), limits, on_finalized=ranked.enqueue if ranked else None)
 
 

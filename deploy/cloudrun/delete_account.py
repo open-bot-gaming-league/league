@@ -59,13 +59,13 @@ def main():
     for collection, doc_id in refs:
         print(f"{'delete' if args.delete else 'would delete'} {collection}/{doc_id}")
     if any(c in ("oauth_account-bots", "oauth_bot-submissions") for c, _ in refs):
-        print(f"and its bots' files: gcloud storage rm -r gs://BUCKET/bots/{args.account}/ gs://BUCKET/uploads/{args.account}/",
+        print(f"and its bots' files: gcloud storage rm -r gs://tmg-obgl-bots/bots/{args.account}/ gs://tmg-obgl-bots/uploads/{args.account}/",
               file=sys.stderr)
     records = [doc_id for c, doc_id in refs if c == "oauth_ranked-tables"]
     if records:
         # A ranked table's record names its owner's account (RANKED-TABLES.md).
         print("and its ranked tables' records: gcloud storage rm "
-              + " ".join(f"gs://RECORDS_BUCKET/{t}.json" for t in records), file=sys.stderr)
+              + " ".join(f"gs://tmg-obgl-records/{t}.json" for t in records), file=sys.stderr)
     if args.delete:
         for collection, doc_id in refs:
             db.collection(collection).document(doc_id).delete()

@@ -16,7 +16,7 @@ from ranked import QUEUE, RankedTables
 from ranked_job import CloudRunJob, starter_from_env
 
 ME = "github:1001"
-JOB = "projects/p/locations/us-west1/jobs/obgl-ranked"
+JOB = "projects/p/locations/us-west1/jobs/tmg-obgl-ranked"
 
 
 class Clock:
@@ -105,7 +105,7 @@ def test_the_job_comes_from_the_environment():
     assert starter_from_env({"OBGL_RANKED_JOB": ""}) is None
     job = starter_from_env({"OBGL_RANKED_JOB": JOB})
     assert isinstance(job, CloudRunJob) and job.name == JOB
-    for bad in ("obgl-ranked", "projects/p/locations/us-west1/jobs/", "projects/p/jobs/obgl-ranked",
+    for bad in ("tmg-obgl-ranked", "projects/p/locations/us-west1/jobs/", "projects/p/jobs/tmg-obgl-ranked",
                 f"https://run.googleapis.com/v2/{JOB}"):
         with pytest.raises(ValueError, match="projects/<project>/locations/<region>/jobs/<name>"):
             starter_from_env({"OBGL_RANKED_JOB": bad})

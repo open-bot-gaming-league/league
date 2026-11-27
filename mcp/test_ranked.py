@@ -116,7 +116,7 @@ def _league(built, tmp_path, records, in_process):
         ranked = RankedTables(store)
         runner = Runner(ranked, built["rankedtable"], built["guests"], files.root, RecordDir(records), TINY, lease=30)
         made.update(ranked=ranked, runner=runner)
-        bots = Bots(store, files, GoBotCheck(built["botcheck"]), Limits(data_bytes=8 << 20, per_day=0),
+        bots = Bots(store, files, GoBotCheck(built["botcheck"]), Limits(data_bytes=8 << 20, per_hour=0),
                     on_finalized=ranked.enqueue)
         return Wiring(bots, ranked, runner if in_process else None)
 
@@ -265,7 +265,7 @@ async def test_a_runner_stopped_mid_queue_loses_no_table(built, tmp_path):
         """One process's view: the store file loaded afresh, a runner on it."""
         store = FileStore(path)
         ranked = RankedTables(store)
-        bots = Bots(store, files, lambda wasm: None, Limits(per_day=0), on_finalized=ranked.enqueue)
+        bots = Bots(store, files, lambda wasm: None, Limits(per_hour=0), on_finalized=ranked.enqueue)
         return store, bots, Runner(ranked, built["rankedtable"], built["guests"], files.root, RecordDir(str(records)), TINY)
 
     store, bots, runner = opened()
@@ -326,7 +326,7 @@ async def test_a_version_whose_files_are_gone_fails_with_a_reason(built, tmp_pat
     store = FileStore(str(tmp_path / "auth.json"))
     files = LocalFiles(str(tmp_path / "store"), "http://league.test")
     ranked = RankedTables(store)
-    bots = Bots(store, files, lambda wasm: None, Limits(per_day=0), on_finalized=ranked.enqueue)
+    bots = Bots(store, files, lambda wasm: None, Limits(per_hour=0), on_finalized=ranked.enqueue)
     tid = await _version(bots, "github:1", built["example"])
     os.remove(os.path.join(files.root, "bots", "github:1", hashlib.sha256(built["example"]).hexdigest()))
     await Runner(ranked, built["rankedtable"], built["guests"], files.root, RecordDir(str(tmp_path / "r")), TINY).drain()

@@ -2,7 +2,7 @@
 // submitted. A submitted bot is a WebAssembly module (your bot built with
 // GOOS=wasip1) and, if it reads any, a folder of data files: at most 64 MB
 // of module and 16 GB of data. The league checks the module and keeps it
-// as the next version of the bot by that name. One submission a day.
+// as the next version of the bot by that name. One submission an hour.
 //
 //	go run ./sdk/cmd/bot submit -name mybot -wasm bot.wasm [-data dir]
 //	go run ./sdk/cmd/bot list

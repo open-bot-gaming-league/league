@@ -5,13 +5,17 @@ upload protocol. The HTTP routes and the SDK's client are test_bot_submit.py's."
 import hashlib
 import os
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import anyio
+import anyio.to_thread
 import pytest
 
 from bot_files import UPLOAD_PATH, LocalFiles, bot_key
-from bots import DAY, Bots, Limits, Refused
+from bot_web import bots_from_env
+from bots import DAY, HOUR, Bots, Limits, Refused
 from oauth.store import MemoryStore
 
 ALICE, BOB = "github:1001", "github:2002"
@@ -104,7 +108,7 @@ async def test_the_next_version_uploads_only_what_the_account_does_not_have(env)
     bots, clock = env
     data = {"big.bin": b"x" * 1000}
     await submit(bots, ALICE, data=data)
-    clock.t += DAY
+    clock.t += HOUR
     wasm2 = WASM + b"\0\x04name"  # another valid module (a custom section)
     sub = await bots.create(ALICE, manifest(wasm=wasm2, data=data))
     assert [u["sha256"] for u in sub["uploads"]] == [entry(wasm2)["sha256"]]
@@ -202,13 +206,13 @@ async def test_a_filed_version_is_handed_on(env):
 
 
 @pytest.mark.asyncio
-async def test_one_version_a_day_per_account(env):
+async def test_one_version_an_hour_per_account(env):
     bots, clock = env
     await submit(bots, ALICE)
-    clock.t += DAY - 60
+    clock.t += HOUR - 60
     with pytest.raises(Refused) as e:
         await bots.create(ALICE, manifest(name="other"))
-    assert e.value.status == 429 and "from 2027-01-16 08:00 UTC" in e.value.problems[0]
+    assert e.value.status == 429 and e.value.problems == ["You can submit one bot an hour: try again at 09:00 UTC"]
     assert e.value.extra == {"retry_at": int(clock.t + 60)}
     await submit(bots, BOB)  # the limit is per account
     clock.t += 60
@@ -220,7 +224,7 @@ async def test_one_version_a_day_per_account(env):
 @pytest.mark.asyncio
 async def test_a_refused_finalize_over_the_limit_leaves_the_submission_open(env, tmp_path):
     clock = Clock()
-    bots = Bots(MemoryStore(), LocalFiles(str(tmp_path / "b2"), "http://league.test"), accept, Limits(per_day=1), clock)
+    bots = Bots(MemoryStore(), LocalFiles(str(tmp_path / "b2"), "http://league.test"), accept, Limits(per_hour=1), clock)
     sub = await bots.create(ALICE, manifest())
     upload_all(bots, sub, by_sha(WASM))
     await bots.store.put("account-bots", ALICE, {**await bots.store.get("account-bots", ALICE),
@@ -229,7 +233,7 @@ async def test_a_refused_finalize_over_the_limit_leaves_the_submission_open(env,
         await bots.finalize(ALICE, sub["id"])
     assert e.value.status == 429
     assert (await bots.status(ALICE, sub["id"]))["state"] == "open"
-    unlimited = Bots(bots.store, bots.files, accept, Limits(per_day=0), clock)
+    unlimited = Bots(bots.store, bots.files, accept, Limits(per_hour=0), clock)
     assert (await unlimited.finalize(ALICE, sub["id"]))["bot"]["version"] == 1
 
 
@@ -285,3 +289,39 @@ def test_local_upload_sessions_resume_and_keep_to_their_size(tmp_path):
     files.delete(key.replace("ab", "ef"))  # ends the session too
     assert files.put(other, "bytes */4", None)[0] == 404
     assert os.listdir(os.path.join(files.root, ".sessions")) == []
+
+
+@pytest.mark.asyncio
+async def test_the_hourly_limit_holds_across_servers_and_is_worded_for_its_number(tmp_path):
+    clock, store = Clock(), MemoryStore()
+    files = LocalFiles(str(tmp_path / "bots"), "http://league.test")
+    checking, go_on = threading.Event(), threading.Event()
+
+    def slow(wasm):  # server one's check: waits while server two finalizes
+        checking.set()
+        go_on.wait(10)
+        return None
+
+    one = Bots(store, files, slow, Limits(per_hour=2), clock)
+    two = Bots(store, files, accept, Limits(per_hour=2), clock)  # another server, the same store
+    await submit(two, ALICE)
+    second = await one.create(ALICE, manifest(name="b"))
+    upload_all(one, second, by_sha(WASM))
+    async with anyio.create_task_group() as tg:
+        async def first():
+            with pytest.raises(Refused) as e:
+                await one.finalize(ALICE, second["id"])  # past its own look at the limit, then over it
+            assert e.value.status == 429 and e.value.problems == ["You can submit 2 bots an hour: try again at 09:00 UTC"]
+        tg.start_soon(first)
+        await anyio.to_thread.run_sync(checking.wait, 10)
+        await store.update("account-bots", ALICE, lambda i: {**i, "open": None})  # server two's own submission
+        await submit(two, ALICE, name="c")
+        go_on.set()
+    assert [v["name"] for v in (await two.list(ALICE))["bots"]] == ["c", "mybot"]
+    assert (await one.status(ALICE, second["id"]))["state"] == "open"  # refused, kept
+
+def test_the_hourly_limit_comes_from_the_environment(tmp_path):
+    base = {"OBGL_BOT_STORE": f"local:{tmp_path}", "OBGL_BOTCHECK": "/bin/false"}
+    assert bots_from_env(base, MemoryStore(), "http://league.test").limits.per_hour == 1
+    assert bots_from_env({**base, "OBGL_BOT_SUBMITS_PER_HOUR": "3"}, MemoryStore(), "http://league.test").limits.per_hour == 3
+    assert bots_from_env({**base, "OBGL_BOT_SUBMITS_PER_HOUR": "0"}, MemoryStore(), "http://league.test").limits.per_hour == 0

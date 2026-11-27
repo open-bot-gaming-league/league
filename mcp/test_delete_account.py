@@ -81,8 +81,8 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert await store.get("account-tables", ME) is None
     assert await store.get("account-programs", ME) is None
     assert await store.get("account-bots", ME) is None and await store.get("bot-submissions", f"{ME}-bot") is None
-    assert "gs://BUCKET/bots/github:1/" in done.stderr
-    assert f"gs://RECORDS_BUCKET/{ME}-table.json" in done.stderr
+    assert "gs://tmg-obgl-bots/bots/github:1/" in done.stderr
+    assert f"gs://tmg-obgl-records/{ME}-table.json" in done.stderr
     assert await store.get("ranked-tables", f"{ME}-table") is None and await store.get("account-ranked", ME) is None
     assert await store.get("account-badges", ME) is None
     assert await store.get("table-sessions", f"{ME}-s0") is None

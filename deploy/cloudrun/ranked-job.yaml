@@ -4,12 +4,11 @@
 #
 #   gcloud run jobs replace deploy/cloudrun/ranked-job.yaml --project PROJECT --region REGION
 #
-# Fill in IMAGE (the service's image, the same tag), PROJECT,
-# RANKED_SERVICE_ACCOUNT, BOTS_BUCKET and RECORDS_BUCKET.
+# Fill in IMAGE (the service's image, the same tag) and PROJECT.
 apiVersion: run.googleapis.com/v1
 kind: Job
 metadata:
-  name: obgl-ranked
+  name: tmg-obgl-ranked
   annotations:
     run.googleapis.com/launch-stage: GA
 spec:
@@ -34,7 +33,7 @@ spec:
           # rankedtable's own limit is OBGL_RANKED_TIMEOUT (4 h, the table's
           # wall); the task's must be longer, for a queue of several.
           timeoutSeconds: 86400
-          serviceAccountName: RANKED_SERVICE_ACCOUNT
+          serviceAccountName: tmg-obgl-ranked@PROJECT.iam.gserviceaccount.com
           containers:
             - image: IMAGE
               command: ["python", "./mcp/ranked.py", "run"]
@@ -76,9 +75,9 @@ spec:
                 driver: gcsfuse.run.googleapis.com
                 readOnly: true
                 volumeAttributes:
-                  bucketName: BOTS_BUCKET
+                  bucketName: tmg-obgl-bots
             - name: records
               csi:
                 driver: gcsfuse.run.googleapis.com
                 volumeAttributes:
-                  bucketName: RECORDS_BUCKET
+                  bucketName: tmg-obgl-records
