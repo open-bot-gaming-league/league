@@ -136,3 +136,30 @@ func TestHouseMatchesTheTable(t *testing.T) {
 		t.Fatalf("only %d decisions compared", decisions)
 	}
 }
+
+// One loaded house bot, played in several matches at once through Clones:
+// each its own hands, the same files (go test -race checks the sharing).
+func TestHouseClonesPlayAtOnce(t *testing.T) {
+	h := testHouse(t, engine.UniformStrategy{})
+	cs := []Contender{
+		{"house", func() (Bot, error) { return h.Clone(), nil }},
+		{"random", func() (Bot, error) { return Random{}, nil }},
+		{"caller", func() (Bot, error) { return caller{}, nil }},
+		{"tight", func() (Bot, error) { return tight{}, nil }},
+	}
+	shared, err := Matrix(cs, 300, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same numbers as fresh loads, one match at a time.
+	for j := 1; j < len(cs); j++ {
+		b, _ := cs[j].New()
+		want, err := Match(h.Clone(), b, 300, 4)
+		if err != nil || shared.Cells[0][j] != want {
+			t.Errorf("house vs %s: shared %+v, alone %+v (%v)", cs[j].Name, shared.Cells[0][j], want, err)
+		}
+	}
+	if err := h.Clone().Close(); err != nil {
+		t.Errorf("a clone's Close: %v", err)
+	}
+}

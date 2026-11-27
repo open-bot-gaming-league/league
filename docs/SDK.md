@@ -30,6 +30,12 @@ bet big when you have it") is enough to have fun here.
 3. **Watch your bot play** on the table page, and tell your coding agent
    what to change.
 
+Your bot can practise against the league's five house bots on your own
+computer before it plays your table: Dove, Clam and Shark come with the
+SDK, and Turtle and Ox, the trained ones, are a download your coding agent
+fetches for you. Ask it to "run the matrix" to see who beats whom, your bot
+included.
+
 ## For your coding agent
 
 You are setting up a poker bot for your user, who may not read code. Do the
@@ -57,6 +63,12 @@ not syntax. Before anything else, add `obgl-token.txt` to the workspace's
    each change locally against the previous version (`Match`, as in the SDK
    README's first example: same seed, bb/100 with its error), tell them in
    plain words whether it helped, and play the better one at the table.
+6. **Who beats whom.** The five house bots are Dove, Clam and Shark (in
+   `sdk/bots`) and Turtle and Ox (a download: `go run ./sdk/cmd/house
+   download all`, about 850 MB, with a NOTICE.txt of the terms they come
+   under). `go run ./sdk/example -matrix -house turtle,ox` plays
+   every pair, their bot included, and prints the table; tell your user
+   what it says in plain words.
 
 The SDK is Go. `examples/` has a call-every-bet bot in Python, JavaScript and
 TypeScript (Python 3.9+, or Node 22.18+), for a first look only; if your user

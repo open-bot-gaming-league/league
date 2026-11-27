@@ -183,8 +183,8 @@ your bot into every kind of spot (a match fails on an illegal move).
 ## Opponents
 
 `bots.Dove`, `bots.Clam`, `bots.Shark` (`sdk/bots/`): three starter bots,
-one short file each, and with Turtle and Ox (below) the league's five
-house bots. `bots.ByName["clam"]()` builds one by id; `bots.Names` has
+one short file each, and with Turtle and Ox (a download, below) the
+league's five house bots. `bots.ByName["clam"]()` builds one by id; `bots.Names` has
 their names.
 
 - **Dove** (`dove.go`) never bluffs: it bets and raises in proportion to its
@@ -203,14 +203,14 @@ and `Match` each change against the last.
     go run ./sdk/cmd/matrix                    # the three starter bots, every pair
     go run ./sdk/example -matrix               # the same, with the example bot (myBot) in it
     go run ./sdk/cmd/matrix -hands 1000000     # tighter numbers (SE about 0.5 to 1), slower
-    go run ./sdk/cmd/matrix -house turtle=abs-200-200-200.bin,turtle-k200-1500.bp -house ox=abs-2000-2000-2000-p3.bin,ox-k2000-1e9.bp
+    go run ./sdk/cmd/matrix -house turtle -house ox   # after downloading them (below)
 
 Every pair plays a duplicate `Match` on the same seed (default 1, so
 everyone gets the same table), and the table shows bb/100 ± SE for the row
 bot against the column bot. A cell marked `~` is within 2 SE of even: too
 close to call at that many hands (`HeadToHead.Close` is the same rule, for
-your code); rerun with more `-hands` to separate the two. House bots join with `-house` when their files
-are on your disk. For a bot of your own, add one line to `roster` in
+your code); rerun with more `-hands` to separate the two. Turtle and Ox join with `-house turtle -house ox`
+once downloaded. For a bot of your own, add one line to `roster` in
 `sdk/cmd/matrix/main.go`, or call `sdk.Matrix` from your program with a
 `sdk.Contender` for it.
 
@@ -253,17 +253,26 @@ second at most: for thousands of hands use `Match`. `Table` also plays a
 table server you run yourself (`go run ./cmd/table`, which needs a house
 bot's files; see its package comment), where it starts a session.
 
-## If you have house-bot files
+## Turtle and Ox: download them
 
-The league's trained bots, Turtle and Ox, run here too, if their files are on your disk (a
-bucket file and a blueprint, hundreds of MB each; not in the repository,
-and nothing here downloads them):
+The league's trained bots, Turtle and Ox, are a download (about 850 MB for
+both, into a cache folder; `go run ./sdk/cmd/house where` prints it):
 
-    go run ./sdk/example -house-buckets abs-200-200-200.bin -house-blueprint turtle-k200-1500.bp
+    go run ./sdk/cmd/house download all        # Turtle and Ox; or: download turtle
+    go run ./sdk/cmd/matrix -house turtle -house ox
 
-In code, `sdk.LoadHouse(buckets, blueprint)` returns a Bot; `Close` it when
-done. It plays as at the table: its menu's bet sizes, reading other sizes as
-the menu sizes around them.
+The files come from the league repository's `house-bots-1` release, each
+checked against the sha256 in `sdk/house-bots.json`; a download picks up
+where it stopped, and a file that comes down wrong is deleted and named.
+NOTICE.txt, the terms the files come under, is downloaded with them: read
+it. The example takes them too: `go run ./sdk/example -house turtle,ox`,
+or with `-matrix`. `OBGL_HOUSE_CACHE` moves the cache.
+
+In code, `sdk.DownloadHouse(ctx, "all")` fetches them and
+`sdk.LoadHouseByID("turtle")` returns a Bot (`Close` it when done; `Clone`
+plays one load in several matches at once). `sdk.LoadHouse(buckets,
+blueprint)` opens files by path. A house bot plays as at the table: its
+menu's bet sizes, reading other sizes as the menu sizes around them.
 
 ## Files
 
@@ -274,6 +283,8 @@ the menu sizes around them.
 | `match.go` | `Match`, `Result` |
 | `matrix.go` | `Matrix`, `Contender`, `HeadToHead`: every pair, one table |
 | `house.go` | `House`, `LoadHouse` |
+| `house_download.go`, `house-bots.json` | `DownloadHouse`, `LoadHouseByID`: Turtle and Ox from the release, sha256-checked |
+| `cmd/house/` | the download command |
 | `table.go` | `Table`, the table client |
 | `bots/` | the starter bots |
 | `example/` | a bot to start from, and the command that runs it |

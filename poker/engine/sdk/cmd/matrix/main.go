@@ -4,7 +4,7 @@
 //
 //	go run ./sdk/cmd/matrix                              # the three starter bots
 //	go run ./sdk/cmd/matrix -bots dove,shark -hands 1000000
-//	go run ./sdk/cmd/matrix -house turtle=abs-200-200-200.bin,turtle-k200-1500.bp
+//	go run ./sdk/cmd/matrix -house turtle -house ox  # after: go run ./sdk/cmd/house download all
 //
 // Your own bot: go run ./sdk/example -matrix puts the example bot in the
 // table with the starters; for a bot of your own, add one line to roster
@@ -45,7 +45,7 @@ func main() {
 	hands := flag.Int("hands", 20000, "hands per pair; 1,000,000 separates close bots (SE about 0.5 to 1 bb/100; it takes a while)")
 	seed := flag.Uint64("seed", 1, "seed: the same seed plays the same cards, so everyone gets the same table")
 	var house houses
-	flag.Var(&house, "house", "a house bot whose files are on disk, as name=buckets,blueprint (e.g. turtle=abs-200-200-200.bin,turtle-k200-1500.bp); repeat for more")
+	flag.Var(&house, "house", "a house bot: turtle or ox once downloaded (go run ./sdk/cmd/house download all), or name=buckets,blueprint for files of your own; repeat for more")
 	flag.Parse()
 	log.SetFlags(0)
 	cs, err := contenders(*list, house)
@@ -58,6 +58,28 @@ func main() {
 	}
 	fmt.Printf("bb/100 for the row bot against the column bot, %d hands a pair, seed %d\n\n", *hands, *seed)
 	fmt.Fprint(os.Stdout, t)
+}
+
+// openHouse loads a -house: a downloaded house bot by id ("turtle"), or
+// name=buckets,blueprint for files of your own.
+func openHouse(spec string) (*sdk.House, string, error) {
+	name, files, explicit := strings.Cut(spec, "=")
+	if !explicit {
+		h, err := sdk.LoadHouseByID(spec)
+		if err != nil {
+			return nil, "", err
+		}
+		return h, sdk.Houses().Bots[spec].Name, nil
+	}
+	buckets, blueprint, ok := strings.Cut(files, ",")
+	if !ok || name == "" || buckets == "" || blueprint == "" {
+		return nil, "", fmt.Errorf("-house %q: want a house bot's id (turtle, ox) or name=buckets,blueprint", spec)
+	}
+	h, err := sdk.LoadHouse(buckets, blueprint)
+	if err != nil {
+		return nil, "", fmt.Errorf("-house %s: %w", name, err)
+	}
+	return h, name, nil
 }
 
 // contenders is the bots named in list, then the house bots.
@@ -78,15 +100,13 @@ func contenders(list string, house []string) ([]sdk.Contender, error) {
 		cs = append(cs, sdk.Contender{Name: name, New: func() (sdk.Bot, error) { return newBot(), nil }})
 	}
 	for _, spec := range house {
-		name, files, ok := strings.Cut(spec, "=")
-		buckets, blueprint, ok2 := strings.Cut(files, ",")
-		if !ok || !ok2 || name == "" || buckets == "" || blueprint == "" {
-			return nil, fmt.Errorf("-house %q: want name=buckets,blueprint", spec)
+		h, name, err := openHouse(spec)
+		if err != nil {
+			return nil, err
 		}
-		if _, err := os.Stat(blueprint); err != nil {
-			return nil, fmt.Errorf("-house %s: %w", name, err)
-		}
-		cs = append(cs, sdk.Contender{Name: name, New: func() (sdk.Bot, error) { return sdk.LoadHouse(buckets, blueprint) }})
+		// One load per run, shared: each pair plays a Clone (its own hands,
+		// the same files). On Windows a load reads the files whole.
+		cs = append(cs, sdk.Contender{Name: name, New: func() (sdk.Bot, error) { return h.Clone(), nil }})
 	}
 	if len(cs) < 2 {
 		return nil, fmt.Errorf("a matrix needs at least two bots, not %d", len(cs))

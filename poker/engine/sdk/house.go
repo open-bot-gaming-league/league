@@ -14,7 +14,8 @@ import (
 // them (engine.TreeView).
 //
 // The files are large (hundreds of MB) and are not part of the
-// repository; LoadHouse only opens files already on disk.
+// repository: DownloadHouse fetches Turtle's and Ox's into a cache, and
+// LoadHouseByID loads them from there; LoadHouse opens files by path.
 type House struct {
 	g     *engine.Game
 	bp    *engine.Blueprint
@@ -44,8 +45,20 @@ func LoadHouse(buckets, blueprint string) (*House, error) {
 	return &House{g: g, bp: bp, close: func() error { return errors.Join(bp.Close(), closeGame()) }}, nil
 }
 
-// Close releases the files.
-func (b *House) Close() error { return b.close() }
+// Close releases the files. A Clone's Close does nothing: the files are
+// the original's.
+func (b *House) Close() error {
+	if b.close == nil {
+		return nil
+	}
+	return b.close()
+}
+
+// Clone is the same house bot with its own state, sharing the loaded
+// files: what playing it in several matches at once takes (one House holds
+// the hands it is in the middle of; the files themselves are only read).
+// Close the original, after the clones are done.
+func (b *House) Clone() *House { return &House{g: b.g, bp: b.bp} }
 
 // Act rebuilds the hand as the seat sees it (the cards it cannot see
 // are stand-ins, which the bot never looks at), lets the bot's view of
