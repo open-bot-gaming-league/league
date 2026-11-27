@@ -58,12 +58,21 @@ def _part(kind: str, value: str, pattern: re.Pattern) -> str:
     return value
 
 
+def _generation(st: os.stat_result) -> str:
+    """A local file's generation: a session writes a whole file anew (a new inode)."""
+    return f"{st.st_ino}-{st.st_mtime_ns}-{st.st_size}"
+
+
 def upload_key(account: str, submission: str, sha256: str) -> str:
     return f"uploads/{_part('account', account, _ACCOUNT)}/{_part('submission', submission, _HEX)}/{_part('sha256', sha256, _HEX)}"
 
 
 def bot_key(account: str, sha256: str) -> str:
     return f"bots/{_part('account', account, _ACCOUNT)}/{_part('sha256', sha256, _HEX)}"
+
+
+class Changed(Exception):
+    """A file is not the generation it was asked for: written again since it was looked at."""
 
 
 class BotFiles(Protocol):
@@ -77,12 +86,20 @@ class BotFiles(Protocol):
         """The size of the file at `key` once it is whole; None if there is none."""
         ...
 
-    def read(self, key: str) -> Iterator[bytes]:
-        """The file's bytes, a piece at a time."""
+    def stat(self, key: str) -> tuple[int, str] | None:
+        """(size, generation) of the file at `key` once it is whole, or
+        None: the generation names these bytes, and changes when anything
+        (another upload session) writes the key again."""
         ...
 
-    def promote(self, src: str, dst: str) -> None:
-        """Move the file at src to dst (replacing dst)."""
+    def read(self, key: str, generation: str | None = None) -> Iterator[bytes]:
+        """The file's bytes, a piece at a time; with a generation, those
+        bytes only (Changed if the file is not that generation now)."""
+        ...
+
+    def promote(self, src: str, dst: str, generation: str | None = None) -> None:
+        """Move the file at src to dst (replacing dst); with a generation,
+        only that generation of src (Changed if it is not)."""
         ...
 
     def delete(self, key: str) -> None:
@@ -120,20 +137,36 @@ class LocalFiles:
         return f"{self.public_url}{UPLOAD_PATH}{upload_id}"
 
     def size(self, key: str) -> int | None:
+        got = self.stat(key)
+        return None if got is None else got[0]
+
+    def stat(self, key: str) -> tuple[int, str] | None:
         try:
-            return os.stat(self._path(key)).st_size
+            st = os.stat(self._path(key))
         except FileNotFoundError:
             return None
+        return st.st_size, _generation(st)
 
-    def read(self, key: str) -> Iterator[bytes]:
-        with open(self._path(key), "rb") as f:
+    def read(self, key: str, generation: str | None = None) -> Iterator[bytes]:
+        try:
+            f = open(self._path(key), "rb")
+        except FileNotFoundError:
+            if generation is None:
+                raise
+            raise Changed(key) from None
+        with f:
+            if generation is not None and _generation(os.fstat(f.fileno())) != generation:
+                raise Changed(key)
             while piece := f.read(CHUNK):
                 yield piece
 
-    def promote(self, src: str, dst: str) -> None:
+    def promote(self, src: str, dst: str, generation: str | None = None) -> None:
         target = self._path(dst)
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.replace(self._path(src), target)
+        with self._lock:  # a session's write (it replaces its file whole) waits
+            if generation is not None and (self.stat(src) or (0, None))[1] != generation:
+                raise Changed(src)
+            os.replace(self._path(src), target)
         self._prune(os.path.dirname(self._path(src)))
 
     def delete(self, key: str) -> None:

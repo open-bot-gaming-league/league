@@ -313,17 +313,20 @@ A submitted bot is a WebAssembly module (at most 64 MB) and, if it reads
 any, a folder of data files (at most 16 GB in all). The league checks the
 module as the sandbox does (`poker/arena/cmd/botcheck`) and keeps it as
 the next version of the bot by that name: one submission per account an
-hour. `submit` waits while the league checks it, and prints the version,
-or why it was refused. The program token is the table's (`OBGL_TOKEN` or `obgl-token.txt`,
-as in "Play your table").
+hour, a refused one included. `submit` waits while the league checks it
+(up to 15 minutes), and prints the version, or why it was refused; `status`
+says where a submission stands. The program token is the table's
+(`OBGL_TOKEN` or `obgl-token.txt`, as in "Play your table").
 
     go run ./sdk/cmd/bot submit -name mybot -wasm mybot.wasm -data ./data
     go run ./sdk/cmd/bot list
+    go run ./sdk/cmd/bot status SUBMISSION
 
 It builds nothing: it uploads what you give it, one plain line a step,
 sizes first. A file the league already has for your account (the same
 data as your last version) is not sent again, and a stopped upload resumes:
-run the same submit again. In code: `Table.SubmitBot` and `Table.Bots`.
+run the same submit again. In code: `Table.SubmitBot`, `Table.Bots` and
+`Table.Submission`.
 
 Each version plays a ranked table from the league's queue: your bot and
 ten seats drawn from the house bots, every pair heads-up on a million
@@ -345,8 +348,8 @@ badge, worth points for the season; badges are kept across seasons.
 | `house_download.go`, `house-bots.json` | `DownloadHouse`, `LoadHouseByID`: Turtle and Ox from the release, sha256-checked |
 | `cmd/house/` | the download command |
 | `table.go` | `Table`, the table client |
-| `submit.go` | `SubmitBot`, `Bots`: submitting a bot, listing yours |
-| `cmd/bot/` | the submit and list command |
+| `submit.go` | `SubmitBot`, `Bots`, `Submission`: submitting a bot, listing yours, a submission's state |
+| `cmd/bot/` | `bot submit`, `bot list`, `bot status` |
 | `bots/` | the starter bots |
 | `wasmbot/` | `Register`: your bot as a WebAssembly module; `wasmbot/abi`, the wire format |
 | `example/` | a bot to start from, and the command that runs it |

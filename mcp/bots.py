@@ -57,7 +57,7 @@ from dataclasses import dataclass
 import anyio
 import anyio.to_thread
 
-from bot_files import BotFiles, bot_key, upload_key
+from bot_files import BotFiles, Changed, bot_key, upload_key
 from jobs import JobStarter, kick, taken
 from oauth.store import AuthStore
 
@@ -408,9 +408,9 @@ class Bots:
         return {f["sha256"]: f["size"] for f in [sub["wasm"], *sub["data"]]}
 
     async def _status(self, sid: str, sub: dict) -> dict:
-        """The submission as the API shows it; for each file still to
-        upload, its session (started now if it has none: call with the
-        account's lock held)."""
+        """The submission as the API shows it; while it is open, for each
+        file still to upload, its session (started now if it has none: call
+        with the account's lock held)."""
         sessions = sub.get("sessions", {})
 
         def look() -> tuple[list[dict], bool]:
@@ -428,7 +428,10 @@ class Bots:
                 out.append(u)
             return out, started
 
-        uploads, started = await anyio.to_thread.run_sync(look)
+        # Only an open submission's uploads are looked at: once it is asked
+        # to be checked, its files are the check's (and a coach's program
+        # asks after it every few seconds).
+        uploads, started = await anyio.to_thread.run_sync(look) if sub["state"] == "open" else ([], False)
         if started:
             sub["sessions"] = sessions
             await self.store.put("bot-submissions", sid, sub)
@@ -441,26 +444,36 @@ class Bots:
 
     def _verify(self, account: str, sid: str, sub: dict) -> list[str]:
         """Read back every uploaded file (sizes first, then the module, then
-        the data); promote them if all is well. The problems, or []."""
+        the data); promote them if all is well. The problems, or []. Each
+        upload is read and promoted as the generation its size was checked
+        at, so bytes written to it since (another upload session) are not
+        what is kept."""
+        try:
+            return self._verify_pinned(account, sid, sub)
+        except Changed:
+            return ["a file was uploaded again while the league checked it: submit the bot again"]
+
+    def _verify_pinned(self, account: str, sid: str, sub: dict) -> list[str]:
         names = {sub["wasm"]["sha256"]: "wasm"}
         for f in sub["data"]:
             names.setdefault(f["sha256"], f"data file {f['path']!r}")
-        todo, problems = [], []
+        todo, problems = [], []  # todo: (sha256, upload key, generation)
         for sha, size in self._blobs(sub).items():
             if self.files.size(bot_key(account, sha)) == size:
                 continue
             key = upload_key(account, sid, sha)
-            got = self.files.size(key)
+            got = self.files.stat(key)
             if got is None:
                 problems.append(f"{names[sha]}: not uploaded")
-            elif got != size:
-                problems.append(f"{names[sha]}: {got:,} bytes uploaded, {size:,} declared")
+            elif got[0] != size:
+                problems.append(f"{names[sha]}: {got[0]:,} bytes uploaded, {size:,} declared")
             else:
-                todo.append((sha, key))
+                todo.append((sha, key, got[1]))
         if problems:
             return problems
         wasm_sha = sub["wasm"]["sha256"]
-        module = b"".join(self.files.read(self._source(account, wasm_sha, todo)))
+        upload = next((t for t in todo if t[0] == wasm_sha), None)
+        module = b"".join(self.files.read(upload[1], upload[2]) if upload else self.files.read(bot_key(account, wasm_sha)))
         if hashlib.sha256(module).hexdigest() != wasm_sha:
             return ["wasm: its sha256 is not the one declared (the file changed, or the upload was damaged)"]
         if not module.startswith(WASM_MAGIC):
@@ -468,23 +481,19 @@ class Bots:
         reason = self.wasm_check(module)
         if reason:
             return [f"wasm: {reason}"]
-        for sha, key in todo:
+        for sha, key, generation in todo:
             if sha == wasm_sha:
                 continue
             h = hashlib.sha256()
-            for piece in self.files.read(key):
+            for piece in self.files.read(key, generation):
                 h.update(piece)
             if h.hexdigest() != sha:
                 problems.append(f"{names[sha]}: its sha256 is not the one declared (the file changed, or the upload was damaged)")
         if problems:
             return problems
-        for sha, key in todo:
-            self.files.promote(key, bot_key(account, sha))
+        for sha, key, generation in todo:
+            self.files.promote(key, bot_key(account, sha), generation)
         return []
-
-    def _source(self, account: str, sha: str, todo: list) -> str:
-        """Where the file with this sha256 is now: its upload, or the account's copy."""
-        return next((key for s, key in todo if s == sha), bot_key(account, sha))
 
     async def _drop(self, sid: str, sub: dict | None, state: str, problems: list[str] | None = None) -> None:
         """End an open submission: its uploads removed, its record kept as `state`."""

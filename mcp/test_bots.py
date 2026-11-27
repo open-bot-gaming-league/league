@@ -370,3 +370,54 @@ def test_the_hourly_limit_comes_from_the_environment(tmp_path):
     assert bots_from_env(base, MemoryStore(), "http://league.test").limits.per_hour == 1
     assert bots_from_env({**base, "OBGL_BOT_SUBMITS_PER_HOUR": "3"}, MemoryStore(), "http://league.test").limits.per_hour == 3
     assert bots_from_env({**base, "OBGL_BOT_SUBMITS_PER_HOUR": "0"}, MemoryStore(), "http://league.test").limits.per_hour == 0
+
+
+class Counting(LocalFiles):
+    """LocalFiles that counts the calls made on it."""
+
+    calls = 0
+
+    def __getattribute__(self, name):
+        if name in ("size", "stat", "read", "start_upload", "promote", "delete"):
+            type(self).calls += 1
+        return super().__getattribute__(name)
+
+
+@pytest.mark.asyncio
+async def test_asking_after_a_submission_being_checked_touches_no_file(tmp_path):
+    files = Counting(str(tmp_path / "bots"), "http://league.test")
+    bots = Bots(MemoryStore(), files, accept, Limits(), Clock())
+    sub = await bots.create(ALICE, manifest(data={"d.bin": b"data"}))
+    upload_all(bots, sub, by_sha(WASM, b"data"))
+    await bots.finalize(ALICE, sub["id"])
+    Counting.calls = 0
+    for _ in range(3):
+        assert (await bots.status(ALICE, sub["id"]))["state"] == "checking"
+    assert Counting.calls == 0
+    await Finalizer(bots).drain()
+    assert Counting.calls > 0  # the check reads them
+
+
+class Swapping(LocalFiles):
+    """LocalFiles where another upload session writes a file again just as
+    the check starts reading it."""
+
+    def read(self, key, generation=None):
+        if key.startswith("uploads/") and generation is not None:
+            path = self._path(key)
+            with open(path + ".new", "wb") as f:
+                f.write(b"x" * os.path.getsize(path))
+            os.replace(path + ".new", path)  # a whole new file, as a finished session leaves it
+        return super().read(key, generation)
+
+
+@pytest.mark.asyncio
+async def test_a_file_written_again_while_it_is_checked_is_not_kept(tmp_path):
+    files = Swapping(str(tmp_path / "bots"), "http://league.test")
+    bots = Bots(MemoryStore(), files, accept, Limits(), Clock())
+    data = {"d.bin": b"the data"}
+    with pytest.raises(Refused) as e:
+        await submit(bots, ALICE, data=data)
+    assert e.value.problems == ["a file was uploaded again while the league checked it: submit the bot again"]
+    assert files.size(bot_key(ALICE, entry(b"the data")["sha256"])) is None
+    assert (await bots.list(ALICE))["bots"] == []

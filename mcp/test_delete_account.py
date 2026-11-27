@@ -24,7 +24,8 @@ FAR = 4_000_000_000
 
 
 def _run(project, *args):
-    env = {**os.environ, "GOOGLE_CLOUD_PROJECT": project}
+    env = {k: v for k, v in os.environ.items() if k not in ("OBGL_BOTS_BUCKET", "OBGL_RECORDS_BUCKET")}
+    env["GOOGLE_CLOUD_PROJECT"] = project
     return subprocess.run([sys.executable, SCRIPT, "--project", project, *args], capture_output=True, text=True, env=env, timeout=60)
 
 
@@ -75,14 +76,15 @@ async def test_dry_run_lists_then_delete_removes_only_that_account():
     assert all(line.startswith("would delete oauth_") for line in listed) and not any("github:2" in line for line in listed)
     assert await store.get("accounts", ME) is not None  # a dry run deletes nothing
 
-    done = _run(project, ME, "--delete")
+    assert "gs://BOTS_BUCKET/bots/github:1/" in dry.stderr  # no bucket named: the command says where it goes
+    done = _run(project, ME, "--delete", "--bots-bucket", "the-bots", "--records-bucket", "the-records")
     assert done.returncode == 0, done.stderr
     assert await store.get("accounts", ME) is None
     assert await store.get("account-tables", ME) is None
     assert await store.get("account-programs", ME) is None
     assert await store.get("account-bots", ME) is None and await store.get("bot-submissions", f"{ME}-bot") is None
-    assert "gs://tmg-obgl-bots/bots/github:1/" in done.stderr
-    assert f"gs://tmg-obgl-records/{ME}-table.json" in done.stderr
+    assert "gs://the-bots/bots/github:1/" in done.stderr and "gs://the-bots/uploads/github:1/" in done.stderr
+    assert f"gs://the-records/{ME}-table.json" in done.stderr
     assert await store.get("ranked-tables", f"{ME}-table") is None and await store.get("account-ranked", ME) is None
     assert await store.get("account-badges", ME) is None
     assert await store.get("table-sessions", f"{ME}-s0") is None

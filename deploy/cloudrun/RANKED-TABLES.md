@@ -11,8 +11,8 @@ tables), and reads the result at `/table/results/<id>` or from the MCP tool
 
 ## How it is split
 
-- **The finalize job** (`finalize-job.yaml`; BOT-STORAGE.md) queues: when it files a version it writes the table to
-  Firestore (`oauth_ranked-tables`), appends it to the queue
+- **The finalize job** (`finalize-job.yaml`; BOT-STORAGE.md) queues: when it
+  files a version it writes the table to Firestore (`oauth_ranked-tables`), appends it to the queue
   (`oauth_ranked-queue/queue`) and to the account's list
   (`oauth_account-ranked`), and starts the ranked job (Running it).
 - **The service** (obgl-bot-poker) serves the results from the records
@@ -27,7 +27,7 @@ tables), and reads the result at `/table/results/<id>` or from the MCP tool
 The queue lives in Firestore, so a job that dies loses nothing: the next
 execution finds the head running with its lease (2 minutes) run out and
 plays it again, from the same seed. After 3 starts a table fails as
-interrupted (so a bot that kills the runner cannot hold the queue). Each
+interrupted. Each
 write that two processes could make at once (the queue, the account's
 list) is a conditional write that retries (`AuthStore.update`).
 
@@ -51,7 +51,8 @@ table. There is no leaderboard.
   (Cloud Storage FUSE): a bot reads its data on demand, nothing is copied
   to the job's memory-backed disk. The runner checks each file's size
   there before it plays.
-- **Records**, new: `tmg-obgl-records`, the service's region, Standard
+- **Records**, new: `RECORDS_BUCKET` (its name is the deploy's: the
+  service's volume and ranked-job.yaml), the service's region, Standard
   class, uniform access, public access prevention, versioning off, soft
   delete on (the default, 7 days). One object per finished table,
   `<id>.json` (20-60 KB). The job mounts it read-write at `/records`; the
@@ -90,7 +91,7 @@ the job (Running it), get `roles/run.invoker` on the job only:
 with IMAGE the service's image (the same tag: the job's `ranked.py` and
 the service's must agree on the queue), and the service deployed with
 
-    --add-volume name=records,type=cloud-storage,bucket=tmg-obgl-records,readonly=true
+    --add-volume name=records,type=cloud-storage,bucket=RECORDS_BUCKET,readonly=true
     --add-volume-mount volume=records,mount-path=/records
     --set-env-vars OBGL_RECORDS=/records,OBGL_RANKED_JOB=projects/PROJECT/locations/REGION/jobs/RANKED_JOB
 
@@ -108,8 +109,7 @@ and `roles/run.invoker` on `RANKED_JOB` (IAM):
   the table page, `table_results`) and one of theirs is queued.
 
 Either starts an execution only if no runner holds the queue's head under
-a live lease and none was started in the last 2 minutes (time for it to
-take the head); a runner holding the head plays on to the end of the
+a live lease and none was started in the last 2 minutes; a runner holding the head plays on to the end of the
 queue. So a start that fails (logged: `ranked: a table is queued, but its
 runner did not start`, with the API's answer) or a runner that died is
 made up by the next table queued or the next look, and the table stays
@@ -135,6 +135,7 @@ the other house bots' time a decision).
 
 `delete_account.py` deletes the account's tables (`oauth_ranked-tables`),
 its list (`oauth_account-ranked`) and its badges (`oauth_account-badges`),
-and prints the command that removes their records: a record names its
-owner's account (`seats[0].owner.account`). The runner skips a deleted
+and prints the command that removes their records (`--records-bucket
+RECORDS_BUCKET`, or `OBGL_RECORDS_BUCKET`): a record names its owner's
+account (`seats[0].owner.account`). The runner skips a deleted
 table left in the queue. The results page does not show the account.

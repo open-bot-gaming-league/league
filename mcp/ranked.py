@@ -213,7 +213,7 @@ class TableSettings:
     seats: int = 10  # league.DefaultSeats: eleven players
     hands: int = 1_000_000  # a pair
     parallel: int = 0  # pairs at once (0: the runner's GOMAXPROCS)
-    draw: str = "copies"  # league.Draws: copies of a pool bot allowed (the league has not ruled on another)
+    draw: str = "copies"  # league.Draws: copies of a pool bot allowed
 
 
 @dataclass

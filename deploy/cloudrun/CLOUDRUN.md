@@ -19,8 +19,9 @@ the same image tree on a machine without Docker, see
   `deploy/cloudrun/data/`, which git ignores and the build needs.
 - `delete_account.py` -- the operator's tool for deleting one account's
   Firestore records ("Deleting an account", under OAuth). Not in the image.
-- `BOT-STORAGE.md` -- submitted bots' files: why they go straight to Cloud
-  Storage, and the bucket, IAM and settings to turn submissions on.
+- `BOT-STORAGE.md`, `finalize-job.yaml` -- submitted bots' files: how they
+  are uploaded to Cloud Storage, the bucket, IAM and settings to turn
+  submissions on, and the Cloud Run job that checks each submission.
 - `RANKED-TABLES.md`, `ranked-job.yaml` -- the ranked tables every submitted
   bot version queues: the Cloud Run job that plays them (the same image),
   the records bucket the results are served from, IAM, how to start it.

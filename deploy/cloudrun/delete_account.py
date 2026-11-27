@@ -2,7 +2,7 @@
 """delete_account.py: delete one account's records from the Open Bot Gaming League's Firestore
 database (CLOUDRUN.md, "Deleting an account"). A dry run unless --delete.
 
-  delete_account.py ACCOUNT_ID --project PROJECT [--delete]
+  delete_account.py ACCOUNT_ID --project PROJECT [--bots-bucket B] [--records-bucket R] [--delete]
 
 ACCOUNT_ID is "github:<id>" or "google:<sub>" (or "guest:<random>", for an
 account left from before guest sign-in was dropped). Run it with
@@ -15,13 +15,16 @@ string, so there is no query): fine at this scale, not a thing to run in a loop.
 It does not touch the game server's hands file (CLOUDRUN.md, "Session state"),
 nor the account's submitted bots' files and ranked tables' records in Cloud
 Storage: it prints the commands that remove those (BOT-STORAGE.md and
-RANKED-TABLES.md, "Deleting an account"). A deleted table still in the
-ranked queue is skipped by the runner.
+RANKED-TABLES.md, "Deleting an account"), with the buckets' names from
+--bots-bucket and --records-bucket (or OBGL_BOTS_BUCKET, OBGL_RECORDS_BUCKET;
+neither: the commands name BOTS_BUCKET and RECORDS_BUCKET). A deleted table
+still in the ranked queue is skipped by the runner.
 """
 
 import argparse
 import hashlib
 import json
+import os
 import sys
 
 from google.cloud import firestore
@@ -49,6 +52,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("account")
     ap.add_argument("--project", required=True)
+    ap.add_argument("--bots-bucket", default=os.environ.get("OBGL_BOTS_BUCKET", "BOTS_BUCKET"),
+                    help="the submitted bots' bucket, for the printed command (default: $OBGL_BOTS_BUCKET)")
+    ap.add_argument("--records-bucket", default=os.environ.get("OBGL_RECORDS_BUCKET", "RECORDS_BUCKET"),
+                    help="the ranked tables' records bucket, for the printed command (default: $OBGL_RECORDS_BUCKET)")
     ap.add_argument("--delete", action="store_true", help="delete what is listed (default: list only)")
     args = ap.parse_args()
     db = firestore.Client(project=args.project)
@@ -59,13 +66,14 @@ def main():
     for collection, doc_id in refs:
         print(f"{'delete' if args.delete else 'would delete'} {collection}/{doc_id}")
     if any(c in ("oauth_account-bots", "oauth_bot-submissions") for c, _ in refs):
-        print(f"and its bots' files: gcloud storage rm -r gs://tmg-obgl-bots/bots/{args.account}/ gs://tmg-obgl-bots/uploads/{args.account}/",
+        print(f"and its bots' files: gcloud storage rm -r gs://{args.bots_bucket}/bots/{args.account}/ "
+              f"gs://{args.bots_bucket}/uploads/{args.account}/",
               file=sys.stderr)
     records = [doc_id for c, doc_id in refs if c == "oauth_ranked-tables"]
     if records:
         # A ranked table's record names its owner's account (RANKED-TABLES.md).
         print("and its ranked tables' records: gcloud storage rm "
-              + " ".join(f"gs://tmg-obgl-records/{t}.json" for t in records), file=sys.stderr)
+              + " ".join(f"gs://{args.records_bucket}/{t}.json" for t in records), file=sys.stderr)
     if args.delete:
         for collection, doc_id in refs:
             db.collection(collection).document(doc_id).delete()
